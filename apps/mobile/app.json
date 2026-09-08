@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Blocky",
+    "slug": "blocky",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "blocky",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.blocky.wallet",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Blocky uses Face ID to approve transactions and unlock your wallet."
+      }
+    },
+    "android": {
+      "package": "com.blocky.wallet",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0B0F",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

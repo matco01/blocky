@@ -1,0 +1,23 @@
+{
+  "name": "blocky",
+  "private": true,
+  "version": "0.0.1",
+  "description": "AI-native non-custodial crypto wallet",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:api": "npm run dev --workspace @blocky/api",
+    "dev:mobile": "npm run start --workspace @blocky/mobile"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
