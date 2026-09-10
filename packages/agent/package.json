@@ -1,5 +1,5 @@
 {
-  "name": "@blocky/wallet-core",
+  "name": "@blocky/agent",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -13,12 +13,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
     "@blocky/shared": "*",
-    "viem": "^2.56.3"
+    "zod": "^4.0.5"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
     "typescript": "^5.7.2",
+    "@types/node": "^22.10.0",
     "vitest": "^3.0.5"
   }
 }

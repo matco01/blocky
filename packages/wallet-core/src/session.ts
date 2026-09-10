@@ -115,3 +115,150 @@ export function isSessionExpired(
 ): boolean {
   return permissions.validUntil * 1000 <= now.getTime();
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Authorising calls against a session                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The server-side mirror of the on-chain validator.
+ *
+ * The Kernel validator is the real guarantee — it holds even if this server is
+ * fully compromised. This exists so a call that the chain would reject is
+ * refused here first, with an explanation, instead of being submitted and
+ * failing as an opaque revert the user pays gas for.
+ *
+ * It must never be *more* permissive than the validator. When in doubt about
+ * whether something is allowed, refuse: a false refusal is an inconvenience, a
+ * false authorisation is someone's money.
+ */
+export type CallAuthorisation =
+  | { ok: true }
+  | { ok: false; code: SessionDenialCode; message: string };
+
+export type SessionDenialCode =
+  | 'session_expired'
+  | 'wrong_chain'
+  | 'target_not_permitted'
+  | 'selector_not_permitted'
+  | 'native_value_not_permitted'
+  | 'over_spend_limit'
+  | 'undecodable_call';
+
+/** The first four bytes of calldata: which function is being called. */
+export function selectorOf(data: string): string | null {
+  return /^0x[0-9a-fA-F]{8}/.test(data) ? data.slice(0, 10).toLowerCase() : null;
+}
+
+/**
+ * The amount out of an ERC-20 `transfer(address,uint256)`.
+ *
+ * Null when the calldata is not exactly that shape. Null means "we cannot tell
+ * how much this moves", which is a refusal — a call whose value we cannot
+ * measure cannot be checked against a spend limit.
+ */
+export function decodeTransferAmount(data: string): bigint | null {
+  // 0x + 8 selector + 64 address + 64 amount
+  if (data.length !== 138) return null;
+  if (selectorOf(data) !== ERC20_TRANSFER) return null;
+
+  try {
+    return BigInt(`0x${data.slice(74, 138)}`);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * May this session sign these calls?
+ *
+ * Checks the whole batch together, because spend limits are cumulative: three
+ * transfers that each pass individually can breach the cap in aggregate, and a
+ * per-call check would wave all three through.
+ */
+export function authoriseCalls(
+  permissions: SessionPermissions,
+  calls: readonly { chainId: ChainId; to: Address; data: string; value: string }[],
+  now: Date = new Date(),
+): CallAuthorisation {
+  if (isSessionExpired(permissions, now)) {
+    return {
+      ok: false,
+      code: 'session_expired',
+      message: 'That session has expired. A new one needs your approval.',
+    };
+  }
+
+  const spent = new Map<Address, bigint>();
+
+  for (const call of calls) {
+    if (call.chainId !== permissions.chainId) {
+      return {
+        ok: false,
+        code: 'wrong_chain',
+        message: 'This session is not valid on that chain.',
+      };
+    }
+
+    /*
+     * A session key may not move native token. Every action we support is an
+     * ERC-20 call, and a non-zero value is either a bug or an attempt to drain
+     * gas money through a path that has no spend limit attached.
+     */
+    if (call.value !== '0') {
+      return {
+        ok: false,
+        code: 'native_value_not_permitted',
+        message: 'The agent cannot send ETH.',
+      };
+    }
+
+    const permitted = permissions.calls.find((entry) => entry.target === call.to.toLowerCase());
+
+    if (!permitted) {
+      return {
+        ok: false,
+        code: 'target_not_permitted',
+        message: 'The agent is not allowed to call that contract.',
+      };
+    }
+
+    const selector = selectorOf(call.data);
+
+    if (!selector || !permitted.selectors.includes(selector)) {
+      return {
+        ok: false,
+        code: 'selector_not_permitted',
+        message: 'The agent is not allowed to perform that action on that contract.',
+      };
+    }
+
+    const limit = permissions.spendLimits.find((entry) => entry.token === call.to.toLowerCase());
+
+    if (limit) {
+      const amount = decodeTransferAmount(call.data);
+
+      if (amount === null) {
+        return {
+          ok: false,
+          code: 'undecodable_call',
+          message: "We couldn't work out how much that call moves, so it wasn't signed.",
+        };
+      }
+
+      const running = (spent.get(limit.token) ?? 0n) + amount;
+
+      if (running > limit.limit) {
+        return {
+          ok: false,
+          code: 'over_spend_limit',
+          message: "That would exceed this session's spending limit.",
+        };
+      }
+
+      spent.set(limit.token, running);
+    }
+  }
+
+  return { ok: true };
+}

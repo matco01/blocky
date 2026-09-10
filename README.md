@@ -28,6 +28,8 @@ even if this server is fully compromised.
 ```
 packages/shared/       Zod schemas shared by model, server and UI. Start here.
 packages/wallet-core/  Chains, smart accounts, session keys, gas strategy.
+packages/agent/        The model, and the boundary around it.
+packages/planner/      Intent in, Plan out. Deterministic.
 apps/api/              Hono backend.
 apps/mobile/           Expo app.
 ```
@@ -62,7 +64,7 @@ EXPO_PUBLIC_API_URL=http://192.168.x.x:8787
 | Privy | Passkey login + embedded signer | [dashboard.privy.io](https://dashboard.privy.io) |
 | Alchemy | Base Sepolia RPC | [dashboard.alchemy.com](https://dashboard.alchemy.com) |
 | ZeroDev | Bundler for the Kernel smart account | [dashboard.zerodev.app](https://dashboard.zerodev.app) |
-| Anthropic | The agent (not needed until M2) | [console.anthropic.com](https://console.anthropic.com) |
+| Anthropic | The agent | [console.anthropic.com](https://console.anthropic.com) |
 
 ## Checks
 
@@ -97,9 +99,9 @@ M0 complete. See the milestone plan for what's next.
 
 - [x] **M0** — Monorepo, schemas, policy engine, gas strategy, API, app shell
 - [ ] **M1** — Receive, Send, real Gateway balance, activity feed
-- [ ] **M2** — Agent chat, read-only tools
+- [x] **M2** — Agent chat, read-only tools
 - [ ] **M3** — Agent writes, with confirmation cards
-- [ ] **M4** — Session keys, policy enforcement, revoke switch
+- [ ] **M4** — Session keys, policy enforcement, revoke switch *(server-side done; on-chain validator pending ZeroDev)*
 - [ ] **M5** — Swaps and bridges
 
 ## Things that will bite you
@@ -117,3 +119,160 @@ M0 complete. See the milestone plan for what's next.
 - **Cards and fiat are regulated money transmission.** A non-custodial wallet is
   largely fine; issuing cards needs a licensed partner and counsel. That's a
   company decision, not a codebase one.
+
+## The agent
+
+`packages/agent` is the only place the Anthropic SDK is imported, the same way
+vendor chain SDKs are confined to `wallet-core`. What leaves it is either prose
+for the user or a validated `Intent` — never calldata, never a key, and never a
+decision about whether something may run.
+
+It runs **Sonnet 5 at `low` effort**. Turning "send Sam twenty" into one of three
+typed intents is closer to classification than reasoning, and effort is the
+lever that most directly sets what a turn costs.
+
+Three things in [`agent.ts`](packages/agent/src/agent.ts) are load-bearing:
+
+- **`propose_intent` is terminal.** When the model calls it the turn ends and
+  control returns to the caller. The model never observes whether its proposal
+  was accepted, because that decision is not its to make. This is why the loop
+  is hand-written rather than using the SDK's tool runner.
+- **Malformed intents are handed back, never repaired.** The model gets two
+  attempts against real validation errors, then we surface the failure.
+- **One cache breakpoint, on the system block.** The API renders
+  tools → system → messages, so that single breakpoint covers the tool schemas
+  and the prompt — about 4,300 tokens of stable prefix — while the conversation
+  varies freely outside it. Watch `usage.cacheReadTokens`: if it is ever zero on
+  a second turn, something has made the prefix unstable and input cost has
+  roughly tripled. Never interpolate anything into `SYSTEM_PROMPT`.
+
+Prompt injection is handled by fencing. Token names, ENS records and memos are
+attacker-controlled text that lands in the model's context verbatim, so every
+tool result is wrapped in unguessable `<untrusted-data>` markers, with any
+occurrence of those markers stripped from the payload first — a fence you can
+close from the inside is not a fence. Verified against a live injection that
+tries exactly that.
+
+## The planner
+
+`packages/planner` is the deterministic half: an `Intent` in, a `Plan` out. It
+resolves what the model only named, works out the exact quantity, picks the gas
+route, builds the calldata and attaches the warnings. Nothing it produces comes
+from model output beyond the validated shape of the intent.
+
+It is **pure**, in the same way `evaluatePolicy` and `selectGasStrategy` are.
+Every chain read, price lookup and screening call arrives through
+[`PlannerContext`](packages/planner/src/context.ts), so the whole thing runs
+offline in milliseconds against a fake. The viem-backed implementation lives in
+[`apps/api/src/planner-context.ts`](apps/api/src/planner-context.ts) and the RPC
+primitives in [`wallet-core/src/rpc.ts`](packages/wallet-core/src/rpc.ts) — the
+only file that imports viem.
+
+Things worth knowing before changing it:
+
+- **`calls.ts` is the only place calldata is assembled**, and it is hand-encoded
+  rather than delegated to a library. ERC-20 `transfer` is a selector and two
+  32-byte words; the file where a wrong byte sends money to the wrong place is
+  not the file to add a dependency to. It throws on overflow rather than
+  wrapping.
+- **The summary is computed, not echoed.** `summary` comes from resolved facts
+  and `modelRationale` is carried through untouched, so a model that has
+  misunderstood the request produces a visible mismatch on the confirmation card
+  rather than a convincing story.
+- **Unresolvable means ask, never guess.** An unknown token, an unresolvable
+  recipient or a USD amount for an unpriced token all fail with a message the
+  agent can say out loud. None of them fall back to a best match.
+- **Swaps and bridges fail loudly**, for the same reason `deriveSessionPermissions`
+  throws on swap: a half-built money-moving path is worse than an absent one,
+  because it looks finished.
+
+### The destination-gas warning
+
+Circle Paymaster is deployed on Base and Arbitrum, not on Ethereum, OP,
+Unichain, Polygon or Avalanche. On those five chains anything beyond a plain
+Gateway USDC transfer needs native token a Blocky user does not hold — so USDC
+that lands there can be received and forwarded, but not swapped or spent.
+
+`destination_no_gas_route` says so before the fact. It is `warn`, not `danger`:
+the money is not lost, and paying someone on Polygon is a perfectly good reason
+to send it there. Making it `danger` would force confirmation on ordinary sends
+and train people to tap through warnings, which costs more safety than it buys.
+It stays silent for outbound transfers — whether the recipient can act on that
+chain is their business.
+
+`canPayForGeneralAction` in [`gas.ts`](packages/wallet-core/src/gas.ts) answers
+the underlying question by asking `selectGasStrategy`, rather than keeping a
+second list of which chains have a paymaster. Two copies of that rule would
+eventually disagree.
+
+### A note on severity
+
+`evaluatePolicy` escalates to human confirmation on `danger` warnings only.
+A missing dry run is a `warn`, so a small transfer to a known recipient still
+auto-executes without ever having been simulated. That is deliberate for now —
+`warn` severity is not meant to block — but it is the kind of default worth
+revisiting before real money moves.
+
+## Recipients: contacts and ENS
+
+A destination reaches the planner one of four ways, and none of them let the
+model invent one:
+
+| Kind | Resolves via | Fails to |
+|---|---|---|
+| `address` | itself, with any ENS name attached for display | — |
+| `ens` | Ethereum mainnet, always | a clarifying question |
+| `contact` | the user's saved labels | a clarifying question |
+| `self` | the user's own wallet | — |
+
+Contacts are the only free-text handle the agent may use, and that is safe for
+exactly one reason: a label resolves against the user's saved list or it fails.
+`list_contacts` lets the agent see what exists so it asks a useful question
+("you have Sam") instead of guessing at a label.
+
+**Saving a contact does not allowlist them.** "I know who this is" and "the
+agent may pay them without asking me" are separate statements, and the routes
+keep them separate — a saved contact still raises `new_recipient` and still
+needs a tap.
+
+ENS resolves on Ethereum mainnet regardless of which chain the transfer settles
+on, because ENS is a naming layer rather than a per-chain registry. That needs
+`ETHEREUM_RPC_URL`; without it, names simply do not resolve and the agent asks
+for an address. viem needs a real chain object on the client for this — one
+built with only a transport has no universal resolver address and every lookup
+fails looking like a network error.
+
+> **Normalise every address that comes out of a chain read.** viem returns
+> EIP-55 checksummed addresses; `AddressSchema` stores everything lowercased so
+> allowlist checks are never checksum-sensitive. An address that skips that
+> normalisation is a *different string* to `isKnownRecipient`, so a recipient
+> the user explicitly allowlisted reads as a stranger forever. This bit us once
+> on the ENS path already — see `rpc.test.ts`.
+
+## Session keys
+
+`POST /v1/session` derives on-chain permissions from the policy the user
+actually set, via `deriveSessionPermissions`, which may only ever narrow it. A
+default session grants exactly one target (USDC), one selector (`transfer`) and
+a spend limit equal to the **daily** cap — the per-transaction cap is enforced
+server-side, but the daily cap is the one that has to survive a compromised
+server, because it bounds total loss rather than loss per attempt.
+
+`authoriseCalls` in [`session.ts`](packages/wallet-core/src/session.ts) is the
+server-side mirror of the on-chain validator. It exists so a call the chain
+would reject is refused with an explanation rather than submitted and reverted
+at the user's expense. It must never be more permissive than the validator, so
+it refuses anything it cannot measure — calldata it cannot decode an amount
+from does not get signed. Spend limits are checked across the whole batch,
+because three transfers that each pass alone can breach the cap together.
+
+`DELETE /v1/session` is the revoke switch: unconditional, no parameters, no
+partial revocation. The one operation a frightened user performs must not have
+options.
+
+> ⚠️  **The on-chain half is not built.** These permissions are enforced
+> server-side only, which stops mistakes but not a compromised server — the
+> weaker half of the guarantee. Installing the Kernel validator needs
+> `ZERODEV_PROJECT_ID` and the user's device signature, and nothing can sign
+> until it exists. Every session response says `onChain: false` for that reason.
+

@@ -144,3 +144,20 @@ export function selectGasStrategy(ctx: GasContext): GasResult {
     message: 'Not enough USDC to cover the network fee. Add a little and try again.',
   };
 }
+
+/**
+ * Can this account do anything on this chain beyond a plain USDC transfer?
+ *
+ * Gateway settles USDC movement with no gas anywhere it is supported, so a
+ * transfer is almost always possible. Everything else — a swap, a contract
+ * call — has to find a real gas route, and on the five chains without Circle
+ * Paymaster that means native token the user is unlikely to hold.
+ *
+ * Implemented by asking {@link selectGasStrategy} rather than re-listing which
+ * chains have a paymaster. Two copies of that rule would eventually disagree,
+ * and the copy that is wrong would be this one, because it is the one nobody
+ * runs in production.
+ */
+export function canPayForGeneralAction(ctx: GasContext): boolean {
+  return selectGasStrategy({ ...ctx, isGatewayNativeTransfer: false }).ok;
+}

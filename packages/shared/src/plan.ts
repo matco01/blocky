@@ -45,6 +45,17 @@ export const WarningCodeSchema = z.enum([
   'address_flagged',
   /** Fee is a large fraction of the amount being moved. */
   'fee_heavy',
+  /**
+   * Value is landing somewhere the user will not be able to act on it.
+   *
+   * Circle Paymaster is deployed on Base and Arbitrum but not on Ethereum, OP,
+   * Unichain, Polygon or Avalanche. On those chains anything beyond a plain
+   * Gateway USDC transfer needs native token the user does not hold, so USDC
+   * bridged there can be received and forwarded but not swapped or spent on a
+   * contract call. Saying so before the fact is cheap; discovering it after is
+   * a support ticket.
+   */
+  'destination_no_gas_route',
 ]);
 
 export type WarningCode = z.infer<typeof WarningCodeSchema>;

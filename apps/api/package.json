@@ -9,6 +9,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
+    "@blocky/agent": "*",
+    "@blocky/planner": "*",
     "@blocky/shared": "*",
     "@blocky/wallet-core": "*",
     "@hono/node-server": "^1.13.7",

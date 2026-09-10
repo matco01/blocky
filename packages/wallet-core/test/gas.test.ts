@@ -1,6 +1,11 @@
 import { CHAIN } from '@blocky/shared';
 import { describe, expect, it } from 'vitest';
-import { ONBOARDING_SPONSORED_TX_COUNT, selectGasStrategy, type GasContext } from '../src';
+import {
+  ONBOARDING_SPONSORED_TX_COUNT,
+  canPayForGeneralAction,
+  selectGasStrategy,
+  type GasContext,
+} from '../src';
 
 /**
  * The zero-ETH case is the default state of a real user, and the easiest thing
@@ -114,5 +119,62 @@ describe('when there is no way to pay', () => {
     });
 
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('acting on the destination chain', () => {
+  it('says yes on Base, where Circle Paymaster is deployed', () => {
+    expect(
+      canPayForGeneralAction({
+        chainId: CHAIN.base,
+        isGatewayNativeTransfer: true,
+        lifetimeTxCount: 50,
+        networkFeeUsd: '0.40',
+        usdcBalanceUsd: '100',
+        hasNativeBalance: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('says no on Polygon for a user holding only USDC', () => {
+    // The whole point of the warning: plenty of money, no way to spend it.
+    expect(
+      canPayForGeneralAction({
+        chainId: CHAIN.polygon,
+        isGatewayNativeTransfer: true,
+        lifetimeTxCount: 50,
+        networkFeeUsd: '0.40',
+        usdcBalanceUsd: '5000',
+        hasNativeBalance: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('says yes on Polygon once the user holds native token', () => {
+    expect(
+      canPayForGeneralAction({
+        chainId: CHAIN.polygon,
+        isGatewayNativeTransfer: true,
+        lifetimeTxCount: 50,
+        networkFeeUsd: '0.40',
+        usdcBalanceUsd: '100',
+        hasNativeBalance: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('ignores the sponsorship allowance, which runs out and would flatter the answer', () => {
+    // A brand-new user is sponsored, so selectGasStrategy would say yes. That
+    // is a temporary condition and a bad basis for "you can act here later".
+    const brandNew = {
+      chainId: CHAIN.polygon,
+      isGatewayNativeTransfer: true,
+      lifetimeTxCount: 0,
+      networkFeeUsd: '0.40',
+      usdcBalanceUsd: '100',
+      hasNativeBalance: false,
+    };
+
+    expect(canPayForGeneralAction({ ...brandNew, lifetimeTxCount: 99 })).toBe(false);
   });
 });
