@@ -19,5 +19,8 @@
   },
   "devDependencies": {
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "viem": "2.56.0"
   }
 }

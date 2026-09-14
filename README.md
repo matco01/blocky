@@ -43,28 +43,51 @@ Requires Node 22.13+ (Expo SDK 57 minimum).
 
 ```bash
 npm install
-cp .env.example .env     # then fill it in
-npm run dev:api          # http://localhost:8787
-npm run dev:mobile       # Expo
+cp .env.example .env                        # API config
+cp apps/mobile/.env.example apps/mobile/.env  # app config
+npm run dev:api                             # http://localhost:8787
+npm run dev:mobile                          # Expo
 ```
 
-You need a **physical phone** from day one — passkeys don't work properly in the
-iOS simulator, and passkeys are the whole onboarding story.
+The API needs nothing else installed: without `DATABASE_URL` it runs embedded
+Postgres (PGlite) persisted to `.data/`, and without `ARC_TESTNET_RPC_URL` it
+uses Circle's public Arc endpoint.
 
-When running on a device, point the app at your machine rather than localhost:
+### The app needs a development build, not Expo Go
 
-```bash
-EXPO_PUBLIC_API_URL=http://192.168.x.x:8787
-```
+Privy's native modules (passkeys, secure key storage) are not in Expo Go. Build
+the app once with `npx expo run:android` / `npx expo run:ios`, or with
+[EAS Build](https://docs.expo.dev/build/introduction/) — building for iOS needs
+a Mac or EAS. After that, `npm run dev:mobile` hot-reloads into it.
 
-### Keys you'll need
+Use a **physical phone**. On a device, `EXPO_PUBLIC_API_URL` must be your
+computer's LAN address, not `localhost`.
+
+### Keys and dashboard setup
 
 | Service | What for | Where |
 |---|---|---|
-| Privy | Passkey login + embedded signer | [dashboard.privy.io](https://dashboard.privy.io) |
-| Alchemy | Base Sepolia RPC | [dashboard.alchemy.com](https://dashboard.alchemy.com) |
-| ZeroDev | Bundler for the Kernel smart account | [dashboard.zerodev.app](https://dashboard.zerodev.app) |
+| Privy | Login + the embedded wallet | [dashboard.privy.io](https://dashboard.privy.io) |
 | Anthropic | The agent | [console.anthropic.com](https://console.anthropic.com) |
+| Pimlico *(optional)* | Bundler API key once past the public rate limit | [dashboard.pimlico.io](https://dashboard.pimlico.io) |
+
+In the Privy dashboard: enable **email** login, enable **Ethereum embedded
+wallets**, and add the app identifier `com.blocky.wallet` as an allowed mobile
+client (put its client id in `EXPO_PUBLIC_PRIVY_CLIENT_ID`).
+
+No ZeroDev account is needed. We use ZeroDev's open-source Kernel contracts and
+SDK, which require no dashboard, with Pimlico as the bundler.
+
+**Passkeys** need a domain you own: host Apple's `apple-app-site-association`
+and Android's `assetlinks.json` there, register it in Privy, and set
+`EXPO_PUBLIC_PASSKEY_RP`. Until then the app offers email login only.
+
+### Test money
+
+Arc testnet USDC comes from Circle's faucet at
+[faucet.circle.com](https://faucet.circle.com) — Arc Testnet is its default
+network, 20 USDC per address every 2 hours. Send it to the address on the
+Receive screen. No ETH is ever needed.
 
 ## Checks
 
@@ -77,43 +100,106 @@ The policy and gas tests are the highest-value tests in the repo. If you change
 `evaluatePolicy` or `selectGasStrategy`, the tests are the specification — read
 them before the implementation.
 
+## Arc is the home chain
+
+Blocky runs on [Arc](https://www.arc.io), Circle's L1, where **USDC is the native
+gas token**. A user holding only USDC pays gas from that same balance — no ETH,
+no paymaster, no sponsorship. Other chains come later, through Circle Gateway.
+
+Everything the send path depends on was checked against the live Arc testnet,
+not just the docs: chain id 5042002, USDC `decimals()` = 6, EntryPoint v0.7 and
+v0.8 deployed, EIP-7702 authorizations charged the spec's 25,000 gas, Kernel
+v3.3's 7702 delegate deployed, Pimlico's bundler serving the chain, Circle
+Gateway's balance API, and ArcScan's transfer API.
+
+> **Arc's decimals trap.** The same USDC is visible at **18 decimals** natively
+> (`eth_getBalance`, gas prices, fees) and at **6 decimals** through the ERC-20
+> at `0x3600…`. Mixing them is a 10¹² error. `nativeToUsdcUnits` and
+> `usdcUnitsToNative` in [`chains.ts`](packages/wallet-core/src/chains.ts) are
+> the only code allowed to cross scales. Never add a native balance to an ERC-20
+> balance — it is the same money counted twice.
+
+## How a send works
+
+1. **Plan.** The app sends recipient and amount to `POST /v1/plans` (or the agent
+   proposes an intent). The server plans it with the same planner either way:
+   resolves the recipient, reserves the fee, builds the calldata, attaches
+   warnings.
+2. **Review.** The confirmation card shows the *server's* plan — what leaves,
+   to whom, the fee in dollars — with a 60-second quote.
+3. **Approve.** Face ID (or passcode). Nothing signs without it.
+4. **Sign and submit.** The user's Privy embedded wallet is upgraded in place to
+   a ZeroDev Kernel v3.3 account with EIP-7702 — signed once, on first send —
+   and the call goes out as a user operation through Pimlico. Gas comes from
+   the user's USDC.
+5. **Verify.** The app reports the transaction hash. The server does not take
+   its word for it: the receipt must contain exactly the planned USDC transfer
+   — right token contract, sender, recipient and amount — or nothing is
+   recorded. A plan executes at most once.
+
 ## Gas, and why it works with zero ETH
 
-EVM gas is paid in native token. Our users hold USDC and no ETH, so without
-intervention their transactions cannot be broadcast at all. Three tiers resolve
-that, in [`packages/wallet-core/src/gas.ts`](packages/wallet-core/src/gas.ts):
+In [`packages/wallet-core/src/gas.ts`](packages/wallet-core/src/gas.ts), in
+order of preference:
 
-1. Plain USDC sends settle on Circle Gateway's gas-free path — no paymaster.
-2. Everything else uses Circle Paymaster, which deducts gas **in USDC from the
-   transaction itself**. (This is what "gas is included in the transaction"
-   actually means mechanically.)
-3. A new user's first few transactions are sponsored outright, so onboarding
-   works at a literal zero balance.
+1. **Native USDC gas** on Arc. Paid from the balance being spent.
+2. **Circle Paymaster** on Base and Arbitrum: gas deducted in USDC from the
+   transaction, plus a 10% surcharge folded into the single fee number.
+3. **Native token**, only if the account happens to hold some.
+
+Two claims from an earlier version were wrong and have been removed:
+*"Gateway transfers are gas-free"* (a Gateway transfer ends in a `gatewayMint`
+someone pays for, and a same-chain send is not a Gateway operation at all), and
+*"Circle Gas Station sponsors onboarding"* (Gas Station sponsors Circle's own
+wallets, not an arbitrary smart account). A tier promising $0 fees with nothing
+behind it produces plans that fail on-chain.
+
+Because gas comes out of the same USDC being sent, the planner reserves the fee
+for **every** amount, not just "send max" — otherwise "send my last $10" plans
+cleanly and fails at execution.
 
 Gas appears in exactly one place in the UI: the fee line of the confirmation
 card, in dollars. It is never a question put to the user.
 
 ## Status
 
-M0 complete. See the milestone plan for what's next.
-
 - [x] **M0** — Monorepo, schemas, policy engine, gas strategy, API, app shell
-- [ ] **M1** — Receive, Send, real Gateway balance, activity feed
-- [x] **M2** — Agent chat, read-only tools
-- [ ] **M3** — Agent writes, with confirmation cards
-- [ ] **M4** — Session keys, policy enforcement, revoke switch *(server-side done; on-chain validator pending ZeroDev)*
+- [x] **M1** — Privy login, Arc smart account, Receive, Send, real balance, activity feed, Postgres
+  *(built and tested; not yet run end to end on a device — see below)*
+- [x] **M2** — Agent, read-only tools *(server side; the app has no chat screen yet)*
+- [ ] **M3** — Agent writes: server plans and verifies them; the app's chat screen and agent confirmation flow are not built
+- [ ] **M4** — Session keys: server-side policy, authorisation and revoke done; on-chain validator not installed, so nothing signs unattended
 - [ ] **M5** — Swaps and bridges
+
+**Not yet verified on a real device.** Everything above typechecks, 240 tests
+pass, both platforms bundle, and every external API was probed live — but the
+full loop (Privy login → first 7702 authorization → user operation on Arc →
+server verification) has not been run on a phone with real testnet USDC. That
+is the next thing to do, and the first place to look if something breaks.
 
 ## Things that will bite you
 
 - **Every mainnet token address in [`chains.ts`](packages/wallet-core/src/chains.ts)
   must be re-verified against Circle's published list before mainnet.** A wrong
   address sends real money somewhere unrecoverable.
-- The M0 store is **in-memory**. Restarting the API forgets the user's spend
-  history, which resets the daily cap. Fine for testnet, unacceptable with real
-  money — Postgres lands in M1.
-- Auth in M0 trusts an `x-blocky-user` header outright. Real Privy token
-  verification lands in M1, before any route can move money.
+- **Arc mainnet launches September 16, 2026** and its contract addresses were not
+  published when this was written. Arc mainnet is not in the chain registry, on
+  purpose — add it from Circle's published addresses, never by guessing that the
+  testnet ones carry over.
+- **Simulation is not wired up.** Every plan carries a `simulation_failed` warning
+  (`warn`, not `danger`). See "A note on severity" below before letting anything
+  execute unattended.
+- **Development uses public endpoints**: Circle's Arc RPC and Pimlico's public
+  bundler are rate-limited. Use keyed endpoints before real traffic.
+- The embedded dev database lives in `.data/`. Delete that folder to reset local
+  state; it is gitignored. Production must set `DATABASE_URL`.
+- `.npmrc` sets `legacy-peer-deps`: Privy's Expo SDK has optional peers
+  (`permissionless`) whose own optional peers conflict with viem. Nothing uses
+  them, but the flag means npm no longer installs peer dependencies for you —
+  a missing native module shows up as a Metro "Unable to resolve" error, and the
+  fix is to add it explicitly (`npx expo install <name>`).
+- **viem is pinned to exactly 2.56.0** (root `overrides`), because Privy's Expo
+  SDK requires that exact version. Upgrade them together.
 - Importing Reanimated raises Android memory ~25-30% on SDK 57 even unused;
   worklets bundle mode is the workaround, and Hermes V1 is expected to fix it.
 - **Cards and fiat are regulated money transmission.** A non-custodial wallet is
@@ -188,10 +274,9 @@ Things worth knowing before changing it:
 
 ### The destination-gas warning
 
-Circle Paymaster is deployed on Base and Arbitrum, not on Ethereum, OP,
-Unichain, Polygon or Avalanche. On those five chains anything beyond a plain
-Gateway USDC transfer needs native token a Blocky user does not hold — so USDC
-that lands there can be received and forwarded, but not swapped or spent.
+Arc takes gas in USDC and Circle Paymaster covers Base and Arbitrum. On Ethereum,
+OP, Unichain, Polygon and Avalanche, *every* transaction — including sending the
+USDC back out — needs native token a Blocky user does not hold.
 
 `destination_no_gas_route` says so before the fact. It is `warn`, not `danger`:
 the money is not lost, and paying someone on Polygon is a perfectly good reason
@@ -199,6 +284,10 @@ to send it there. Making it `danger` would force confirmation on ordinary sends
 and train people to tap through warnings, which costs more safety than it buys.
 It stays silent for outbound transfers — whether the recipient can act on that
 chain is their business.
+
+A same-chain transfer can never trigger it: if the user can pay gas to send on a
+chain, they can act on it, and a USDC-only user who cannot is refused outright
+with `no_gas_route`. The warning earns its keep once cross-chain moves land in M5.
 
 `canPayForGeneralAction` in [`gas.ts`](packages/wallet-core/src/gas.ts) answers
 the underlying question by asking `selectGasStrategy`, rather than keeping a
@@ -272,7 +361,9 @@ options.
 
 > ⚠️  **The on-chain half is not built.** These permissions are enforced
 > server-side only, which stops mistakes but not a compromised server — the
-> weaker half of the guarantee. Installing the Kernel validator needs
-> `ZERODEV_PROJECT_ID` and the user's device signature, and nothing can sign
-> until it exists. Every session response says `onChain: false` for that reason.
+> weaker half of the guarantee. Installing the permission validator on the
+> user's Kernel account needs the user's device signature, and nothing signs
+> unattended until it exists. Every session response says `onChain: false` for
+> that reason. The Kernel account itself is live — the app already delegates to
+> it with EIP-7702 on the first send.
 

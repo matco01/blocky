@@ -43,6 +43,12 @@ describe('rpcConfigFromEnv', () => {
     expect(config.urls[1]).toBe('https://eth.example');
   });
 
+  it('wires Arc testnet, the home chain', () => {
+    const config = rpcConfigFromEnv({ ARC_TESTNET_RPC_URL: 'https://arc.example' });
+
+    expect(config.urls[5042002]).toBe('https://arc.example');
+  });
+
   it('leaves Ethereum unset when only Base is configured, so ENS degrades quietly', () => {
     const config = rpcConfigFromEnv({ BASE_SEPOLIA_RPC_URL: 'https://base.example' });
 

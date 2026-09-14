@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
@@ -14,14 +16,21 @@
     "@blocky/planner": "*",
     "@blocky/shared": "*",
     "@blocky/wallet-core": "*",
+    "@electric-sql/pglite": "^0.5.8",
     "@hono/node-server": "^1.13.7",
+    "@privy-io/node": "^0.34.0",
     "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.6.14",
+    "pg": "^8.23.0",
     "zod": "^4.0.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.10",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.7"
   }
 }

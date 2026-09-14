@@ -20,11 +20,17 @@ const EnvSchema = z.object({
   PRIVY_APP_ID: z.string().min(1),
   PRIVY_APP_SECRET: z.string().min(1),
 
-  /** Anthropic — the agent. Not needed until M2. */
+  /** Anthropic — the agent. The chat route 503s without it. */
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
 
-  /** RPC. Alchemy or any standard provider. */
-  BASE_SEPOLIA_RPC_URL: z.string().url(),
+  /**
+   * Arc testnet, the home chain. Defaults to Circle's public endpoint, which is
+   * rate-limited — fine for development, not for real traffic.
+   */
+  ARC_TESTNET_RPC_URL: z.string().url().default('https://rpc.testnet.arc.network'),
+
+  /** Base Sepolia. Optional; only needed for multichain work. */
+  BASE_SEPOLIA_RPC_URL: z.string().url().optional(),
 
   /**
    * Ethereum mainnet, for ENS lookups only — we do not transact there.
@@ -33,8 +39,12 @@ const EnvSchema = z.object({
    */
   ETHEREUM_RPC_URL: z.string().url().optional(),
 
-  /** ZeroDev — smart account bundler and paymaster. */
-  ZERODEV_PROJECT_ID: z.string().min(1).optional(),
+  /**
+   * Postgres. Optional in development: without it the API runs an embedded
+   * Postgres (PGlite) that persists to `.data/` at the repo root. Required in
+   * production, where a local file is not a database.
+   */
+  DATABASE_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -67,5 +77,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     );
   }
 
-  return result.data;
+  const env = result.data;
+
+  if (env.NODE_ENV === 'production' && !env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is required in production. The embedded dev database is not a database.');
+  }
+
+  return env;
 }

@@ -15,14 +15,13 @@ import type { Store } from './store';
 /**
  * The agent route's plumbing.
  *
- * The full read path is wired now: message → intent → plan → policy decision.
- * What is still missing is the last step — nothing signs, so even an
- * `auto_execute` decision comes back as something the client must act on. The
- * response says which, rather than implying a capability that does not exist.
+ * message → intent → plan → policy decision, against the user's real wallet.
+ * Signing happens on the device: the plan is stored, the app shows the card,
+ * and the user approves with Face ID. Unattended execution needs the session
+ * key's on-chain validator, which is not installed yet — so even an
+ * `auto_execute` decision comes back for the user to approve, and the response
+ * says so rather than implying a capability that does not exist.
  */
-
-/** The dev wallet, until Privy supplies a real one in M1. */
-const DEV_ACCOUNT = '0x0000000000000000000000000000000000000001' as const;
 
 /**
  * Read-only tools, bound to one user.
@@ -43,8 +42,9 @@ export function agentToolsFor(
      *
      * These two disagreeing is worse than either being wrong alone: the agent
      * talks the user out of a transfer the planner would have built, or promises
-     * one it then refuses. Circle Gateway's unified balance replaces this in M1;
-     * until then it is a single-chain read rather than a placeholder zero.
+     * one it then refuses. So this is the *spendable* Arc balance, the same
+     * number the Home screen shows — not Gateway deposits, which no plan can
+     * spend yet.
      */
     async getBalance() {
       const chainId = DEFAULT_CHAIN;
@@ -99,10 +99,16 @@ export function createAgentHandler(store: Store, apiKey: string, reader: ChainRe
   // connection pool for no benefit.
   const client = new Anthropic({ apiKey });
 
-  return async function handle(userId: string, message: string): Promise<AgentResponse> {
+  return async function handle(
+    user: { id: string; walletAddress: Address },
+    message: string,
+  ): Promise<AgentResponse> {
+    const userId = user.id;
+    const account = user.walletAddress;
+
     const turn = await runAgentTurn(message, {
       client,
-      tools: agentToolsFor(store, userId, reader, DEV_ACCOUNT),
+      tools: agentToolsFor(store, userId, reader, account),
     });
 
     const empty = { plan: null, decision: null, usage: turn.usage };
@@ -135,7 +141,7 @@ export function createAgentHandler(store: Store, apiKey: string, reader: ChainRe
 
     const outcome = await buildPlan(
       turn.intent,
-      createPlannerContext({ reader, store, userId, account: DEV_ACCOUNT }),
+      createPlannerContext({ reader, store, userId, account }),
     );
 
     if (!outcome.ok) {
@@ -155,7 +161,7 @@ export function createAgentHandler(store: Store, apiKey: string, reader: ChainRe
 
     // Held so the client can approve it by id rather than posting a plan back —
     // a plan that arrives from a client is a plan an attacker can edit.
-    await store.putPlan(userId, outcome.plan);
+    await store.putPlan(userId, outcome.plan, 'agent');
 
     return {
       kind: 'plan',
@@ -173,8 +179,8 @@ function statusFor(decision: PolicyDecision): string {
     case 'deny':
       return `Blocked by your settings: ${decision.reasons.map((r) => r.message).join(' ')}`;
     case 'require_confirmation':
-      return 'Needs your approval. Nothing is signed or sent yet — signing lands in M4.';
+      return 'Needs your approval.';
     case 'auto_execute':
-      return 'Within your limits, but nothing can sign it yet — session keys land in M4.';
+      return "Within your limits — but unattended sending needs the on-chain session key, which isn't installed yet, so this needs your approval too.";
   }
 }

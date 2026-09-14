@@ -1,0 +1,367 @@
+import { planOutflowUsd, type Plan } from '@blocky/shared';
+import { TRANSFER_TOPIC, type ChainReader, type Receipt } from '@blocky/wallet-core';
+import { sql } from 'drizzle-orm';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createApp, type AppDeps } from '../src/app';
+import type { IdentityProvider } from '../src/auth';
+import { openDatabase, type Database } from '../src/db/client';
+import { createStore, type Store } from '../src/store';
+
+/**
+ * The HTTP surface, end to end, against a real (embedded) Postgres. Privy, the
+ * chain and the explorer are faked — each fake is the smallest thing that lets
+ * a test state exactly the condition it is about.
+ */
+
+const USDC = '0x3600000000000000000000000000000000000000';
+const ALICE_WALLET = '0xa11ce00000000000000000000000000000000001';
+const MALLORY_WALLET = '0x3a11040000000000000000000000000000000002';
+const SAM = '0x5a30000000000000000000000000000000000003';
+
+const TOKENS: Record<string, { userId: string; wallet: string | null }> = {
+  'alice-token': { userId: 'did:privy:alice', wallet: ALICE_WALLET },
+  'mallory-token': { userId: 'did:privy:mallory', wallet: MALLORY_WALLET },
+  'newbie-token': { userId: 'did:privy:newbie', wallet: null },
+};
+
+let database: Database;
+let store: Store;
+let walletLookups: number;
+
+let chain: {
+  balance: bigint | Error;
+  receipts: Map<string, Receipt>;
+};
+let gateway: () => Promise<{ totalUsd: string; perChain: [] }>;
+let explorer: () => Promise<[]>;
+
+const identity: IdentityProvider = {
+  async verifyAccessToken(token) {
+    return TOKENS[token]?.userId ?? null;
+  },
+  async embeddedWalletAddress(userId) {
+    walletLookups++;
+    return (Object.values(TOKENS).find((t) => t.userId === userId)?.wallet ?? null) as `0x${string}` | null;
+  },
+};
+
+const reader: ChainReader = {
+  supports: () => true,
+  async erc20Balance() {
+    if (chain.balance instanceof Error) throw chain.balance;
+    return chain.balance;
+  },
+  async nativeBalance() {
+    return 0n;
+  },
+  async tokenMetadata() {
+    return null;
+  },
+  async isContract() {
+    return false;
+  },
+  async gasPrice() {
+    // ~2e10 native (18-decimal USDC) per gas, as observed on Arc testnet.
+    return 20_000_000_000n;
+  },
+  async transactionReceipt(_chainId, hash) {
+    return chain.receipts.get(hash) ?? null;
+  },
+  async resolveEns() {
+    return null;
+  },
+  async lookupEns() {
+    return null;
+  },
+};
+
+function app() {
+  const deps: AppDeps = {
+    store,
+    reader,
+    identity,
+    agent: null,
+    gatewayBalances: () => gateway(),
+    explorerTransfers: () => explorer(),
+    receiptPolling: { attempts: 1, delayMs: 0 },
+  };
+  return createApp(deps);
+}
+
+async function call(path: string, init: { token?: string; method?: string; body?: unknown; headers?: Record<string, string> } = {}) {
+  const headers: Record<string, string> = { 'content-type': 'application/json', ...init.headers };
+  if (init.token) headers.authorization = `Bearer ${init.token}`;
+
+  const response = await app().request(path, {
+    method: init.method ?? 'GET',
+    headers,
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  });
+
+  return { status: response.status, body: (await response.json()) as any };
+}
+
+function transferReceipt(from: string, to: string, amount: bigint): Receipt {
+  const topic = (a: string) => `0x${a.slice(2).padStart(64, '0')}`;
+  return {
+    status: 'success',
+    logs: [{ address: USDC, topics: [TRANSFER_TOPIC, topic(from), topic(to)], data: `0x${amount.toString(16).padStart(64, '0')}` }],
+  };
+}
+
+const hash = (char: string) => `0x${char.repeat(64)}`;
+
+async function planSend(amount = '10', token = 'alice-token'): Promise<Plan> {
+  const { status, body } = await call('/v1/plans', {
+    token,
+    method: 'POST',
+    body: { recipient: { kind: 'address', address: SAM }, amount: { kind: 'token', value: amount } },
+  });
+  expect(status).toBe(201);
+  return body.plan as Plan;
+}
+
+beforeAll(async () => {
+  database = await openDatabase({});
+  store = createStore(database.db);
+});
+
+afterAll(async () => {
+  await database.close();
+});
+
+beforeEach(async () => {
+  await database.db.execute(sql`TRUNCATE executions, plans, sessions, contacts, policies, users CASCADE`);
+  walletLookups = 0;
+  chain = { balance: 100_000_000n, receipts: new Map() };
+  gateway = async () => ({ totalUsd: '0', perChain: [] });
+  explorer = async () => [];
+});
+
+describe('authentication', () => {
+  it('rejects a request with no token', async () => {
+    expect((await call('/v1/me')).status).toBe(401);
+  });
+
+  it('rejects an invalid token', async () => {
+    expect((await call('/v1/me', { token: 'forged' })).status).toBe(401);
+  });
+
+  /** The M0 scheme trusted this header outright. It must now mean nothing. */
+  it('ignores the old x-blocky-user header entirely', async () => {
+    const { status } = await call('/v1/me', { headers: { 'x-blocky-user': 'did:privy:alice' } });
+
+    expect(status).toBe(401);
+  });
+
+  it('takes the wallet from Privy, never from the client', async () => {
+    const { body } = await call('/v1/me', {
+      token: 'alice-token',
+      headers: { 'x-wallet-address': MALLORY_WALLET },
+    });
+
+    expect(body.walletAddress).toBe(ALICE_WALLET);
+  });
+
+  it('looks the wallet up once, then caches it', async () => {
+    await call('/v1/me', { token: 'alice-token' });
+    await call('/v1/me', { token: 'alice-token' });
+
+    expect(walletLookups).toBe(1);
+  });
+
+  it('asks the app to wait while the wallet is still being created', async () => {
+    const { status, body } = await call('/v1/balance', { token: 'newbie-token' });
+
+    expect(status).toBe(409);
+    expect(body.error).toBe('wallet_not_ready');
+  });
+});
+
+describe('balance', () => {
+  it('reports the spendable Arc balance at 6 decimals', async () => {
+    const { body } = await call('/v1/balance', { token: 'alice-token' });
+
+    expect(body.totalUsd).toBe('100');
+    expect(body.chainId).toBe(5042002);
+  });
+
+  it('keeps Gateway deposits out of the spendable total', async () => {
+    gateway = async () => ({ totalUsd: '50', perChain: [] });
+
+    const { body } = await call('/v1/balance', { token: 'alice-token' });
+
+    expect(body.totalUsd).toBe('100');
+    expect(body.gateway.totalUsd).toBe('50');
+  });
+
+  it('still answers when Gateway is down, and says so', async () => {
+    gateway = async () => {
+      throw new Error('down');
+    };
+
+    const { status, body } = await call('/v1/balance', { token: 'alice-token' });
+
+    expect(status).toBe(200);
+    expect(body.gateway).toBeNull();
+  });
+
+  it('returns 503, never a zero, when the chain cannot be read', async () => {
+    chain.balance = new Error('rpc down');
+
+    const { status, body } = await call('/v1/balance', { token: 'alice-token' });
+
+    expect(status).toBe(503);
+    expect(body.totalUsd).toBeUndefined();
+  });
+});
+
+describe('manual send planning', () => {
+  it('plans an Arc transfer whose fee is paid in USDC', async () => {
+    const plan = await planSend('10');
+
+    expect(plan.calls[0]?.chainId).toBe(5042002);
+    expect(plan.fee.paidIn).toBe('usdc');
+    expect(plan.outflow[0]?.amount).toBe('10000000');
+  });
+
+  it('refuses to plan the whole balance with nothing left for the fee', async () => {
+    const { status, body } = await call('/v1/plans', {
+      token: 'alice-token',
+      method: 'POST',
+      body: { recipient: { kind: 'address', address: SAM }, amount: { kind: 'token', value: '100' } },
+    });
+
+    expect(status).toBe(422);
+    expect(body.error).toBe('insufficient_balance');
+  });
+});
+
+describe('recording an execution', () => {
+  it('records a transaction that makes exactly the planned transfer', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('a'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+
+    const { status, body } = await call(`/v1/plans/${plan.id}/executions`, {
+      token: 'alice-token',
+      method: 'POST',
+      body: { txHash: hash('a') },
+    });
+
+    expect(status).toBe(201);
+    expect(body.execution.status).toBe('success');
+  });
+
+  /** Any hash attached to any plan would otherwise pass. */
+  it('refuses a transaction that moved a different amount, and records nothing', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('b'), transferReceipt(ALICE_WALLET, SAM, 1n));
+
+    const { status } = await call(`/v1/plans/${plan.id}/executions`, {
+      token: 'alice-token',
+      method: 'POST',
+      body: { txHash: hash('b') },
+    });
+
+    expect(status).toBe(422);
+    expect(await store.listExecutions('did:privy:alice')).toEqual([]);
+  });
+
+  it('refuses a transfer sent from someone else’s wallet', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('c'), transferReceipt(MALLORY_WALLET, SAM, 10_000_000n));
+
+    const { status } = await call(`/v1/plans/${plan.id}/executions`, {
+      token: 'alice-token',
+      method: 'POST',
+      body: { txHash: hash('c') },
+    });
+
+    expect(status).toBe(422);
+  });
+
+  it('asks the app to retry when the transaction is not visible yet', async () => {
+    const plan = await planSend('10');
+
+    const { status, body } = await call(`/v1/plans/${plan.id}/executions`, {
+      token: 'alice-token',
+      method: 'POST',
+      body: { txHash: hash('d') },
+    });
+
+    expect(status).toBe(202);
+    expect(body.status).toBe('unconfirmed');
+  });
+
+  it('executes a plan at most once', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('e'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+
+    const first = await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('e') } });
+    const second = await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('e') } });
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(409);
+  });
+
+  it('will not let one user execute another user’s plan', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('f'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+
+    await call('/v1/me', { token: 'mallory-token' });
+    const { status } = await call(`/v1/plans/${plan.id}/executions`, {
+      token: 'mallory-token',
+      method: 'POST',
+      body: { txHash: hash('f') },
+    });
+
+    expect(status).toBe(404);
+  });
+
+  /** The gap this milestone closes: agent spend is now actually counted. */
+  it('counts an agent-originated execution toward the daily cap, fee included', async () => {
+    const manual = await planSend('10');
+    const agentPlan = { ...manual, id: crypto.randomUUID() };
+    await store.putPlan('did:privy:alice', agentPlan, 'agent');
+    chain.receipts.set(hash('9'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+
+    await call(`/v1/plans/${agentPlan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('9') } });
+
+    // $10 plus the planned fee — never just the $10.
+    expect(await store.spentTodayUsd('did:privy:alice')).toBe(planOutflowUsd(agentPlan));
+    expect(planOutflowUsd(agentPlan)).not.toBe('10');
+  });
+
+  it('does not count a manual send toward the agent cap', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('8'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+
+    await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('8') } });
+
+    expect(await store.spentTodayUsd('did:privy:alice')).toBe('0');
+  });
+});
+
+describe('activity', () => {
+  it('shows a recorded send even before the explorer indexes it', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('7'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+    await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('7') } });
+
+    const { body } = await call('/v1/activity', { token: 'alice-token' });
+
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({ direction: 'sent', counterparty: SAM, amount: '10' });
+  });
+
+  it('marks the feed incomplete when the explorer is down, rather than empty', async () => {
+    explorer = async () => {
+      throw new Error('down');
+    };
+
+    const { status, body } = await call('/v1/activity', { token: 'alice-token' });
+
+    expect(status).toBe(200);
+    expect(body.complete).toBe(false);
+  });
+});

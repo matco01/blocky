@@ -1,29 +1,65 @@
+import { PrivyProvider, usePrivy } from '@privy-io/expo';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { arcTestnet } from 'viem/chains';
+import { setTokenGetter } from '../lib/api';
+import { config } from '../lib/config';
 import { ThemeProvider, useTheme } from '../theme';
 
 /**
  * Root layout.
  *
- * Privy's provider slots in here at M1, wrapping everything below so the auth
- * gate lives at the router level rather than inside individual screens.
+ * Privy wraps everything, and the auth gate lives at the router level: the app
+ * screens are not merely hidden from a logged-out user, they are not routable.
  */
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ThemeProvider>
-          <ThemedStack />
-        </ThemeProvider>
+        <PrivyProvider
+          appId={config.privyAppId}
+          {...(config.privyClientId ? { clientId: config.privyClientId } : {})}
+          // Arc is the home chain. Privy needs it listed to fetch the nonce when
+          // signing the EIP-7702 authorization.
+          supportedChains={[arcTestnet]}
+          config={{
+            // Every user gets an embedded wallet at first login — there is no
+            // separate "create wallet" step to explain.
+            embedded: { ethereum: { createOnLogin: 'users-without-wallets' } },
+          }}
+        >
+          <ThemeProvider>
+            <Gate />
+          </ThemeProvider>
+        </PrivyProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
 
-function ThemedStack() {
+function Gate() {
   const theme = useTheme();
+  const { isReady, user, getAccessToken } = usePrivy();
+
+  // Every API call carries a fresh Privy access token. Privy refreshes it; we
+  // just ask for the current one at request time.
+  useEffect(() => {
+    setTokenGetter(getAccessToken);
+  }, [getAccessToken]);
+
+  if (!isReady) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.background }}>
+        <ActivityIndicator color={theme.colors.textTertiary} />
+      </View>
+    );
+  }
+
+  const signedIn = Boolean(user);
 
   return (
     <>
@@ -33,7 +69,17 @@ function ThemedStack() {
           headerShown: false,
           contentStyle: { backgroundColor: theme.colors.background },
         }}
-      />
+      >
+        <Stack.Protected guard={!signedIn}>
+          <Stack.Screen name="login" />
+        </Stack.Protected>
+
+        <Stack.Protected guard={signedIn}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="receive" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="send" options={{ presentation: 'modal', gestureEnabled: false }} />
+        </Stack.Protected>
+      </Stack>
     </>
   );
 }

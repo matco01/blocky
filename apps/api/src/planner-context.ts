@@ -9,7 +9,13 @@ import {
   type TokenRef,
 } from '@blocky/shared';
 import type { PlannerContext } from '@blocky/planner';
-import { CHAINS, getChain, type ChainReader } from '@blocky/wallet-core';
+import {
+  CHAINS,
+  DEFAULT_CHAIN,
+  getChain,
+  nativeToUsdcUnits,
+  type ChainReader,
+} from '@blocky/wallet-core';
 import type { Store } from './store';
 
 /**
@@ -22,8 +28,16 @@ import type { Store } from './store';
  * number to make a code path complete.
  */
 
-/** Gas units an ERC-20 transfer costs. Conservative; a real estimate replaces it per-call. */
-const ERC20_TRANSFER_GAS = 65_000n;
+/**
+ * Gas units for a transfer sent as a user operation from a 7702 Kernel account.
+ *
+ * Deliberately generous: it covers validation, the ERC-20 call, bundler
+ * overhead, and the one-off 25,000-gas cost of the first 7702 authorization.
+ * The bundler's own estimate is what actually gets submitted; this only sizes
+ * the fee shown on the card and the reserve held back for it, and those must
+ * not come in under the real cost. On Arc it is about half a cent.
+ */
+const USER_OP_TRANSFER_GAS = 250_000n;
 
 export interface PlannerDeps {
   reader: ChainReader;
@@ -82,7 +96,7 @@ export function createPlannerContext({
     },
 
     async resolveRecipient(ref: RecipientRef): Promise<ResolvedRecipient | null> {
-      const chainId = CHAIN.baseSepolia;
+      const chainId = DEFAULT_CHAIN;
 
       const resolved = await addressFor(ref, { account, reader, store, userId });
 
@@ -127,25 +141,29 @@ export function createPlannerContext({
       return (await reader.nativeBalance(chainId, account)) > 0n;
     },
 
-    async lifetimeTxCount() {
-      // M0's store has no transaction history. Zero means a new user, which
-      // errs toward sponsoring gas — the safe direction to be wrong in, since
-      // it costs us money rather than stranding the user.
-      return 0;
-    },
-
     async estimateNetworkFeeUsd(chainId: ChainId) {
       const chain = CHAINS[chainId];
-      const gasPrice = await reader.gasPrice(chainId).catch(() => 0n);
 
-      const weiCost = gasPrice * ERC20_TRANSFER_GAS;
+      /*
+       * A failed gas-price read must not become a $0 fee. Zero would size the
+       * reserve at nothing and let the user plan a send they cannot pay gas
+       * for. Throwing surfaces as "temporarily unavailable" instead.
+       */
+      const gasPrice = await reader.gasPrice(chainId);
+      const nativeCost = gasPrice * USER_OP_TRANSFER_GAS;
 
-      // Native token priced in USD is a feed we do not have yet. On the L2s we
-      // run on this is fractions of a cent; the number becomes real when the
-      // price feed lands with M5.
+      if (chain.gasPaidInUsdc) {
+        // Arc: the fee is already USDC, at 18 decimals. Cross to 6 in the one
+        // function allowed to, which rounds up.
+        return formatUnits(nativeToUsdcUnits(nativeCost), 6);
+      }
+
+      // Native token priced in USD is a feed we do not have yet. This path is
+      // only reached for non-Arc chains, which are optional in v1; the number
+      // becomes real when the price feed lands with M5.
       const nativeUsdPrice = chain.nativeCurrency.symbol === 'ETH' ? 3000n : 1n;
 
-      return formatUnits((weiCost * nativeUsdPrice) / 10n ** 12n, 6);
+      return formatUnits(nativeToUsdcUnits(nativeCost * nativeUsdPrice), 6);
     },
 
     async isAddressFlagged() {

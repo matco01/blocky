@@ -1,8 +1,15 @@
 import { CHAIN, type Address, type ChainId } from '@blocky/shared';
-import { createPublicClient, http, type Chain, type PublicClient } from 'viem';
+import {
+  TransactionReceiptNotFoundError,
+  createPublicClient,
+  http,
+  type Chain,
+  type PublicClient,
+} from 'viem';
 import {
   arbitrum,
   arbitrumSepolia,
+  arcTestnet,
   avalanche,
   base,
   baseSepolia,
@@ -13,6 +20,7 @@ import {
 } from 'viem/chains';
 import { normalize } from 'viem/ens';
 import { CHAINS } from './chains';
+import type { Receipt } from './receipts';
 
 /**
  * viem's chain objects, by our chain id.
@@ -30,6 +38,7 @@ const VIEM_CHAINS: Record<ChainId, Chain> = {
   [CHAIN.base]: base,
   [CHAIN.arbitrum]: arbitrum,
   [CHAIN.avalanche]: avalanche,
+  [CHAIN.arcTestnet]: arcTestnet,
   [CHAIN.baseSepolia]: baseSepolia,
   [CHAIN.arbitrumSepolia]: arbitrumSepolia,
 };
@@ -93,16 +102,26 @@ export interface TokenMetadata {
 export interface ChainReader {
   /** ERC-20 balance in base units. */
   erc20Balance(chainId: ChainId, token: Address, owner: Address): Promise<bigint>;
-  /** Native token balance in wei. */
+  /**
+   * Native balance in the chain's smallest unit. On Arc that is USDC at 18
+   * decimals — the *same money* as the ERC-20 balance, so never add the two.
+   */
   nativeBalance(chainId: ChainId, owner: Address): Promise<bigint>;
   /** Symbol, name and decimals, read from the contract itself. */
   tokenMetadata(chainId: ChainId, token: Address): Promise<TokenMetadata | null>;
   /** True when the address has bytecode — worth flagging before a plain transfer. */
   isContract(chainId: ChainId, address: Address): Promise<boolean>;
-  /** Current gas price in wei, for fee estimation. */
+  /** Current gas price in native units (18-decimal USDC on Arc), for fee estimation. */
   gasPrice(chainId: ChainId): Promise<bigint>;
   /** Whether we have an endpoint configured for a chain at all. */
   supports(chainId: ChainId): boolean;
+
+  /**
+   * A mined transaction's outcome and logs. Null when the chain has not seen
+   * the hash (yet) — not an error, since a just-submitted transaction may not
+   * be visible to this node for a moment.
+   */
+  transactionReceipt(chainId: ChainId, hash: `0x${string}`): Promise<Receipt | null>;
 
   /**
    * ENS name to address. Null when it does not resolve.
@@ -203,6 +222,24 @@ export function createChainReader(config: RpcConfig): ChainReader {
       return clientFor(chainId).getGasPrice();
     },
 
+    async transactionReceipt(chainId, hash) {
+      try {
+        const receipt = await clientFor(chainId).getTransactionReceipt({ hash });
+
+        return {
+          status: receipt.status,
+          logs: receipt.logs.map((log) => ({
+            address: lowercase(log.address),
+            topics: log.topics,
+            data: log.data,
+          })),
+        };
+      } catch (error) {
+        if (error instanceof TransactionReceiptNotFoundError) return null;
+        throw error;
+      }
+    },
+
     async resolveEns(name) {
       if (!config.urls[CHAIN.ethereum]) return null;
 
@@ -233,15 +270,20 @@ export function createChainReader(config: RpcConfig): ChainReader {
 /**
  * Read RPC endpoints out of the environment.
  *
- * Only Base Sepolia is wired up, because that is the only chain v1 runs on.
- * Adding a chain here is deliberate: an endpoint that exists is a chain the
- * planner will happily quote against.
+ * Arc testnet is the home chain. Base Sepolia is optional and exists for the
+ * multichain work. Adding a chain here is deliberate: an endpoint that exists
+ * is a chain the planner will happily quote against.
  */
 export function rpcConfigFromEnv(env: {
+  ARC_TESTNET_RPC_URL?: string | undefined;
   BASE_SEPOLIA_RPC_URL?: string | undefined;
   ETHEREUM_RPC_URL?: string | undefined;
 }): RpcConfig {
   const urls: Partial<Record<ChainId, string>> = {};
+
+  if (env.ARC_TESTNET_RPC_URL) {
+    urls[CHAIN.arcTestnet] = env.ARC_TESTNET_RPC_URL;
+  }
 
   if (env.BASE_SEPOLIA_RPC_URL) {
     urls[CHAIN.baseSepolia] = env.BASE_SEPOLIA_RPC_URL;

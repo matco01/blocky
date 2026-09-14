@@ -5,9 +5,9 @@ import type { PlannerContext } from '../src/context';
 export const ACCOUNT = '0x1111111111111111111111111111111111111111' as Address;
 export const ALICE = '0x2222222222222222222222222222222222222222' as Address;
 
-export const USDC_BASE_SEPOLIA: ResolvedToken = {
-  chainId: CHAIN.baseSepolia,
-  address: CHAINS[CHAIN.baseSepolia].usdc,
+export const USDC_ARC: ResolvedToken = {
+  chainId: CHAIN.arcTestnet,
+  address: CHAINS[CHAIN.arcTestnet].usdc,
   symbol: 'USDC',
   name: 'USD Coin',
   decimals: 6,
@@ -16,7 +16,7 @@ export const USDC_BASE_SEPOLIA: ResolvedToken = {
 };
 
 export function tokenOn(chainId: keyof typeof CHAINS): ResolvedToken {
-  return { ...USDC_BASE_SEPOLIA, chainId: CHAINS[chainId].id, address: CHAINS[chainId].usdc };
+  return { ...USDC_ARC, chainId: CHAINS[chainId].id, address: CHAINS[chainId].usdc };
 }
 
 export const KNOWN_RECIPIENT: ResolvedRecipient = {
@@ -37,15 +37,13 @@ export const KNOWN_RECIPIENT: ResolvedRecipient = {
 export function fakeContext(overrides: Partial<PlannerContext> = {}): PlannerContext {
   return {
     accountAddress: async () => ACCOUNT,
-    resolveToken: async () => USDC_BASE_SEPOLIA,
+    resolveToken: async () => USDC_ARC,
     resolveRecipient: async () => KNOWN_RECIPIENT,
     priceOf: async () => '1',
     // 1,000 USDC.
     balanceOf: async () => 1_000_000_000n,
     usdcBalanceUsd: async () => '1000',
     hasNativeBalance: async () => false,
-    // Past the onboarding sponsorship, so fees are real by default.
-    lifetimeTxCount: async () => 99,
     estimateNetworkFeeUsd: async () => '0.10',
     isAddressFlagged: async () => false,
     ...overrides,

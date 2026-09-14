@@ -10,3 +10,5 @@ export * from './account';
 export * from './session';
 export * from './gas';
 export * from './rpc';
+export * from './receipts';
+export * from './gateway';

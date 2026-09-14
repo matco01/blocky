@@ -1,44 +1,88 @@
-import { useCallback, useEffect, useState } from 'react';
+import { usePrivy } from '@privy-io/expo';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActionButton } from '../components/ActionButton';
+import { ActivityRow } from '../components/ActivityRow';
 import { BalanceDisplay } from '../components/BalanceDisplay';
+import { Button } from '../components/Button';
 import { Text } from '../components/Text';
-import { api } from '../lib/api';
+import { ApiError, api, type ActivityItem } from '../lib/api';
 import { useTheme } from '../theme';
+
+type Load =
+  | { state: 'loading' }
+  | { state: 'setting-up' }
+  | { state: 'ready'; balance: string; activity: ActivityItem[]; activityComplete: boolean }
+  | { state: 'error'; message: string; lastBalance: string | null };
 
 /**
  * Home.
  *
  * One balance, Receive, Send, recent activity. Nothing else — no chain
  * selector, no token list, no gas indicator. Everything more complicated than
- * this is the agent's job, and it lives one tab away.
+ * this is the agent's job.
  */
 export default function HomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { logout } = usePrivy();
 
-  const [balance, setBalance] = useState('0');
-  const [loading, setLoading] = useState(true);
-  const [offline, setOffline] = useState(false);
+  const [load, setLoad] = useState<Load>({ state: 'loading' });
+  const [refreshing, setRefreshing] = useState(false);
+  const lastBalance = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     try {
-      const result = await api.balance();
-      setBalance(result.totalUsd);
-      setOffline(false);
-    } catch {
-      // A stale balance beats a spinner that never resolves. Keep the last
-      // known number on screen and say quietly that it may be out of date.
-      setOffline(true);
-    } finally {
-      setLoading(false);
+      const [balance, activity] = await Promise.all([api.balance(), api.activity()]);
+      lastBalance.current = balance.totalUsd;
+      setLoad({
+        state: 'ready',
+        balance: balance.totalUsd,
+        activity: activity.items,
+        activityComplete: activity.complete,
+      });
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'wallet_not_ready') {
+        setLoad({ state: 'setting-up' });
+        return;
+      }
+      // Keep the last known number on screen. A spinner that never resolves, or
+      // a zero, both say something false about the user's money.
+      setLoad({
+        state: 'error',
+        message: error instanceof Error ? error.message : 'Something went wrong.',
+        lastBalance: lastBalance.current,
+      });
     }
   }, []);
 
+  // Refetch whenever Home comes back into view — most importantly, after Send.
+  useFocusEffect(
+    useCallback(() => {
+      void fetchAll();
+    }, [fetchAll]),
+  );
+
+  // The wallet is created at first login and can take a moment to appear on
+  // the server. Poll gently until it does.
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (load.state !== 'setting-up') return;
+    const timer = setTimeout(() => void fetchAll(), 2000);
+    return () => clearTimeout(timer);
+  }, [load, fetchAll]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchAll();
+    setRefreshing(false);
+  }, [fetchAll]);
+
+  const balance =
+    load.state === 'ready' ? load.balance : load.state === 'error' ? (load.lastBalance ?? '0') : '0';
+
+  const canTransact = load.state === 'ready' || (load.state === 'error' && load.lastBalance !== null);
 
   return (
     <ScrollView
@@ -48,20 +92,32 @@ export default function HomeScreen() {
         { paddingTop: insets.top + theme.space.xxxl, paddingBottom: insets.bottom + theme.space.xl },
       ]}
       refreshControl={
-        <RefreshControl refreshing={loading} onRefresh={load} tintColor={theme.colors.textTertiary} />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.textTertiary} />
       }
     >
-      <BalanceDisplay totalUsd={balance} loading={loading} />
+      <BalanceDisplay totalUsd={balance} loading={load.state === 'loading' || load.state === 'setting-up'} />
 
-      {offline ? (
-        <Text variant="caption" tone="warning" style={styles.offline}>
-          Can't reach the network — showing your last known balance.
+      {load.state === 'setting-up' ? (
+        <Text variant="caption" tone="tertiary" style={styles.notice}>
+          Setting up your wallet…
+        </Text>
+      ) : null}
+
+      {load.state === 'error' ? (
+        <Text variant="caption" tone="warning" style={styles.notice}>
+          {load.lastBalance === null ? load.message : `${load.message} Showing your last known balance.`}
         </Text>
       ) : null}
 
       <View style={[styles.actions, { gap: theme.space.md, marginTop: theme.space.xxl }]}>
-        <ActionButton label="Receive" glyph="↓" />
-        <ActionButton label="Send" glyph="↑" variant="primary" />
+        <ActionButton label="Receive" glyph="↓" disabled={!canTransact} onPress={() => router.push('/receive')} />
+        <ActionButton
+          label="Send"
+          glyph="↑"
+          variant="primary"
+          disabled={!canTransact}
+          onPress={() => router.push('/send')}
+        />
       </View>
 
       <View style={[styles.section, { marginTop: theme.space.xxxl }]}>
@@ -69,23 +125,39 @@ export default function HomeScreen() {
           Activity
         </Text>
 
-        <View
-          style={[
-            styles.empty,
-            {
-              backgroundColor: theme.colors.surface,
-              borderRadius: theme.radius.lg,
-              padding: theme.space.xl,
-            },
-          ]}
-        >
-          <Text variant="body" tone="secondary" style={{ textAlign: 'center' }}>
-            Nothing yet.
+        {load.state === 'ready' && load.activity.length > 0 ? (
+          <View>
+            {load.activity.map((item) => (
+              <ActivityRow key={item.id} item={item} />
+            ))}
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.empty,
+              { backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg, padding: theme.space.xl },
+            ]}
+          >
+            <Text variant="body" tone="secondary" style={styles.center}>
+              {load.state === 'ready' ? 'Nothing yet.' : ' '}
+            </Text>
+            {load.state === 'ready' ? (
+              <Text variant="caption" tone="tertiary" style={[styles.center, { marginTop: 4 }]}>
+                Tap Receive to add USDC.
+              </Text>
+            ) : null}
+          </View>
+        )}
+
+        {load.state === 'ready' && !load.activityComplete ? (
+          <Text variant="caption" tone="tertiary" style={[styles.notice, { marginTop: theme.space.md }]}>
+            Some incoming activity may be missing right now.
           </Text>
-          <Text variant="caption" tone="tertiary" style={{ textAlign: 'center', marginTop: 4 }}>
-            Add some USDC to get started.
-          </Text>
-        </View>
+        ) : null}
+      </View>
+
+      <View style={{ marginTop: theme.space.xxl }}>
+        <Button label="Sign out" variant="quiet" onPress={() => void logout()} />
       </View>
     </ScrollView>
   );
@@ -96,7 +168,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     flexGrow: 1,
   },
-  offline: {
+  notice: {
     textAlign: 'center',
     marginTop: 12,
   },
@@ -109,10 +181,14 @@ const styles = StyleSheet.create({
   sectionTitle: {
     textTransform: 'uppercase',
     letterSpacing: 1.2,
-    marginBottom: 12,
+    marginBottom: 4,
   },
   empty: {
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 8,
+  },
+  center: {
+    textAlign: 'center',
   },
 });

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { assetDelta, resolveAmount } from '../src/amount';
 import { encodeErc20Transfer } from '../src/calls';
-import { ALICE, USDC_BASE_SEPOLIA } from './factories';
+import { ALICE, USDC_ARC } from './factories';
 
-const token = USDC_BASE_SEPOLIA;
+const token = USDC_ARC;
 const BALANCE = 1_000_000_000n; // 1,000 USDC
 
 const base = { token, unitPrice: '1' as string | null, balance: BALANCE };
@@ -37,6 +37,17 @@ describe('token-denominated amounts', () => {
       ok: false,
       reason: 'insufficient',
     });
+  });
+
+  it('counts the reserved fee against a fixed amount, not just against max', () => {
+    // Balance exactly equal to the amount, with a fee still to pay from it.
+    expect(
+      resolveAmount({ ...base, spec: { kind: 'token', value: '1000' }, reserve: 1n }),
+    ).toEqual({ ok: false, reason: 'insufficient' });
+
+    expect(
+      resolveAmount({ ...base, spec: { kind: 'usd', value: '999.999999' }, reserve: 1n }),
+    ).toEqual({ ok: true, amount: BALANCE - 1n });
   });
 
   it('allows spending the balance exactly', () => {

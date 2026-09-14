@@ -118,11 +118,14 @@ export function simulationWarnings(simulation: Simulation | null): Warning[] {
 /**
  * The foresight warning: value landing where the user cannot act on it.
  *
- * Circle Paymaster is deployed on Base and Arbitrum, not on Ethereum, OP,
- * Unichain, Polygon or Avalanche. On those chains anything beyond a plain
- * Gateway USDC transfer needs native token, which a Blocky user by definition
- * does not hold. USDC that lands there can be received and forwarded onward,
- * but not swapped or spent on a contract call.
+ * Arc takes gas in USDC, and Circle Paymaster covers Base and Arbitrum. On
+ * Ethereum, OP, Unichain, Polygon and Avalanche every transaction — including
+ * sending the USDC back out — needs native token a Blocky user does not hold.
+ *
+ * A same-chain transfer can never trigger this: if the user can pay gas to send
+ * on a chain, they can act on it. It earns its keep once value moves *between*
+ * chains, where the destination's gas route is a different question from the
+ * source's.
  *
  * `warn`, not `danger`: the money is not lost and the move may be exactly what
  * the user wants — paying someone on Polygon is a perfectly good reason. Making
@@ -142,7 +145,7 @@ export function destinationWarnings(args: {
     {
       code: 'destination_no_gas_route',
       severity: 'warn',
-      message: `Once this is on ${args.chainName} you won't be able to swap or spend it without holding ${args.chainName} gas. Sending it back out will still work.`,
+      message: `Once this is on ${args.chainName} you won't be able to move or spend it without holding ${args.chainName} gas.`,
     },
   ];
 }

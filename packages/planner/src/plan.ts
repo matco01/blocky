@@ -93,13 +93,12 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
 
   /* --- Work out how much ------------------------------------------------- */
 
-  const [unitPrice, balance, lifetimeTxCount, hasNative, usdcBalanceUsd] = await Promise.all([
+  const [unitPrice, balance, hasNative, usdcBalanceUsd] = await Promise.all([
     ctx.priceOf(token),
     ctx.balanceOf(token),
-    ctx.lifetimeTxCount(),
     ctx.hasNativeBalance(chainId),
-    // Asked for independently of the token being sent: Circle Paymaster takes
-    // gas in USDC whatever is moving.
+    // Asked for independently of the token being sent: gas is taken in USDC
+    // whatever is moving.
     ctx.usdcBalanceUsd(chainId),
   ]);
 
@@ -123,9 +122,6 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
 
   const gasContext = {
     chainId,
-    // A plain USDC transfer is exactly what Gateway settles for free.
-    isGatewayNativeTransfer: isUsdc,
-    lifetimeTxCount,
     networkFeeUsd,
     usdcBalanceUsd,
     hasNativeBalance: hasNative,
@@ -137,8 +133,14 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
     return fail('no_gas_route', gas.message);
   }
 
+  /*
+   * When the fee comes out of the token being sent, it has to fit alongside the
+   * amount — for every kind of amount, not only "max". On Arc that is every USDC
+   * send. Without this, "send my last $10" passes planning with a balance of
+   * exactly $10 and then fails on-chain, having looked fine on the card.
+   */
   const reserve =
-    intent.amount.kind === 'max' && gas.plan.mode === 'usdc' && isUsdc && unitPrice !== null
+    gas.plan.mode === 'usdc' && isUsdc && unitPrice !== null
       ? feeInTokenUnits(gas.plan.totalUsd, token, unitPrice)
       : 0n;
 
@@ -260,10 +262,16 @@ function amountFailure(
   }
 }
 
-/** Convert a USD fee back into base units of the token it will be taken from. */
+/**
+ * Convert a USD fee back into base units of the token it will be taken from.
+ *
+ * Rounds up. A reserve that is one unit short is a transaction that fails.
+ */
 function feeInTokenUnits(feeUsd: string, token: ResolvedToken, unitPrice: string): bigint {
   const price = parseUsd(unitPrice);
   if (price === 0n) return 0n;
 
-  return (parseUsd(feeUsd) * 10n ** BigInt(token.decimals)) / price;
+  const numerator = parseUsd(feeUsd) * 10n ** BigInt(token.decimals);
+
+  return (numerator + price - 1n) / price;
 }

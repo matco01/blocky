@@ -30,3 +30,6 @@ yarn-error.*
 # os
 .DS_Store
 Thumbs.db
+
+# embedded dev database
+.data/

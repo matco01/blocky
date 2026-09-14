@@ -7,7 +7,7 @@ import {
   fakeContext,
   tokenOn,
   transferIntent,
-  USDC_BASE_SEPOLIA,
+  USDC_ARC,
 } from './factories';
 
 /**
@@ -50,7 +50,7 @@ describe('the happy path', () => {
     const plan = await planOk();
 
     expect(plan.calls).toHaveLength(1);
-    expect(plan.calls[0]?.to).toBe(USDC_BASE_SEPOLIA.address);
+    expect(plan.calls[0]?.to).toBe(USDC_ARC.address);
     expect(plan.calls[0]?.value).toBe('0');
     // selector + recipient + amount
     expect(plan.calls[0]?.data).toBe(
@@ -67,11 +67,14 @@ describe('the happy path', () => {
     expect(plan.summary).not.toContain('Totally unrelated');
   });
 
-  it('costs nothing to send USDC, because Gateway settles it gas-free', async () => {
+  it('pays gas in USDC on Arc, with no paymaster surcharge', async () => {
     const plan = await planOk();
 
-    expect(plan.fee.totalUsd).toBe('0');
-    expect(plan.fee.paidIn).toBe('sponsored');
+    // An earlier version charged $0 here on the false premise that Gateway
+    // settles transfers gas-free. A real transfer costs gas; the fee says so.
+    expect(plan.fee.totalUsd).toBe('0.1');
+    expect(plan.fee.paidIn).toBe('usdc');
+    expect(plan.fee.breakdown.paymasterUsd).toBe('0');
   });
 
   it('expires, so a stale quote cannot be executed', async () => {
@@ -88,10 +91,32 @@ describe('amounts', () => {
     expect(plan.outflow[0]?.amount).toBe('12500000');
   });
 
-  it('sends the whole balance for max', async () => {
+  it('leaves the fee behind on a max send, since gas comes out of the same USDC', async () => {
     const plan = await planOk({ amount: { kind: 'max' } });
 
-    expect(plan.outflow[0]?.amount).toBe('1000000000');
+    // 1,000 USDC minus the $0.10 fee.
+    expect(plan.outflow[0]?.amount).toBe('999900000');
+  });
+
+  /**
+   * The bug this replaced: the fee was only reserved for "max", so sending your
+   * exact balance planned cleanly and then failed on-chain. On Arc gas always
+   * comes out of USDC, which made that every user's last send.
+   */
+  it('refuses a fixed amount that leaves nothing to pay the fee with', async () => {
+    const result = await buildPlan(
+      intent({ amount: { kind: 'token', value: '1000' } }),
+      fakeContext(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe('insufficient_balance');
+  });
+
+  it('allows a fixed amount that leaves exactly enough for the fee', async () => {
+    const plan = await planOk({ amount: { kind: 'token', value: '999.9' } });
+
+    expect(plan.outflow[0]?.amount).toBe('999900000');
   });
 
   it('refuses to spend more than the balance', async () => {
@@ -122,19 +147,18 @@ describe('amounts', () => {
     expect(plan.outflow[0]?.usdValue).toBeNull();
   });
 
-  it('sends the entire balance on a max USDC send, because Gateway charges nothing', async () => {
-    // No fee means nothing to reserve. The reserve path in the planner only
-    // engages when gas is taken from the same token being sent, which today
-    // cannot happen for USDC — every configured chain has Gateway, so a USDC
-    // transfer always settles on the gas-free tier. It stays in place because
-    // adding a non-Gateway chain would make it live again.
+  it('rounds a fractional fee reserve up, never down', async () => {
+    // A $0.000001 fee at a $3 unit price is a third of a base unit. Rounding
+    // down would reserve nothing and leave the fee unpayable.
     const plan = await planOk(
       { amount: { kind: 'max' } },
-      fakeContext({ estimateNetworkFeeUsd: async () => '1' }),
+      fakeContext({
+        estimateNetworkFeeUsd: async () => '0.000001',
+        priceOf: async () => '3',
+      }),
     );
 
-    expect(plan.fee.totalUsd).toBe('0');
-    expect(plan.outflow[0]?.amount).toBe('1000000000');
+    expect(plan.outflow[0]?.amount).toBe('999999999');
   });
 });
 
@@ -186,7 +210,7 @@ describe('warnings', () => {
   it('flags an unverified token as danger', async () => {
     const plan = await planOk(
       {},
-      fakeContext({ resolveToken: async () => ({ ...USDC_BASE_SEPOLIA, verified: false }) }),
+      fakeContext({ resolveToken: async () => ({ ...USDC_ARC, verified: false }) }),
     );
 
     const warning = plan.warnings.find((w) => w.code === 'unverified_token');
@@ -228,29 +252,34 @@ describe('warnings', () => {
   });
 });
 
-describe('the destination-gas warning', () => {
-  it('stays quiet when sending to someone else on a chain without a paymaster', async () => {
-    // Whether the recipient can act on Polygon is their business.
-    const plan = await planOk(
-      { chainId: CHAIN.polygon },
+describe('chains without a gas route', () => {
+  /**
+   * Previously this planned for free on the belief that Gateway pays. It does
+   * not, so a USDC-only user genuinely cannot send on Polygon — and the honest
+   * outcome is a refusal they can act on, not a plan that fails at broadcast.
+   */
+  it('refuses a send on Polygon for a user holding only USDC', async () => {
+    const result = await buildPlan(
+      intent({ chainId: CHAIN.polygon }),
       fakeContext({ resolveToken: async () => tokenOn(CHAIN.polygon) }),
     );
 
-    expect(codes(plan)).not.toContain('destination_no_gas_route');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe('no_gas_route');
   });
 
-  it('warns on a self-transfer to a chain the user cannot act on', async () => {
+  it('never attaches the destination warning to a same-chain transfer', async () => {
+    // If gas can be paid to send there, the user can act there. The warning is
+    // for cross-chain moves, which land in M5.
     const plan = await planOk(
       { chainId: CHAIN.polygon, recipient: { kind: 'self' } },
       fakeContext({
         resolveToken: async () => tokenOn(CHAIN.polygon),
-        resolveRecipient: async () => ({ ...KNOWN_RECIPIENT, display: 'your wallet' }),
+        hasNativeBalance: async () => true,
       }),
     );
 
-    const warning = plan.warnings.find((w) => w.code === 'destination_no_gas_route');
-    expect(warning?.severity).toBe('warn');
-    expect(warning?.message).toContain('Polygon');
+    expect(codes(plan)).not.toContain('destination_no_gas_route');
   });
 
   it('stays quiet on Base, where Circle Paymaster is deployed', async () => {
@@ -317,17 +346,17 @@ describe('handing off to the policy engine', () => {
       spentTodayUsd: '0',
     });
 
-    // $20, known recipient, under the $25 threshold: this auto-executes. The
-    // missing dry run rides along as a `warn`, and `evaluatePolicy` only
-    // escalates on `danger` — see the note in the README about that.
+    // $20 plus a $0.10 fee, known recipient, under the $25 threshold: this
+    // auto-executes. The missing dry run rides along as a `warn`, and
+    // `evaluatePolicy` only escalates on `danger` — see the README about that.
     expect(decision.outcome).toBe('auto_execute');
-    expect(decision.outflowUsd).toBe('20');
+    expect(decision.outflowUsd).toBe('20.1');
   });
 
   it('forces confirmation once a danger-severity warning is attached', async () => {
     const plan = await planOk(
       {},
-      fakeContext({ resolveToken: async () => ({ ...USDC_BASE_SEPOLIA, verified: false }) }),
+      fakeContext({ resolveToken: async () => ({ ...USDC_ARC, verified: false }) }),
     );
 
     const decision = evaluatePolicy({

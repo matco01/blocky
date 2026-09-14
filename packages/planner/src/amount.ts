@@ -29,12 +29,13 @@ export interface AmountInput {
   /** Spendable balance in base units. */
   balance: bigint;
   /**
-   * Fee to reserve when the user asked for "everything".
+   * Fee that must stay behind, when the fee is paid in the token being sent.
    *
-   * Only subtracted for `max`, and only when the fee is denominated in the same
-   * token being sent — a USDC send whose gas comes out of the same USDC has to
-   * leave room for it, or the transaction fails at execution having looked fine
-   * in the confirmation card.
+   * Applies to every kind of amount. For `max` it is subtracted from the
+   * balance; for a fixed amount, amount plus reserve must fit in the balance. A
+   * USDC send whose gas comes out of the same USDC has to leave room for it, or
+   * the transaction fails at execution having looked fine on the confirmation
+   * card.
    */
   reserve?: bigint;
 }
@@ -46,10 +47,12 @@ export function resolveAmount({
   balance,
   reserve = 0n,
 }: AmountInput): AmountResult {
+  const spendable = balance - reserve;
+
   switch (spec.kind) {
     case 'token': {
       try {
-        return checked(parseUnits(spec.value, token.decimals), balance);
+        return checked(parseUnits(spec.value, token.decimals), spendable);
       } catch {
         return { ok: false, reason: 'invalid' };
       }
@@ -62,15 +65,13 @@ export function resolveAmount({
       if (unitPrice === null) return { ok: false, reason: 'unpriced' };
 
       try {
-        return checked(tokenAmountForUsd(spec.value, token.decimals, unitPrice), balance);
+        return checked(tokenAmountForUsd(spec.value, token.decimals, unitPrice), spendable);
       } catch {
         return { ok: false, reason: 'invalid' };
       }
     }
 
     case 'max': {
-      const spendable = balance - reserve;
-
       // Reserving the fee can take the whole balance. That is "you cannot
       // afford to move this", not "send zero".
       if (spendable <= 0n) return { ok: false, reason: 'insufficient' };
@@ -80,9 +81,9 @@ export function resolveAmount({
   }
 }
 
-function checked(amount: bigint, balance: bigint): AmountResult {
+function checked(amount: bigint, spendable: bigint): AmountResult {
   if (amount <= 0n) return { ok: false, reason: 'invalid' };
-  if (amount > balance) return { ok: false, reason: 'insufficient' };
+  if (amount > spendable) return { ok: false, reason: 'insufficient' };
 
   return { ok: true, amount };
 }

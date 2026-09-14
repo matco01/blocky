@@ -46,18 +46,15 @@ export interface PlannerContext {
   /**
    * Spendable USDC on a chain, in USD.
    *
-   * Separate from {@link balanceOf} because Circle Paymaster takes gas in USDC
-   * whatever token the transaction moves. Deriving it from the transferred
-   * token instead would report zero for every non-USDC transfer and refuse
-   * perfectly payable transactions.
+   * Separate from {@link balanceOf} because gas is taken in USDC — natively on
+   * Arc, via Circle Paymaster elsewhere — whatever token the transaction moves.
+   * Deriving it from the transferred token instead would report zero for every
+   * non-USDC transfer and refuse perfectly payable transactions.
    */
   usdcBalanceUsd(chainId: ChainId): Promise<string>;
 
   /** Whether the account holds any native token on a chain. */
   hasNativeBalance(chainId: ChainId): Promise<boolean>;
-
-  /** Transactions this account has already made, for onboarding sponsorship. */
-  lifetimeTxCount(): Promise<number>;
 
   /** Estimated network fee in USD, before any paymaster surcharge. */
   estimateNetworkFeeUsd(chainId: ChainId, calls: readonly PreparedCall[]): Promise<string>;
