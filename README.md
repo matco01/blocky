@@ -279,6 +279,33 @@ occurrence of those markers stripped from the payload first — a fence you can
 close from the inside is not a fence. Verified against a live injection that
 tries exactly that.
 
+### What the agent can do beyond sending
+
+Past `get_balance` / `get_policy` / `get_supported_chains` / `list_contacts` /
+`propose_intent`, the agent has:
+
+- **`get_token_price`** — a live market price for a curated list of well-known
+  tickers ([`packages/wallet-core/src/prices.ts`](packages/wallet-core/src/prices.ts),
+  DefiLlama's free `coins.llama.fi` feed, no key required). Curated rather than
+  a general search: guessing a slug for an unlisted symbol risks quoting the
+  wrong asset with complete confidence, so an unlisted symbol comes back as "no
+  price available," never a guess. This number is for the user to read, never
+  for the model to do money math with — the system prompt says so explicitly,
+  and it was checked against a live model that it doesn't use the price to
+  compute a transfer amount on its own.
+- **`resolve_address`** — preview an address or ENS name without proposing
+  anything. Exists mainly so the model can turn "vitalik.eth" into a real
+  address before `save_contact`, which only accepts one.
+- **`save_contact`** / **`delete_contact`** — the agent can build the user's
+  contact book conversationally. This is deliberately *not* the same
+  authority as sending: saving a contact never touches the recipient
+  allowlist that governs unattended sends, and the system prompt is explicit
+  that the two are unrelated.
+- **`get_recent_activity`** — reuses the exact merge
+  ([`mergeActivity`](apps/api/src/activity.ts)) that the Activity screen
+  renders, so the agent's answer about the past can never disagree with what
+  the user sees when they look themselves.
+
 ## The planner
 
 `packages/planner` is the deterministic half: an `Intent` in, a `Plan` out. It

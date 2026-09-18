@@ -2,13 +2,21 @@ import Anthropic from '@anthropic-ai/sdk';
 import { runAgentTurn, type AgentTools, type AgentTurn } from '@blocky/agent';
 import { buildPlan } from '@blocky/planner';
 import {
+  AddressSchema,
   evaluatePolicy,
   formatUnits,
   type Address,
   type Plan,
   type PolicyDecision,
 } from '@blocky/shared';
-import { CHAINS, DEFAULT_CHAIN, getChain, type ChainReader } from '@blocky/wallet-core';
+import {
+  CHAINS,
+  DEFAULT_CHAIN,
+  getChain,
+  getTokenPriceUsd,
+  type ChainReader,
+} from '@blocky/wallet-core';
+import { mergeActivity, type ExplorerTransfer } from './activity';
 import { createPlannerContext } from './planner-context';
 import type { Store } from './store';
 
@@ -35,6 +43,7 @@ export function agentToolsFor(
   userId: string,
   reader: ChainReader,
   account: Address,
+  explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>,
 ): AgentTools {
   return {
     /**
@@ -79,6 +88,72 @@ export function agentToolsFor(
     async listContacts() {
       return store.listContacts(userId);
     },
+
+    async getTokenPrice(symbol) {
+      try {
+        const quote = await getTokenPriceUsd(symbol);
+        return quote ?? { error: `No price available for ${symbol}.` };
+      } catch {
+        return { error: 'Price data is temporarily unavailable.' };
+      }
+    },
+
+    /**
+     * Preview an address or ENS name, for the agent to check before
+     * `save_contact` — never an input to a transfer. Only the planner's own
+     * resolution, inside `buildPlan`, is trusted for that.
+     */
+    async resolveAddress(input) {
+      const trimmed = input.trim();
+
+      const asAddress = AddressSchema.safeParse(trimmed);
+      if (asAddress.success) {
+        const ensName = await reader.lookupEns(asAddress.data).catch(() => null);
+        return { address: asAddress.data, ensName };
+      }
+
+      if (!/^[^\s]{1,250}\.eth$/i.test(trimmed)) {
+        return { error: 'Not a 0x address or an ENS name ending in .eth.' };
+      }
+
+      const address = await reader.resolveEns(trimmed.toLowerCase());
+      if (!address) return { error: `Could not resolve ${trimmed}.` };
+
+      return { address, ensName: trimmed.toLowerCase() };
+    },
+
+    async saveContact(label, address) {
+      const parsed = AddressSchema.safeParse(address.trim());
+      if (!parsed.success) {
+        return { error: 'That is not a valid 0x address. Resolve it with resolve_address first.' };
+      }
+
+      await store.saveContact(userId, label, parsed.data);
+      return { saved: true, label: label.trim(), address: parsed.data };
+    },
+
+    async deleteContact(label) {
+      return { deleted: await store.deleteContact(userId, label) };
+    },
+
+    /**
+     * Reuses the same merge the Activity screen renders, so the agent's answer
+     * about the past can never disagree with what the user sees when they look.
+     */
+    async getRecentActivity() {
+      const [executions, transfers] = await Promise.all([
+        store.listExecutions(userId, 20),
+        explorerTransfers(account).then(
+          (value) => ({ ok: true as const, value }),
+          () => ({ ok: false as const, value: [] as ExplorerTransfer[] }),
+        ),
+      ]);
+
+      return {
+        items: mergeActivity(account, executions, transfers.value).slice(0, 20),
+        complete: transfers.ok,
+      };
+    },
   };
 }
 
@@ -110,7 +185,12 @@ export interface AgentResponse {
   usage: AgentTurn['usage'];
 }
 
-export function createAgentHandler(store: Store, apiKey: string, reader: ChainReader) {
+export function createAgentHandler(
+  store: Store,
+  apiKey: string,
+  reader: ChainReader,
+  explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>,
+) {
   // One client for the process. Constructing per request throws away the
   // connection pool for no benefit.
   const client = new Anthropic({ apiKey });
@@ -125,7 +205,7 @@ export function createAgentHandler(store: Store, apiKey: string, reader: ChainRe
 
     const turn = await runAgentTurn(message, {
       client,
-      tools: agentToolsFor(store, userId, reader, account),
+      tools: agentToolsFor(store, userId, reader, account, explorerTransfers),
       history: history.map((entry) => ({ role: entry.role, content: entry.content })),
     });
 

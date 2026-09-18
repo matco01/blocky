@@ -12,3 +12,4 @@ export * from './gas';
 export * from './rpc';
 export * from './receipts';
 export * from './gateway';
+export * from './prices';

@@ -49,6 +49,11 @@ const tools: AgentTools = {
   getPolicy: async () => ({ enabled: false }),
   getSupportedChains: async () => [{ name: 'Base Sepolia', testnet: true }],
   listContacts: async () => [{ label: 'Sam', address: '0x3333333333333333333333333333333333333333' }],
+  getTokenPrice: async (symbol) => ({ symbol, usd: 2628.32 }),
+  resolveAddress: async (input) => ({ address: input, ensName: null }),
+  saveContact: async (label, address) => ({ saved: true, label, address }),
+  deleteContact: async (label) => ({ deleted: label === 'sam' }),
+  getRecentActivity: async () => ({ items: [], complete: true }),
 };
 
 const text = (value: string): Anthropic.TextBlock => ({
@@ -115,6 +120,41 @@ describe('read-only tools', () => {
     const followUp = calls[1]?.messages.at(-1);
     expect(Array.isArray(followUp?.content)).toBe(true);
     expect(followUp?.content).toHaveLength(2);
+  });
+
+  it('passes the model\'s arguments through to the matching tool', async () => {
+    let received: [string, string] | null = null;
+    const withSpy: AgentTools = {
+      ...tools,
+      saveContact: async (label, address) => {
+        received = [label, address];
+        return { saved: true };
+      },
+    };
+
+    const { client } = fakeClient([
+      { content: [toolUse('save_contact', { label: 'Sam', address: '0x1111111111111111111111111111111111111111' })] },
+      { content: [text('Saved.')] },
+    ]);
+
+    await runAgentTurn('save Sam', { client, tools: withSpy });
+
+    expect(received).toEqual(['Sam', '0x1111111111111111111111111111111111111111']);
+  });
+
+  it('refuses a tool call missing its required argument, without touching the tool', async () => {
+    let called = false;
+    const withSpy: AgentTools = { ...tools, getTokenPrice: async (s) => { called = true; return { s }; } };
+
+    const { client, calls } = fakeClient([
+      { content: [toolUse('get_token_price', {})] },
+      { content: [text('I need a symbol.')] },
+    ]);
+
+    await runAgentTurn('price?', { client, tools: withSpy });
+
+    expect(called).toBe(false);
+    expect(JSON.stringify(calls[1]?.messages.at(-1))).toContain('is_error');
   });
 
   it('reports a failing tool back to the model instead of throwing', async () => {

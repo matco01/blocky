@@ -45,16 +45,24 @@ const MAX_INTENT_RETRIES = 2;
 /* -------------------------------------------------------------------------- */
 
 /**
- * Read-only data the agent may pull.
+ * What the agent may see and touch.
  *
- * Deliberately narrow. Every method here is something a compromised or confused
- * model is allowed to see, and none of them can change state.
+ * Deliberately narrow. `saveContact` and `deleteContact` are the only two that
+ * change anything, and both are scoped to the calling user's own contact book —
+ * never funds, never the recipient allowlist that governs unattended sends.
+ * Every argument here names a token, an address, or a label; none of them can
+ * name a different user, because the implementation binds that server-side.
  */
 export interface AgentTools {
   getBalance(): Promise<unknown>;
   getPolicy(): Promise<unknown>;
   getSupportedChains(): Promise<unknown>;
   listContacts(): Promise<unknown>;
+  getTokenPrice(symbol: string): Promise<unknown>;
+  resolveAddress(input: string): Promise<unknown>;
+  saveContact(label: string, address: string): Promise<unknown>;
+  deleteContact(label: string): Promise<unknown>;
+  getRecentActivity(): Promise<unknown>;
 }
 
 export interface AgentUsage {
@@ -177,7 +185,7 @@ export async function runAgentTurn(
           return {
             type: 'tool_result',
             tool_use_id: use.id,
-            content: JSON.stringify(untrustedJson(await callTool(use.name, tools))),
+            content: JSON.stringify(untrustedJson(await callTool(use.name, use.input, tools))),
           };
         } catch (error) {
           return {
@@ -198,7 +206,18 @@ export async function runAgentTurn(
   return { kind: 'exhausted', text: '', usage };
 }
 
-async function callTool(name: string, tools: AgentTools): Promise<unknown> {
+/** The shape a tool call's arguments are expected to have, checked before use. */
+function stringArg(input: unknown, name: string): string {
+  const value = (input as Record<string, unknown> | null)?.[name];
+
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Expected a non-empty string for "${name}".`);
+  }
+
+  return value;
+}
+
+async function callTool(name: string, input: unknown, tools: AgentTools): Promise<unknown> {
   switch (name) {
     case 'get_balance':
       return tools.getBalance();
@@ -208,6 +227,16 @@ async function callTool(name: string, tools: AgentTools): Promise<unknown> {
       return tools.getSupportedChains();
     case 'list_contacts':
       return tools.listContacts();
+    case 'get_token_price':
+      return tools.getTokenPrice(stringArg(input, 'symbol'));
+    case 'resolve_address':
+      return tools.resolveAddress(stringArg(input, 'input'));
+    case 'save_contact':
+      return tools.saveContact(stringArg(input, 'label'), stringArg(input, 'address'));
+    case 'delete_contact':
+      return tools.deleteContact(stringArg(input, 'label'));
+    case 'get_recent_activity':
+      return tools.getRecentActivity();
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

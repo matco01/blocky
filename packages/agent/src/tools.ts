@@ -6,10 +6,22 @@ import { UNTRUSTED_CLOSE, UNTRUSTED_OPEN } from './system-prompt';
 /**
  * The agent's tools.
  *
- * M2 is read-only plus one proposal. Every tool here either reads state the
- * user already has, or produces an Intent that something else has to approve.
- * None of them move money, and none of them take free-form data that ends up
- * in a transaction.
+ * Every tool but one either reads state or writes something that is not
+ * money: a saved contact, a deleted one. None of them move funds, and none of
+ * them take free-form data that ends up in a transaction — `save_contact`
+ * requires an already-validated address, never a name the model made up.
+ *
+ * Saving a contact is deliberately *not* the same thing as authorising a
+ * send to them: it only makes a label resolvable, and every unattended-send
+ * boundary elsewhere in the codebase still asks whether an address is on the
+ * user's allowlist, which contacts do not touch. See `evaluatePolicy` and the
+ * `recipientAllowlist` field it reads — this file has no way to write to it.
+ *
+ * Every tool below takes no argument that could name a *different* user —
+ * `userId` and the wallet address are bound in a closure server-side, never
+ * supplied by the model. A few take an argument that names something else
+ * (a token symbol, an address, a contact label), which is fine: the model
+ * cannot use those to read or change anyone's data but this user's own.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -133,6 +145,58 @@ export const TOOLS: Anthropic.Tool[] = [
     name: 'get_supported_chains',
     description:
       'The chains Blocky supports, with names and whether each is a testnet. Use this only when the user asks about networks directly; routing is the planner\'s job and not something to raise unprompted.',
+    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    name: 'get_token_price',
+    description:
+      'The current USD price of a well-known token (e.g. "BTC", "ETH", "SOL"), from a live market feed. This is market data for the user to read, not something Blocky prices for a transaction — the amount on any transfer card always comes from the planner, never from this. Returns "no price available" for anything not on the curated list; never guess a price for a token this returns nothing for.',
+    input_schema: {
+      type: 'object',
+      properties: { symbol: { type: 'string', description: 'A token ticker, e.g. "ETH".' } },
+      required: ['symbol'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'resolve_address',
+    description:
+      'Resolve an ENS name (anything ending in .eth) to its address, or check an address\'s ENS name, without proposing anything. Use this before save_contact when the user gives you a name rather than a 0x address — save_contact only accepts an address. Also useful to answer "what address is x.eth" directly.',
+    input_schema: {
+      type: 'object',
+      properties: { input: { type: 'string', description: 'A 0x address or an ENS name.' } },
+      required: ['input'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'save_contact',
+    description:
+      "Save a label for an address, so the user can say the label later instead of the address. Requires a real 0x address — resolve an ENS name first with resolve_address, and never invent an address. This does NOT let you send to this contact unattended; every send still needs the user's approval, or the address on their allowlist, whichever applies. If a label is already saved, this replaces what it points to — check list_contacts first if you are not sure that is what the user wants.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'How the user will refer to this address, e.g. "Sam".' },
+        address: { type: 'string', description: 'A 0x-prefixed address. Not an ENS name.' },
+      },
+      required: ['label', 'address'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'delete_contact',
+    description: 'Remove a saved contact by its exact label. Confirm with the user first if they only described someone rather than naming the exact saved label.',
+    input_schema: {
+      type: 'object',
+      properties: { label: { type: 'string' } },
+      required: ['label'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_recent_activity',
+    description:
+      `The user's recent sends and received payments — amounts, counterparties, timestamps, and whether each went through. Use this for anything about the past (what did I send, when did I last pay Sam, how much came in this week). It has nothing to do with what a future send would cost — that is the planner's job, not this.`,
     input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
   },
   {

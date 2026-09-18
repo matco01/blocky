@@ -29,14 +29,18 @@ const store = createStore(database.db);
 const reader = createChainReader(rpcConfigFromEnv(env));
 const arc = getChain(CHAIN.arcTestnet);
 
+const explorerTransfers = (address: Parameters<typeof fetchExplorerTransfers>[0]) =>
+  fetchExplorerTransfers(address, { apiBase: `${arc.explorerUrl}/api/v2`, token: arc.usdc });
+
 const app = createApp({
   store,
   reader,
   identity: createPrivyIdentity({ appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET }),
-  agent: env.ANTHROPIC_API_KEY ? createAgentHandler(store, env.ANTHROPIC_API_KEY, reader) : null,
+  agent: env.ANTHROPIC_API_KEY
+    ? createAgentHandler(store, env.ANTHROPIC_API_KEY, reader, explorerTransfers)
+    : null,
   gatewayBalances: (address) => fetchGatewayBalances(address, { testnet: true }),
-  explorerTransfers: (address) =>
-    fetchExplorerTransfers(address, { apiBase: `${arc.explorerUrl}/api/v2`, token: arc.usdc }),
+  explorerTransfers,
   logRequests: true,
 });
 
