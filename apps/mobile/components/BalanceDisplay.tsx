@@ -1,53 +1,44 @@
 import { displayUsd } from '@blocky/shared';
-import { StyleSheet, View } from 'react-native';
-import { useTheme } from '../theme';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from './Text';
 
 export interface BalanceDisplayProps {
   /** Total balance as a USD decimal string. */
   totalUsd: string;
   loading?: boolean;
+  /** Tap to refresh. */
+  onPress?: () => void;
 }
 
 /**
- * The balance. This is the screen.
+ * The balance.
  *
- * One number, chain-agnostic, no token list, no network badge. Circle Gateway
- * is what makes that honest rather than a simplification — the USDC really is
- * spendable on any supported chain, so there is nothing to disclose here.
+ * One number, no token list, no network badge. Sized to share the screen with
+ * the chat: still the first thing the eye lands on, but not the whole screen.
  *
- * The dollars and cents are split into separate weights so the eye lands on the
- * magnitude first. It reads as one number and scans as one number.
+ * Dollars and cents are split into separate weights so the eye lands on the
+ * magnitude first.
  */
-export function BalanceDisplay({ totalUsd, loading = false }: BalanceDisplayProps) {
-  const theme = useTheme();
-
+export function BalanceDisplay({ totalUsd, loading = false, onPress }: BalanceDisplayProps) {
   const formatted = displayUsd(totalUsd);
   const [dollars, cents] = formatted.split('.');
+  const dim = loading ? { opacity: 0.3 } : undefined;
 
   return (
-    <View style={styles.container}>
+    <Pressable onPress={onPress} disabled={!onPress} style={styles.container}>
       <Text variant="label" tone="tertiary" style={styles.label}>
         Balance
       </Text>
 
       <View style={styles.amountRow} accessibilityRole="text" accessibilityLabel={`Balance ${formatted}`}>
-        <Text variant="balance" style={loading ? { opacity: 0.3 } : undefined}>
+        <Text variant="balance" style={[styles.dollars, dim]}>
           {dollars}
         </Text>
-        <Text
-          variant="balance"
-          tone="tertiary"
-          style={[styles.cents, loading ? { opacity: 0.3 } : undefined]}
-        >
+        <Text variant="balance" tone="tertiary" style={[styles.cents, dim]}>
           .{cents}
         </Text>
       </View>
-
-      <Text variant="caption" tone="tertiary" style={{ marginTop: theme.space.xs }}>
-        Available everywhere
-      </Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -58,14 +49,18 @@ const styles = StyleSheet.create({
   label: {
     textTransform: 'uppercase',
     letterSpacing: 1.2,
-    marginBottom: 6,
+    marginBottom: 2,
   },
   amountRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
   },
+  dollars: {
+    fontSize: 44,
+    lineHeight: 52,
+  },
   cents: {
-    // Slightly smaller so the cents recede without breaking the baseline.
-    fontSize: 40,
+    fontSize: 30,
+    lineHeight: 52,
   },
 });

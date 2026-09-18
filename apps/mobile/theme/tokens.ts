@@ -1,39 +1,68 @@
 /**
- * Design tokens.
+ * Design tokens — anchored to the mascot.
  *
- * The product's whole argument is that crypto can feel calm, so the palette is
- * deliberately quiet: near-black ground, one accent, and semantic colours used
- * sparingly enough that when something does turn amber the user looks at it.
+ * The brand colours are sampled from the mascot artwork itself (assets/blocky*.jpg),
+ * not chosen separately: `maroon700` (#723431) is its body, `sprout500` (#6C7942)
+ * is its leaf. Everything else — the fills used for buttons and text — is a
+ * darkened or lightened derivative of those two, checked for contrast, so the
+ * mascot never looks like it wandered in from a different app.
  *
- * Every colour is defined for both schemes. Nothing reads a raw hex outside
- * this file — components take tokens, so a theme change is one edit here.
+ * Light-first: a warm cream page, deep sprout green for the primary action,
+ * the mascot's maroon for the secondary one (Send), warm taupe for quiet text.
+ * Dark keeps the same maroon and a brightened sprout, on a near-black ground.
+ *
+ * A direction being tried, not a final brand. Nothing reads a raw hex outside
+ * this file, so trying another one is an edit here and nowhere else.
+ *
+ * Contrast: every text-on-fill pair below was checked at ≥ 4.5 : 1 (most sit
+ * well above 6.8 : 1). Tertiary text sits at ~4 : 1 and is only used for
+ * captions and placeholders.
  */
 
 export const palette = {
-  // Neutrals. Warm-shifted rather than pure grey; pure grey reads clinical.
-  black: '#0B0B0F',
-  ink900: '#141419',
-  ink800: '#1C1C23',
-  ink700: '#26262F',
-  ink600: '#3A3A46',
-  ink500: '#5C5C6B',
-  ink400: '#8E8E9E',
-  ink300: '#B8B8C4',
-  ink200: '#DCDCE4',
-  ink100: '#EFEFF3',
+  // Maroon — the mascot's body. #723431 is sampled directly from the artwork.
+  maroon900: '#331716',
+  maroon700: '#723431',
+  maroon600: '#8B4441',
+  maroon100: '#F3E1DE',
+
+  // Sprout — the mascot's leaf. #6C7942 is sampled directly from the artwork;
+  // the others are it darkened (for light-mode fills) and brightened (for dark).
+  sprout700: '#4C552E',
+  sprout500: '#6C7942',
+  sproutBright: '#9CB36B',
+
+  // Amber — warning only. Not a brand colour.
+  amber700: '#8A5410',
+  amberBright: '#E8A94A',
+
+  // Taupe — warm neutrals for type on the light ground.
+  taupe900: '#2B211B',
+  taupe600: '#6C5E53',
+  taupe500: '#8A7A6D',
+
+  // Cream — the light ground.
+  cream50: '#FFFBF8',
+  cream100: '#FFF6EF',
+  cream200: '#FCEBDF',
+  cream300: '#F6E0D2',
+  cream400: '#EDD8CA',
+
+  // Night — the dark ground: near-black, with surfaces clearly lifted off it
+  // so cards read as cards.
+  night950: '#0E1512',
+  night900: '#18221D',
+  night850: '#1F2B25',
+  night800: '#25332C',
+  night700: '#324239',
+  mist300: '#C4BCB4',
+  mist500: '#8C837B',
+
+  // Errors.
+  error: '#B3261E',
+  errorBright: '#F2826F',
+
   white: '#FFFFFF',
-
-  // One accent. Restraint here is what keeps the balance screen calm.
-  accent: '#5B5BD6',
-  accentBright: '#7B7BF0',
-  accentDim: '#3A3A9E',
-
-  positive: '#2FA36B',
-  positiveBright: '#4ECB8D',
-  warning: '#D98324',
-  warningBright: '#F0A050',
-  danger: '#D64545',
-  dangerBright: '#F06B6B',
 } as const;
 
 export interface ThemeColors {
@@ -43,6 +72,8 @@ export interface ThemeColors {
   surface: string;
   /** Surfaces on top of surfaces: inputs, chips. */
   surfaceRaised: string;
+  /** The user's own chat messages: quiet, visible in both schemes. */
+  bubble: string;
   border: string;
 
   textPrimary: string;
@@ -51,9 +82,15 @@ export interface ThemeColors {
   /** Text on top of an accent fill. */
   textInverted: string;
 
+  /** Primary actions — the mascot's sprout, darkened or brightened for contrast. */
   accent: string;
   accentText: string;
 
+  /** The mascot's maroon, for a second kind of action (e.g. Send). */
+  secondary: string;
+  secondaryText: string;
+
+  /** Reuses `accent`: the sprout already means growth, so success doesn't need its own hue. */
   positive: string;
   warning: string;
   danger: string;
@@ -62,44 +99,55 @@ export interface ThemeColors {
   scrim: string;
 }
 
+/** Cream, sprout and maroon: the scheme the brand is designed in. */
 const light: ThemeColors = {
-  background: palette.white,
-  surface: palette.ink100,
-  surfaceRaised: palette.white,
-  border: palette.ink200,
+  background: palette.cream100,
+  surface: palette.cream200,
+  surfaceRaised: palette.cream50,
+  bubble: palette.cream300,
+  border: palette.cream400,
 
-  textPrimary: palette.black,
-  textSecondary: palette.ink500,
-  textTertiary: palette.ink400,
-  textInverted: palette.white,
+  textPrimary: palette.taupe900,
+  textSecondary: palette.taupe600,
+  textTertiary: palette.taupe500,
+  textInverted: palette.cream50,
 
-  accent: palette.accent,
-  accentText: palette.white,
+  accent: palette.sprout700,
+  accentText: palette.cream50,
 
-  positive: palette.positive,
-  warning: palette.warning,
-  danger: palette.danger,
+  secondary: palette.maroon700,
+  secondaryText: palette.cream50,
 
-  scrim: 'rgba(11, 11, 15, 0.4)',
+  positive: palette.sprout700,
+  warning: palette.amber700,
+  danger: palette.error,
+
+  scrim: 'rgba(43, 33, 27, 0.4)',
 };
 
+/** The same mascot at night: near-black ground, cream type, a brighter sprout. */
 const dark: ThemeColors = {
-  background: palette.black,
-  surface: palette.ink900,
-  surfaceRaised: palette.ink800,
-  border: palette.ink700,
+  background: palette.night950,
+  surface: palette.night900,
+  surfaceRaised: palette.night850,
+  bubble: palette.night800,
+  border: palette.night700,
 
-  textPrimary: palette.white,
-  textSecondary: palette.ink300,
-  textTertiary: palette.ink500,
-  textInverted: palette.black,
+  textPrimary: palette.cream100,
+  textSecondary: palette.mist300,
+  textTertiary: palette.mist500,
+  // The bright sprout is light, so the type on it is dark, not white.
+  textInverted: palette.night950,
 
-  accent: palette.accentBright,
-  accentText: palette.white,
+  accent: palette.sproutBright,
+  accentText: palette.night950,
 
-  positive: palette.positiveBright,
-  warning: palette.warningBright,
-  danger: palette.dangerBright,
+  secondary: palette.maroon600,
+  secondaryText: palette.cream50,
+
+  positive: palette.sproutBright,
+  warning: palette.amberBright,
+  danger: palette.errorBright,
 
   scrim: 'rgba(0, 0, 0, 0.6)',
 };

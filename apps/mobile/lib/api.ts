@@ -1,4 +1,12 @@
-import { PlanSchema, PolicySchema, type AmountSpec, type Plan, type Policy, type RecipientRef } from '@blocky/shared';
+import {
+  PlanSchema,
+  PolicyDecisionSchema,
+  PolicySchema,
+  type AmountSpec,
+  type Plan,
+  type Policy,
+  type RecipientRef,
+} from '@blocky/shared';
 import { z } from 'zod';
 import { config } from './config';
 
@@ -65,6 +73,22 @@ const ActivitySchema = z.object({
 const ExecutionSchema = z.object({
   execution: z.object({ id: z.string(), txHash: z.string(), status: z.string() }),
 });
+
+const AgentResponseSchema = z.object({
+  kind: z.enum(['reply', 'intent', 'invalid_intent', 'exhausted', 'plan', 'cannot_plan']),
+  reply: z.string(),
+  plan: PlanSchema.nullable(),
+  decision: PolicyDecisionSchema.nullable(),
+  status: z.string(),
+});
+
+export type AgentResponse = z.infer<typeof AgentResponseSchema>;
+
+/** A prior chat turn, as the server expects it. */
+export interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 export type Me = z.infer<typeof MeSchema>;
 export type Balance = z.infer<typeof BalanceSchema>;
@@ -140,6 +164,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ recipient, amount }),
     }).then((r): Plan => r.plan),
+
+  /** Talk to the agent. History is the recent conversation, oldest first. */
+  agentChat: (message: string, history: readonly ChatTurn[]) =>
+    request('/v1/agent/chat', AgentResponseSchema, {
+      method: 'POST',
+      body: JSON.stringify({ message, history }),
+    }),
+
+  /** A fresh quote for a plan whose price window has passed. Keeps the plan's origin. */
+  requotePlan: (planId: string) =>
+    request(`/v1/plans/${planId}/requote`, z.object({ plan: PlanSchema }), { method: 'POST' }).then(
+      (r): Plan => r.plan,
+    ),
 
   /**
    * Report a submitted transaction. The server verifies the receipt against the

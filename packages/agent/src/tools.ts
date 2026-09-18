@@ -114,13 +114,13 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_balance',
     description:
-      "The user's spendable balance, in USDC and in dollars. One figure across every supported chain — Blocky uses Circle Gateway, so there is no per-chain balance to reconcile and no bridging step to mention.",
+      "The user's spendable balance, in USDC and in dollars. One figure — the USDC in their wallet on Arc. There is no per-chain balance to explain and no bridging step to mention.",
     input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
   },
   {
     name: 'get_policy',
     description:
-      "The user's agent settings: whether unattended execution is on at all, the per-transaction and daily caps, the auto-approve threshold, which action types are permitted, and which tokens. Check this before telling the user what will happen to a proposal — the same request behaves differently under different settings.",
+      "The user's spending limits for sends you propose: the most per send (perTxCapUsd), the most per day (dailyCapUsd), which actions and tokens are allowed, and settings for unattended sending — which is not available yet, so every send needs their approval regardless. Describe these in plain words, as spending limits; never use field names or phrases like \"auto-approve threshold\" or \"unattended execution\".",
     input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
   },
   {
@@ -138,7 +138,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: PROPOSE_INTENT,
     description:
-      'Propose that money move. This does NOT execute — it hands a structured intent to the planner, which builds the real transaction, prices it, and applies the user\'s policy. Depending on that policy the user either approves it with Face ID or it runs unattended within their limits. Call this once you know exactly what the user wants; ask a clarifying question instead if any of the token, the amount, or the recipient is ambiguous.',
+      'Propose that money move. This does NOT execute — it hands a structured intent to the planner, which builds the real transaction, prices it, and checks it against the user\'s limits. The user then approves it on their phone. Call this once you know exactly what the user wants; ask a clarifying question instead if any of the token, the amount, or the recipient is ambiguous. Only transfers of USDC work today — do not propose swaps or bridges.',
     input_schema: intentJsonSchema() as Anthropic.Tool['input_schema'],
   },
 ];

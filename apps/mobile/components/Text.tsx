@@ -14,7 +14,10 @@ export interface TextProps extends RNTextProps {
   tabular?: boolean;
 }
 
-const TONE_KEY: Record<Tone, keyof Theme['colors']> = {
+/** Only the flat colour tokens — not grouped ones like `wood`. */
+type ColorKey = { [K in keyof Theme['colors']]: Theme['colors'][K] extends string ? K : never }[keyof Theme['colors']];
+
+const TONE_KEY: Record<Tone, ColorKey> = {
   primary: 'textPrimary',
   secondary: 'textSecondary',
   tertiary: 'textTertiary',

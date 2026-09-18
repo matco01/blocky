@@ -77,6 +77,8 @@ function Gate() {
         <Stack.Protected guard={signedIn}>
           <Stack.Screen name="index" />
           <Stack.Screen name="receive" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="activity" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="limits" options={{ presentation: 'modal' }} />
           <Stack.Screen name="send" options={{ presentation: 'modal', gestureEnabled: false }} />
         </Stack.Protected>
       </Stack>

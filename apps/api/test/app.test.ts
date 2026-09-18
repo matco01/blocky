@@ -34,6 +34,7 @@ let chain: {
 };
 let gateway: () => Promise<{ totalUsd: string; perChain: [] }>;
 let explorer: () => Promise<[]>;
+let agent: AppDeps['agent'];
 
 const identity: IdentityProvider = {
   async verifyAccessToken(token) {
@@ -80,7 +81,7 @@ function app() {
     store,
     reader,
     identity,
-    agent: null,
+    agent,
     gatewayBalances: () => gateway(),
     explorerTransfers: () => explorer(),
     receiptPolling: { attempts: 1, delayMs: 0 },
@@ -136,6 +137,7 @@ beforeEach(async () => {
   chain = { balance: 100_000_000n, receipts: new Map() };
   gateway = async () => ({ totalUsd: '0', perChain: [] });
   explorer = async () => [];
+  agent = null;
 });
 
 describe('authentication', () => {
@@ -339,6 +341,119 @@ describe('recording an execution', () => {
     await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('8') } });
 
     expect(await store.spentTodayUsd('did:privy:alice')).toBe('0');
+  });
+});
+
+describe('agent chat', () => {
+  function captureAgent() {
+    const calls: Array<{ message: string; history: readonly { role: string; content: string }[] }> = [];
+    agent = async (_user, message, history) => {
+      calls.push({ message, history });
+      return { kind: 'reply', reply: 'ok', plan: null, decision: null, status: 'ok', usage: {} as never };
+    };
+    return calls;
+  }
+
+  it('passes recent history to the agent, so it remembers the conversation', async () => {
+    const calls = captureAgent();
+
+    await call('/v1/agent/chat', {
+      token: 'alice-token',
+      method: 'POST',
+      body: {
+        message: '0x5a30000000000000000000000000000000000003',
+        history: [
+          { role: 'user', content: 'send $5 to Sam' },
+          { role: 'assistant', content: "Who's Sam? Give me an address." },
+        ],
+      },
+    });
+
+    expect(calls[0]?.history).toHaveLength(2);
+  });
+
+  it('drops turns before the first user message rather than rejecting them', async () => {
+    const calls = captureAgent();
+
+    await call('/v1/agent/chat', {
+      token: 'alice-token',
+      method: 'POST',
+      body: {
+        message: 'hi',
+        history: [
+          { role: 'assistant', content: 'trimmed reply' },
+          { role: 'user', content: 'earlier question' },
+        ],
+      },
+    });
+
+    expect(calls[0]?.history).toEqual([{ role: 'user', content: 'earlier question' }]);
+  });
+
+  it('caps history length, because it is billed input', async () => {
+    captureAgent();
+    const history = Array.from({ length: 21 }, (_, i) => ({ role: 'user', content: `m${i}` }));
+
+    const { status } = await call('/v1/agent/chat', {
+      token: 'alice-token',
+      method: 'POST',
+      body: { message: 'hi', history },
+    });
+
+    expect(status).toBe(400);
+  });
+});
+
+describe('re-quoting an expired plan', () => {
+  it('returns a fresh plan with the same amount and recipient', async () => {
+    const original = await planSend('10');
+
+    const { status, body } = await call(`/v1/plans/${original.id}/requote`, { token: 'alice-token', method: 'POST' });
+
+    expect(status).toBe(201);
+    expect(body.plan.id).not.toBe(original.id);
+    expect(body.plan.outflow[0].amount).toBe(original.outflow[0]?.amount);
+    expect(body.plan.recipient.address).toBe(original.recipient?.address);
+  });
+
+  /** Otherwise reading the chat slowly would move agent spend out of the cap. */
+  it('keeps an agent plan counted as an agent plan', async () => {
+    const manual = await planSend('10');
+    const agentPlan = { ...manual, id: crypto.randomUUID() };
+    await store.putPlan('did:privy:alice', agentPlan, 'agent');
+
+    const { body } = await call(`/v1/plans/${agentPlan.id}/requote`, { token: 'alice-token', method: 'POST' });
+
+    expect((await store.getPlan('did:privy:alice', body.plan.id))?.origin).toBe('agent');
+  });
+
+  it('refuses an agent plan once the daily cap has filled in the meantime', async () => {
+    const manual = await planSend('10');
+    const agentPlan = { ...manual, id: crypto.randomUUID() };
+    await store.putPlan('did:privy:alice', agentPlan, 'agent');
+    await store.setPolicy('did:privy:alice', {
+      enabled: true,
+      perTxCapUsd: '100',
+      dailyCapUsd: '5',
+      autoExecuteThresholdUsd: '1',
+      allowedActions: ['transfer'],
+      tokenAllowlist: ['USDC'],
+      recipientAllowlist: [],
+    });
+
+    const { status, body } = await call(`/v1/plans/${agentPlan.id}/requote`, { token: 'alice-token', method: 'POST' });
+
+    expect(status).toBe(422);
+    expect(body.error).toBe('denied');
+  });
+
+  it('will not re-quote another user’s plan', async () => {
+    const plan = await planSend('10');
+    await call('/v1/me', { token: 'mallory-token' });
+
+    const { status } = await call(`/v1/plans/${plan.id}/requote`, { token: 'mallory-token', method: 'POST' });
+
+    expect(status).toBe(404);
   });
 });
 

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
+import { Mascot } from '../components/Mascot';
 import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { config } from '../lib/config';
@@ -49,11 +50,14 @@ export default function LoginScreen() {
       style={[styles.screen, { backgroundColor: theme.colors.background }]}
     >
       <View style={[styles.content, { paddingTop: insets.top + 96, paddingBottom: insets.bottom + 24 }]}>
-        <View style={{ gap: theme.space.sm }}>
-          <Text variant="title">Blocky</Text>
-          <Text variant="body" tone="secondary">
-            Your money, and an assistant that moves it for you.
-          </Text>
+        <View style={{ alignItems: 'center', gap: theme.space.lg }}>
+          <Mascot pose="neutral" size={112} />
+          <View style={{ alignItems: 'center', gap: theme.space.sm }}>
+            <Text variant="title">Blocky</Text>
+            <Text variant="body" tone="secondary" style={styles.center}>
+              Your money, and an assistant that moves it for you.
+            </Text>
+          </View>
         </View>
 
         <View style={{ gap: theme.space.lg }}>
@@ -134,5 +138,8 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     justifyContent: 'space-between',
+  },
+  center: {
+    textAlign: 'center',
   },
 });

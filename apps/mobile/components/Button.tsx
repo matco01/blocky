@@ -11,6 +11,8 @@ export interface ButtonProps {
   disabled?: boolean;
   /** `heavy` is for irreversible actions only — see PressableScale. */
   haptic?: PressableScaleProps['haptic'];
+  /** `compact` for buttons inside cards. */
+  size?: 'regular' | 'compact';
 }
 
 export function Button({
@@ -20,6 +22,7 @@ export function Button({
   loading = false,
   disabled = false,
   haptic = 'light',
+  size = 'regular',
 }: ButtonProps) {
   const theme = useTheme();
 
@@ -35,7 +38,11 @@ export function Button({
       disabled={disabled || loading}
       haptic={haptic}
       accessibilityLabel={label}
-      style={[styles.button, { backgroundColor: background, borderRadius: theme.radius.lg }]}
+      style={[
+        styles.button,
+        size === 'compact' && styles.compact,
+        { backgroundColor: background, borderRadius: size === 'compact' ? theme.radius.md : theme.radius.lg },
+      ]}
     >
       <View style={styles.inner}>
         {loading ? (
@@ -54,6 +61,9 @@ const styles = StyleSheet.create({
   button: {
     minHeight: 56,
     justifyContent: 'center',
+  },
+  compact: {
+    minHeight: 42,
   },
   inner: {
     alignItems: 'center',

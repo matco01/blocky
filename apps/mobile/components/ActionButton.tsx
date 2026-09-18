@@ -5,52 +5,41 @@ import { Text } from './Text';
 
 export interface ActionButtonProps {
   label: string;
-  /** A glyph. Kept as text so M0 ships without an icon dependency. */
+  /** A glyph. Kept as text so it needs no icon dependency. */
   glyph: string;
   onPress?: () => void;
-  variant?: 'primary' | 'secondary';
+  /** `accent` and `secondary` are the brand's two action colours; `plain` is quiet. */
+  fill?: 'accent' | 'secondary' | 'plain';
   disabled?: boolean;
 }
 
 /**
- * Receive and Send.
+ * Receive, Send, Activity — compact pills under the balance.
  *
- * These stay manual on purpose. The agent is better at everything complicated,
- * but "send money to someone" is two taps and no sentence you could type would
- * be faster. Putting them on the home screen is a UX decision, not a fallback.
+ * Small on purpose: the chat is the main surface, and these are shortcuts for
+ * the things that are faster to tap than to type.
  */
-export function ActionButton({
-  label,
-  glyph,
-  onPress,
-  variant = 'secondary',
-  disabled,
-}: ActionButtonProps) {
+export function ActionButton({ label, glyph, onPress, fill = 'plain', disabled }: ActionButtonProps) {
   const theme = useTheme();
 
-  const isPrimary = variant === 'primary';
+  const background =
+    fill === 'accent' ? theme.colors.accent : fill === 'secondary' ? theme.colors.secondary : theme.colors.surface;
+  const color =
+    fill === 'accent' ? theme.colors.accentText : fill === 'secondary' ? theme.colors.secondaryText : theme.colors.textPrimary;
 
   return (
     <PressableScale
       onPress={onPress}
       disabled={disabled}
       accessibilityLabel={label}
-      haptic="medium"
-      style={[
-        styles.button,
-        {
-          backgroundColor: isPrimary ? theme.colors.accent : theme.colors.surface,
-          borderRadius: theme.radius.lg,
-          paddingVertical: theme.space.lg,
-          gap: theme.space.xs,
-        },
-      ]}
+      haptic="light"
+      style={[styles.pill, { backgroundColor: background, borderRadius: theme.radius.pill }]}
     >
       <View style={styles.inner}>
-        <Text variant="heading" tone={isPrimary ? 'inverted' : 'primary'}>
+        <Text variant="bodyStrong" style={{ color }}>
           {glyph}
         </Text>
-        <Text variant="label" tone={isPrimary ? 'inverted' : 'primary'}>
+        <Text variant="label" style={{ color }}>
           {label}
         </Text>
       </View>
@@ -59,11 +48,15 @@ export function ActionButton({
 }
 
 const styles = StyleSheet.create({
-  button: {
+  pill: {
     flex: 1,
+    height: 44,
+    justifyContent: 'center',
   },
   inner: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    gap: 6,
   },
 });

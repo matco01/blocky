@@ -177,6 +177,46 @@ full loop (Privy login → first 7702 authorization → user operation on Arc �
 server verification) has not been run on a phone with real testnet USDC. That
 is the next thing to do, and the first place to look if something breaks.
 
+## Design direction *(ideas, not final)*
+
+### Mascot: the sprout block
+
+A small wooden block with a sprout growing out of the top.
+
+- **Why a block:** the product is called Blocky, and "block" means both a
+  blockchain block and a building block.
+- **Why the sprout:** a plain square is too generic. Like Phantom's ghost with
+  its wavy bottom, the character needs one distinctive feature that makes the
+  silhouette unmistakable, and the sprout is it. It also says the right thing
+  about money: it grows. The leaf alone can work as a tiny logo mark.
+- **Simple enough to work at 16px:** a rounded block, two dot eyes, no mouth,
+  no limbs. Expression comes from the eyes, posture and the leaf.
+- **The app icon is its face.** App icons are already rounded squares.
+
+**The mascot is the agent.** It shouldn't be a logo in the corner; it's the face
+of the chat. It waves on the empty chat, the leaf wiggles while it thinks
+(replacing the dots), it hops when a send lands, and the leaf droops next to a
+warning. People trust a character with their money more than "an AI".
+
+**The one rule: it never jokes about money.** Failed sends, danger warnings and
+the approval screen stay calm and plain.
+
+Also considered: an ice cube ("cold storage" pun, but melting reads as losing
+money), a block of cheddar (money slang, maybe too jokey), a delivery box
+(sending as a package), a tiny vault. Avoid Lego-style studs (protected
+shape), dice (gambling) and pixel/voxel cubes (reads as Minecraft).
+
+### Palette: autumn wood and sprout
+
+Being tried in [`theme/tokens.ts`](apps/mobile/theme/tokens.ts). Taken from the
+mascot: bark and walnut browns for the dark ground, birch and parchment cream
+for the light one, **sprout green as the single signature colour** (primary
+buttons and highlights only), amber for warnings, rust for errors, leaf green
+for money coming in. The card preview is deep forest with an amber glow.
+
+The point is to look like no other wallet: nothing cold, grey or blue, and
+deliberately far from Phantom's purple, which the first palette was too close to.
+
 ## Things that will bite you
 
 - **Every mainnet token address in [`chains.ts`](packages/wallet-core/src/chains.ts)

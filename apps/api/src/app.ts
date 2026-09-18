@@ -5,6 +5,7 @@ import {
   PolicySchema,
   RecipientRefSchema,
   TransferIntentSchema,
+  evaluatePolicy,
   formatUnits,
   planOutflowUsd,
   type Address,
@@ -24,7 +25,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { z } from 'zod';
 import { mergeActivity, type ExplorerTransfer } from './activity';
-import type { AgentResponse } from './agent';
+import type { AgentResponse, ChatTurn } from './agent';
 import { authenticate, type AuthenticatedUser, type IdentityProvider } from './auth';
 import { createPlannerContext } from './planner-context';
 import { DuplicateExecutionError, type Store } from './store';
@@ -34,7 +35,13 @@ export interface AppDeps {
   reader: ChainReader;
   identity: IdentityProvider;
   /** Null when no Anthropic key is configured; the chat route 503s. */
-  agent: ((user: { id: string; walletAddress: Address }, message: string) => Promise<AgentResponse>) | null;
+  agent:
+    | ((
+        user: { id: string; walletAddress: Address },
+        message: string,
+        history: readonly ChatTurn[],
+      ) => Promise<AgentResponse>)
+    | null;
   gatewayBalances: (address: Address) => Promise<GatewayBalances>;
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>;
   /** How long to wait for a just-submitted transaction to become visible. */
@@ -234,6 +241,72 @@ export function createApp(deps: AppDeps) {
    * execution of this plan and nothing is recorded. Otherwise any hash could be
    * attached to any plan.
    */
+  /**
+   * A fresh quote for a plan whose price window has passed.
+   *
+   * Rebuilt from the stored plan rather than from anything the app sends, and
+   * stored with the *same origin*. That matters: if an expired agent plan came
+   * back as a manual one, the agent's spend would slip out of its daily cap
+   * simply by the user reading the chat slowly. Agent plans are also re-judged
+   * by the policy engine, since the cap may have filled up in the meantime.
+   */
+  app.post('/v1/plans/:id/requote', async (c) => {
+    const wallet = walletOf(c);
+    if (wallet instanceof Response) return wallet;
+
+    const userId = c.get('user').id;
+    const stored = await store.getPlan(userId, c.req.param('id'));
+    if (!stored) return c.json({ error: 'No such plan' }, 404);
+
+    const { plan, origin } = stored;
+    const outflow = plan.outflow[0];
+    const call = plan.calls[0];
+
+    if (plan.intentType !== 'transfer' || !outflow || !call || !plan.recipient) {
+      return c.json({ error: 'unsupported_plan', message: 'Only transfers can be re-quoted.' }, 422);
+    }
+
+    const intent = TransferIntentSchema.parse({
+      type: 'transfer',
+      // A verified token is re-resolved by symbol; an address would come back
+      // "unverified" and pick up a danger warning it never had.
+      token: outflow.token.verified
+        ? { kind: 'symbol', symbol: outflow.token.symbol }
+        : { kind: 'address', address: outflow.token.address, chainId: outflow.token.chainId },
+      amount: { kind: 'token', value: outflow.displayAmount },
+      // A contact keeps its label on the card. Anything else is pinned to the
+      // exact address the user already saw, never re-resolved from a name.
+      recipient: plan.recipient.contactLabel
+        ? { kind: 'contact', label: plan.recipient.contactLabel }
+        : { kind: 'address', address: plan.recipient.address },
+      chainId: call.chainId,
+      rationale: plan.modelRationale || 'Re-quoted.',
+    });
+
+    const outcome = await buildPlan(intent, createPlannerContext({ reader, store, userId, account: wallet }));
+    if (!outcome.ok) {
+      return c.json({ error: outcome.failure.code, message: outcome.failure.message }, 422);
+    }
+
+    if (origin === 'agent') {
+      const decision = evaluatePolicy({
+        policy: await store.getPolicy(userId),
+        plan: outcome.plan,
+        spentTodayUsd: await store.spentTodayUsd(userId),
+      });
+
+      if (decision.outcome === 'deny') {
+        return c.json(
+          { error: 'denied', message: decision.reasons.map((reason) => reason.message).join(' ') },
+          422,
+        );
+      }
+    }
+
+    await store.putPlan(userId, outcome.plan, origin);
+    return c.json({ plan: outcome.plan }, 201);
+  });
+
   const ExecutionBodySchema = z.object({ txHash: TxHashSchema });
 
   app.post('/v1/plans/:id/executions', async (c) => {
@@ -326,6 +399,16 @@ export function createApp(deps: AppDeps) {
     // Bounded because it is billed input, and because an unbounded user string is
     // the cheapest denial-of-wallet attack there is.
     message: z.string().min(1).max(2000),
+    /** Recent turns, oldest first. Same reasoning: capped in count and length. */
+    history: z
+      .array(
+        z.object({
+          role: z.enum(['user', 'assistant']),
+          content: z.string().min(1).max(4000),
+        }),
+      )
+      .max(20)
+      .default([]),
   });
 
   app.post('/v1/agent/chat', async (c) => {
@@ -341,7 +424,15 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: 'Invalid request', issues: parsed.error.issues }, 400);
     }
 
-    return c.json(await deps.agent({ id: c.get('user').id, walletAddress: wallet }, parsed.data.message));
+    // A conversation must open with the user. Anything before the first user
+    // turn is dropped rather than rejected — it is the app's trimming, not an
+    // attack, when the oldest message in the window happens to be a reply.
+    const firstUser = parsed.data.history.findIndex((turn) => turn.role === 'user');
+    const history = firstUser === -1 ? [] : parsed.data.history.slice(firstUser);
+
+    return c.json(
+      await deps.agent({ id: c.get('user').id, walletAddress: wallet }, parsed.data.message, history),
+    );
   });
 
   /* ------------------------------------------------------------------------ */

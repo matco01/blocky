@@ -1,7 +1,7 @@
 import { displayUsd, isDecimalString, isPlanExpired, type Plan, type RecipientRef } from '@blocky/shared';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,7 +12,8 @@ import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { api } from '../lib/api';
 import { confirmWithBiometrics } from '../lib/biometrics';
-import { useSmartAccount, type SendStage } from '../lib/smart-account';
+import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
+import { SubmittedButUnconfirmedError, useSmartAccount, type SendStage } from '../lib/smart-account';
 import { useTheme } from '../theme';
 
 type Step =
@@ -20,7 +21,10 @@ type Step =
   | { name: 'review'; plan: Plan }
   | { name: 'sending'; plan: Plan; stage: SendStage }
   | { name: 'done'; plan: Plan; recorded: boolean }
-  | { name: 'failed'; plan: Plan; message: string };
+  /** Nothing reached the chain. Safe to try again. */
+  | { name: 'failed'; plan: Plan; message: string }
+  /** Submitted, outcome unknown. Never offer a retry: it could send twice. */
+  | { name: 'unconfirmed'; plan: Plan };
 
 const STAGE_COPY: Record<SendStage, string> = {
   preparing: 'Getting ready…',
@@ -32,25 +36,49 @@ const STAGE_COPY: Record<SendStage, string> = {
 /**
  * Send.
  *
- * form → review → Face ID → sign → submit → done.
+ * form → review → fingerprint → sign → submit → done.
  *
  * The amount and recipient the user types go to the server, which plans the
  * send with the same planner the agent uses. The review card shows the
  * *server's* plan, and that plan — not the form — is what gets signed.
+ *
+ * A plan proposed in the chat arrives by id and starts at the review step.
+ * This is the only screen that approves money, whoever proposed it.
  */
 export default function SendScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { sendCalls, ready } = useSmartAccount();
 
-  const [step, setStep] = useState<Step>({ name: 'form' });
+  const { planId } = useLocalSearchParams<{ planId?: string }>();
+  const [handedOff] = useState(() => getHandedOffPlan(planId));
+
+  const [step, setStep] = useState<Step>(() =>
+    handedOff ? { name: 'review', plan: handedOff } : { name: 'form' },
+  );
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
   const [planning, setPlanning] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+
+  const secondsLeft = useSecondsLeft(step.name === 'review' ? step.plan.expiresAt : null);
 
   const recipient = parseRecipient(to);
   const amountValue = parseAmount(amount);
+
+  /** A fresh quote for the plan on screen. Keeps agent plans counted as agent plans. */
+  async function requote(plan: Plan) {
+    setPlanning(true);
+    setApprovalError(null);
+    try {
+      setStep({ name: 'review', plan: await api.requotePlan(plan.id) });
+    } catch (error) {
+      setApprovalError(error instanceof Error ? error.message : 'Could not refresh that quote.');
+    } finally {
+      setPlanning(false);
+    }
+  }
 
   async function review() {
     if (!recipient || !amountValue) return;
@@ -68,14 +96,18 @@ export default function SendScreen() {
   }
 
   async function send(plan: Plan) {
-    // A stale quote is re-planned, never signed.
+    // A stale quote is re-quoted, never signed.
     if (isPlanExpired(plan)) {
-      await review();
+      await requote(plan);
       return;
     }
 
-    const approved = await confirmWithBiometrics(`Send ${sendAmountLabel(plan)}`);
-    if (!approved) return;
+    setApprovalError(null);
+    const approval = await confirmWithBiometrics(`Send ${sendAmountLabel(plan)}`);
+    if (!approval.ok) {
+      setApprovalError(approval.message);
+      return;
+    }
 
     setStep({ name: 'sending', plan, stage: 'preparing' });
 
@@ -83,7 +115,11 @@ export default function SendScreen() {
     try {
       txHash = await sendCalls(plan.calls, (stage) => setStep({ name: 'sending', plan, stage }));
     } catch (error) {
-      // Nothing reached the chain, so it is safe to offer a retry.
+      if (error instanceof SubmittedButUnconfirmedError) {
+        setStep({ name: 'unconfirmed', plan });
+        return;
+      }
+      // Failed before submission: nothing reached the chain, so a retry is safe.
       setStep({
         name: 'failed',
         plan,
@@ -93,6 +129,7 @@ export default function SendScreen() {
     }
 
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    if (handedOff) markPlanSent(handedOff.id);
 
     /*
      * The money has moved. From here on nothing may say "failed": if reporting
@@ -126,7 +163,16 @@ export default function SendScreen() {
           />
         ) : null}
 
-        {step.name === 'review' ? <ReviewStep plan={step.plan} /> : null}
+        {step.name === 'review' ? (
+          <View style={{ gap: theme.space.lg }}>
+            <PlanReview plan={step.plan} secondsLeft={secondsLeft} />
+            {approvalError ? (
+              <Text variant="body" tone="warning" style={styles.center}>
+                {approvalError}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {step.name === 'sending' ? (
           <View style={styles.status}>
@@ -165,6 +211,16 @@ export default function SendScreen() {
           </View>
         ) : null}
 
+        {step.name === 'unconfirmed' ? (
+          <View style={styles.status}>
+            <Text variant="title">Still confirming</Text>
+            <Text variant="body" tone="secondary" style={styles.center}>
+              Your send of {sendAmountLabel(step.plan)} was submitted but is taking longer than usual to
+              confirm. Check Activity in a minute before trying again, so you don't send it twice.
+            </Text>
+          </View>
+        ) : null}
+
         <View style={{ gap: theme.space.md, marginTop: theme.space.xxl }}>
           {step.name === 'form' ? (
             <>
@@ -181,16 +237,22 @@ export default function SendScreen() {
           {step.name === 'review' ? (
             <>
               <Button
-                label={isPlanExpired(step.plan) ? 'Get a new quote' : `Send ${sendAmountLabel(step.plan)}`}
-                haptic="heavy"
+                label={secondsLeft === 0 ? 'Get a new quote' : `Send ${sendAmountLabel(step.plan)}`}
+                haptic={secondsLeft === 0 ? 'light' : 'heavy'}
                 loading={planning}
                 onPress={() => void send(step.plan)}
               />
-              <Button label="Edit" variant="quiet" onPress={() => setStep({ name: 'form' })} />
+              {handedOff ? (
+                <Button label="Cancel" variant="quiet" onPress={() => router.back()} />
+              ) : (
+                <Button label="Edit" variant="quiet" onPress={() => setStep({ name: 'form' })} />
+              )}
             </>
           ) : null}
 
-          {step.name === 'done' ? <Button label="Done" onPress={() => router.back()} /> : null}
+          {step.name === 'done' || step.name === 'unconfirmed' ? (
+            <Button label="Done" onPress={() => router.back()} />
+          ) : null}
 
           {step.name === 'failed' ? (
             <>
@@ -260,15 +322,23 @@ function SendForm(props: {
   );
 }
 
-function ReviewStep({ plan }: { plan: Plan }) {
-  const [secondsLeft, setSecondsLeft] = useState(() => secondsUntil(plan.expiresAt));
+/**
+ * Seconds until a quote expires, ticking once a second.
+ *
+ * Lives in the screen rather than the card so the button can switch to
+ * "Get a new quote" the moment the quote lapses, not just the countdown text.
+ */
+function useSecondsLeft(expiresAt: string | null): number {
+  const [seconds, setSeconds] = useState(() => (expiresAt ? secondsUntil(expiresAt) : 0));
 
   useEffect(() => {
-    const timer = setInterval(() => setSecondsLeft(secondsUntil(plan.expiresAt)), 1000);
+    if (!expiresAt) return;
+    setSeconds(secondsUntil(expiresAt));
+    const timer = setInterval(() => setSeconds(secondsUntil(expiresAt)), 1000);
     return () => clearInterval(timer);
-  }, [plan.expiresAt]);
+  }, [expiresAt]);
 
-  return <PlanReview plan={plan} secondsLeft={secondsLeft} />;
+  return seconds;
 }
 
 /* -------------------------------------------------------------------------- */

@@ -3,7 +3,15 @@ import { useEmbeddedEthereumWallet, useSign7702Authorization } from '@privy-io/e
 import { createKernelAccount, createKernelAccountClient } from '@zerodev/sdk';
 import { KERNEL_7702_DELEGATION_ADDRESS, KERNEL_V3_3, getEntryPoint } from '@zerodev/sdk/constants';
 import { useCallback } from 'react';
-import { createPublicClient, http, type Client, type Hex } from 'viem';
+import {
+  BaseError,
+  HttpRequestError,
+  TimeoutError,
+  createPublicClient,
+  http,
+  type Client,
+  type Hex,
+} from 'viem';
 import { arcTestnet } from 'viem/chains';
 import { config } from './config';
 
@@ -35,6 +43,24 @@ interface PimlicoGasPrice {
 }
 
 export type SendStage = 'preparing' | 'authorizing' | 'submitting' | 'confirming';
+
+/**
+ * The operation was (or may have been) submitted, and its outcome is unknown.
+ *
+ * Distinct from an ordinary error on purpose: the screen must not offer a
+ * retry for this one, because the first attempt may still land.
+ */
+export class SubmittedButUnconfirmedError extends Error {
+  constructor(readonly userOpHash: Hex | null = null) {
+    super('Submitted, but not confirmed yet.');
+    this.name = 'SubmittedButUnconfirmedError';
+  }
+}
+
+function isAmbiguousNetworkError(error: unknown): boolean {
+  if (!(error instanceof BaseError)) return false;
+  return Boolean(error.walk((cause) => cause instanceof TimeoutError || cause instanceof HttpRequestError));
+}
 
 export function useSmartAccount() {
   const { wallets } = useEmbeddedEthereumWallet();
@@ -112,15 +138,34 @@ export function useSmartAccount() {
 
       onStage?.('submitting');
 
-      const userOpHash = await client.sendUserOperation({
-        calls: calls.map((call) => ({ to: call.to, data: call.data as Hex, value: BigInt(call.value) })),
-      });
+      let userOpHash: Hex;
+      try {
+        userOpHash = await client.sendUserOperation({
+          calls: calls.map((call) => ({ to: call.to, data: call.data as Hex, value: BigInt(call.value) })),
+        });
+      } catch (error) {
+        // A rejection from the bundler means nothing was submitted. A timeout or
+        // dropped connection means we cannot know — it may have gone through.
+        if (isAmbiguousNetworkError(error)) throw new SubmittedButUnconfirmedError();
+        throw error;
+      }
 
       onStage?.('confirming');
 
-      const receipt = await client.waitForUserOperationReceipt({ hash: userOpHash, timeout: 60_000 });
+      /*
+       * From here the operation is with the bundler. Any failure to *observe*
+       * the result is not a failure of the send, and must never be reported as
+       * one: the user would tap "try again" and pay twice.
+       */
+      let receipt: Awaited<ReturnType<typeof client.waitForUserOperationReceipt>>;
+      try {
+        receipt = await client.waitForUserOperationReceipt({ hash: userOpHash, timeout: 60_000 });
+      } catch {
+        throw new SubmittedButUnconfirmedError(userOpHash);
+      }
 
       if (!receipt.success) {
+        // Included, but the transfer itself reverted: the USDC did not move.
         throw new Error('The transaction failed on-chain. Nothing was sent.');
       }
 

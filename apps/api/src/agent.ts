@@ -82,6 +82,22 @@ export function agentToolsFor(
   };
 }
 
+/**
+ * A prior chat turn, as text.
+ *
+ * The API is stateless, so the app sends recent history with each message.
+ * Text only — tool calls and their results are not replayed, because they must
+ * arrive in matched pairs and a client-supplied tool result is a forged one.
+ *
+ * History is client-controlled, so a user can put words in the agent's mouth.
+ * That only reaches their own session, and every action it could lead to
+ * still goes through the planner, the policy engine and their own fingerprint.
+ */
+export interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface AgentResponse {
   kind: AgentTurn['kind'] | 'plan' | 'cannot_plan';
   reply: string;
@@ -102,6 +118,7 @@ export function createAgentHandler(store: Store, apiKey: string, reader: ChainRe
   return async function handle(
     user: { id: string; walletAddress: Address },
     message: string,
+    history: readonly ChatTurn[] = [],
   ): Promise<AgentResponse> {
     const userId = user.id;
     const account = user.walletAddress;
@@ -109,6 +126,7 @@ export function createAgentHandler(store: Store, apiKey: string, reader: ChainRe
     const turn = await runAgentTurn(message, {
       client,
       tools: agentToolsFor(store, userId, reader, account),
+      history: history.map((entry) => ({ role: entry.role, content: entry.content })),
     });
 
     const empty = { plan: null, decision: null, usage: turn.usage };

@@ -1,0 +1,45 @@
+import type { Plan } from '@blocky/shared';
+import { useSyncExternalStore } from 'react';
+
+/**
+ * Passing a plan from the chat to the Send screen, and the result back.
+ *
+ * The chat shows a card; tapping it opens the same confirmation screen a manual
+ * send uses, so there is exactly one place where money is approved. The plan
+ * travels by id through the route and is looked up here rather than being
+ * serialised into the URL.
+ *
+ * Reads are non-destructive on purpose: a screen that renders twice (fast
+ * refresh, strict mode) must see the same plan both times.
+ */
+
+const plans = new Map<string, Plan>();
+const sent = new Set<string>();
+const listeners = new Set<() => void>();
+let version = 0;
+
+export function handOffPlan(plan: Plan): void {
+  plans.set(plan.id, plan);
+}
+
+export function getHandedOffPlan(planId: string | undefined): Plan | null {
+  return planId ? (plans.get(planId) ?? null) : null;
+}
+
+/** Mark a chat plan as sent, by the id the chat knows it by. */
+export function markPlanSent(planId: string): void {
+  sent.add(planId);
+  version += 1;
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** Re-renders when any plan is marked sent. */
+export function useSentPlans(): (planId: string) => boolean {
+  useSyncExternalStore(subscribe, () => version);
+  return (planId) => sent.has(planId);
+}
