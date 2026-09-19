@@ -12,6 +12,7 @@ import {
 import {
   CHAINS,
   DEFAULT_CHAIN,
+  getArcProtocols,
   getChain,
   getTokenPriceUsd,
   type ChainReader,
@@ -134,6 +135,14 @@ export function agentToolsFor(
 
     async deleteContact(label) {
       return { deleted: await store.deleteContact(userId, label) };
+    },
+
+    async getArcEcosystem() {
+      try {
+        return { protocols: await getArcProtocols() };
+      } catch {
+        return { error: 'Ecosystem data is temporarily unavailable.' };
+      }
     },
 
     /**

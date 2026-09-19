@@ -63,6 +63,7 @@ export interface AgentTools {
   saveContact(label: string, address: string): Promise<unknown>;
   deleteContact(label: string): Promise<unknown>;
   getRecentActivity(): Promise<unknown>;
+  getArcEcosystem(): Promise<unknown>;
 }
 
 export interface AgentUsage {
@@ -237,6 +238,8 @@ async function callTool(name: string, input: unknown, tools: AgentTools): Promis
       return tools.deleteContact(stringArg(input, 'label'));
     case 'get_recent_activity':
       return tools.getRecentActivity();
+    case 'get_arc_ecosystem':
+      return tools.getArcEcosystem();
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

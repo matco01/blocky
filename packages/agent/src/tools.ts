@@ -194,6 +194,12 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_arc_ecosystem',
+    description:
+      'What is actually live on Arc right now, ranked by TVL (total value locked) — for questions like "what are the best apps on Arc" or "is there anywhere to lend/stake USDC". No APY or yield figure is included, because there is no reliable one to give yet; if the user asks for a specific rate, say you don\'t have a trustworthy number rather than estimating one. A protocol appearing here is not a recommendation and never a basis for propose_intent — Blocky only sends plain USDC transfers today.',
+    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+  },
+  {
     name: 'get_recent_activity',
     description:
       `The user's recent sends and received payments — amounts, counterparties, timestamps, and whether each went through. Use this for anything about the past (what did I send, when did I last pay Sam, how much came in this week). It has nothing to do with what a future send would cost — that is the planner's job, not this.`,

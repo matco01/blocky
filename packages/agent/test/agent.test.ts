@@ -54,6 +54,7 @@ const tools: AgentTools = {
   saveContact: async (label, address) => ({ saved: true, label, address }),
   deleteContact: async (label) => ({ deleted: label === 'sam' }),
   getRecentActivity: async () => ({ items: [], complete: true }),
+  getArcEcosystem: async () => ({ protocols: [] }),
 };
 
 const text = (value: string): Anthropic.TextBlock => ({

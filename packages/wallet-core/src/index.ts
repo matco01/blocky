@@ -13,3 +13,4 @@ export * from './rpc';
 export * from './receipts';
 export * from './gateway';
 export * from './prices';
+export * from './ecosystem';

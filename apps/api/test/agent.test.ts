@@ -111,6 +111,39 @@ describe('get_token_price', () => {
   });
 });
 
+describe('get_arc_ecosystem', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('answers with the live feed’s protocol list, faked rather than hit for real', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify([
+            { name: 'Morpho Blue', category: 'Lending', chains: ['Ethereum', 'Arc'], chainTvls: { Arc: 184_000_000 } },
+            { name: 'Some Ethereum Thing', category: 'Dexs', chains: ['Ethereum'], chainTvls: { Ethereum: 1 } },
+          ]),
+        ),
+      ),
+    );
+
+    const result = (await tools().getArcEcosystem()) as { protocols?: Array<{ name: string }>; error?: string };
+
+    expect(result.error).toBeUndefined();
+    expect(result.protocols).toEqual([{ name: 'Morpho Blue', category: 'Lending', tvlUsd: 184_000_000 }]);
+  });
+
+  it('turns an actual feed failure into "temporarily unavailable", not a crash', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { status: 503 })));
+
+    const result = (await tools().getArcEcosystem()) as { error?: string };
+
+    expect(result.error).toMatch(/unavailable/i);
+  });
+});
+
 describe('resolve_address', () => {
   it('passes an already-valid address straight through, lowercased', async () => {
     const result = await tools().resolveAddress('0xABCDEF0123456789ABCDEF0123456789ABCDEF01');

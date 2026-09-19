@@ -91,7 +91,14 @@ describe('the tool surface', () => {
   });
 
   it('still gives the tools with nothing to ask for a zero-argument schema', () => {
-    const noArgTools = ['get_balance', 'get_policy', 'get_supported_chains', 'list_contacts', 'get_recent_activity'];
+    const noArgTools = [
+      'get_balance',
+      'get_policy',
+      'get_supported_chains',
+      'list_contacts',
+      'get_recent_activity',
+      'get_arc_ecosystem',
+    ];
 
     for (const name of noArgTools) {
       const tool = TOOLS.find((t) => t.name === name);
