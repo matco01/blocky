@@ -2,15 +2,16 @@ import { displayUsd, parseUsd, type Plan, type PolicyDecision } from '@blocky/sh
 import { StyleSheet, View } from 'react-native';
 import { useTheme } from '../../theme';
 import { Button } from '../Button';
+import { Icon } from '../Icon';
 import { Text } from '../Text';
+import { Tile } from '../Tile';
 
 /**
- * A send the agent proposed, as a transaction card in the chat.
+ * A send the agent proposed, as a card in the chat.
  *
  * It never executes from here. "Review & send" opens the same confirmation
- * screen as a manual send — one place where money is approved, with the full
- * details and the fingerprint prompt. A plan the user's limits refuse shows why
- * and has no button at all.
+ * screen as a manual send — one place where money is approved. A plan the
+ * user's limits refuse shows why and has no button at all.
  */
 export function ChatPlanCard({
   plan,
@@ -37,25 +38,17 @@ export function ChatPlanCard({
       : { label: 'Needs approval', tone: 'tertiary' as const };
 
   return (
-    <View
-      style={[
-        styles.card,
-        {
-          backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radius.xl,
-          padding: theme.space.lg,
-        },
-      ]}
-    >
+    <Tile style={{ padding: theme.space.lg }}>
       <View style={styles.header}>
-        <Text variant="label" tone="tertiary" style={styles.eyebrow}>
+        <Text variant="label" tone="secondary">
           Send
         </Text>
-        <Text variant="caption" tone={status.tone}>
-          {sent ? '✓ ' : ''}
-          {status.label}
-        </Text>
+        <View style={styles.status}>
+          {sent ? <Icon name="checkmark" size={14} tone="positive" /> : null}
+          <Text variant="caption" tone={status.tone}>
+            {status.label}
+          </Text>
+        </View>
       </View>
 
       <View style={{ marginTop: theme.space.sm }}>
@@ -103,25 +96,23 @@ export function ChatPlanCard({
           <Button label="Review & send" size="compact" haptic="medium" onPress={onReview} />
         </View>
       ) : null}
-    </View>
+    </Tile>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  eyebrow: {
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
+  status: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   divider: {
-    height: StyleSheet.hairlineWidth,
+    height: 1,
   },
   row: {
     flexDirection: 'row',

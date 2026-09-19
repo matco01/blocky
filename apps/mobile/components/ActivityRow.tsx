@@ -2,12 +2,12 @@ import { displayUsd } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
 import type { ActivityItem } from '../lib/api';
 import { useTheme } from '../theme';
+import { Icon } from './Icon';
 import { Text } from './Text';
 
 /**
  * One line of history, written for a person: "Sent to 0x5a30…0003", not a
- * method selector and a hash. The hash is one tap away in the detail view, not
- * on the main screen.
+ * method selector and a hash.
  */
 export function ActivityRow({ item }: { item: ActivityItem }) {
   const theme = useTheme();
@@ -20,19 +20,12 @@ export function ActivityRow({ item }: { item: ActivityItem }) {
 
   return (
     <View style={[styles.row, { paddingVertical: theme.space.md }]}>
-      <View
-        style={[
-          styles.glyph,
-          { backgroundColor: theme.colors.surface, borderRadius: theme.radius.pill },
-        ]}
-      >
-        <Text variant="bodyStrong" tone={sent ? 'secondary' : 'positive'}>
-          {sent ? '↑' : '↓'}
-        </Text>
+      <View style={[styles.square, { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radius.md }]}>
+        <Icon name={sent ? 'arrow-up' : 'arrow-down'} size={20} tone={sent ? 'secondary' : 'positive'} />
       </View>
 
       <View style={styles.middle}>
-        <Text variant="body" numberOfLines={1}>
+        <Text variant="bodyStrong" numberOfLines={1}>
           {title}
         </Text>
         <Text variant="caption" tone={failed ? 'danger' : 'tertiary'}>
@@ -73,7 +66,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  glyph: {
+  square: {
     width: 40,
     height: 40,
     alignItems: 'center',

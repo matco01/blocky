@@ -1,8 +1,15 @@
-import { usePrivy } from '@privy-io/expo';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, KeyboardAvoidingView, ScrollView, StyleSheet, View, type TextInput } from 'react-native';
-import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
+import {
+  KeyboardAvoidingView,
+  ScrollView,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type TextInput,
+} from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { displayUsd } from '@blocky/shared';
 import { ActionButton } from '../ActionButton';
@@ -10,9 +17,9 @@ import { BalanceDisplay } from '../BalanceDisplay';
 import { ChatEmpty, type Capability } from '../chat/ChatEmpty';
 import { ChatInput } from '../chat/ChatInput';
 import { ChatPlanCard } from '../chat/ChatPlanCard';
+import { MascotStage, type StageState } from '../chat/MascotStage';
 import { AssistantMessage, ErrorMessage, UserMessage } from '../chat/Messages';
-import { TypingIndicator } from '../chat/TypingIndicator';
-import { Mascot } from '../Mascot';
+import { Icon } from '../Icon';
 import { PageDots, type PageProps } from '../PageDots';
 import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
@@ -31,17 +38,19 @@ type BalanceState =
 /** How often the balance refreshes while Home is on screen, so incoming money shows up. */
 const BALANCE_POLL_MS = 20_000;
 
+/** Scroll offset past which Blocky docks to his smallest size. */
+const DOCK_AT = 24;
+
 /**
  * Home — the first page of the pager.
  *
- * The balance, three shortcuts, and the chat. The chat is the main surface:
- * anything more involved than a plain send is something you say, not somewhere
- * you navigate to. Account and settings are one swipe to the left.
+ * The balance, three shortcuts, Blocky, and the chat. The chat is the main
+ * surface: anything more involved than a plain send is something you say, not
+ * somewhere you navigate to. Account is one swipe to the left.
  */
 export function HomePage({ page, onPageChange }: PageProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { logout } = usePrivy();
 
   const [balance, setBalance] = useState<BalanceState>({ state: 'loading' });
   const lastBalance = useRef<string | null>(null);
@@ -52,6 +61,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const [draft, setDraft] = useState('');
+  const [scrolled, setScrolled] = useState(false);
   const typing = useKeyboardVisible();
 
   const pickCapability = useCallback(
@@ -103,16 +113,22 @@ export function HomePage({ page, onPageChange }: PageProps) {
     return () => clearInterval(timer);
   }, [focused, balance.state, fetchBalance]);
 
-  function confirmSignOut() {
-    Alert.alert('Sign out?', 'You can sign back in with your email.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: () => void logout() },
-    ]);
-  }
+  // A threshold, not a per-frame value: the stage re-lays out once, not continuously.
+  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setScrolled(event.nativeEvent.contentOffset.y > DOCK_AT);
+  }, []);
 
   const shown =
     balance.state === 'ready' ? balance.balance : balance.state === 'error' ? (balance.lastBalance ?? '0') : '0';
   const canTransact = balance.state === 'ready' || (balance.state === 'error' && balance.lastBalance !== null);
+
+  const stage: StageState = busy
+    ? 'busy'
+    : typing || scrolled
+      ? 'docked'
+      : messages.length === 0
+        ? 'empty'
+        : 'conversation';
 
   return (
     <KeyboardAvoidingView behavior="padding" style={[styles.screen, { backgroundColor: theme.colors.background }]}>
@@ -124,7 +140,9 @@ export function HomePage({ page, onPageChange }: PageProps) {
         ]}
       >
         <View style={styles.header}>
-          <Text variant="bodyStrong">Blocky</Text>
+          <Text variant="label" tone="brand" style={styles.wordmark}>
+            Blocky
+          </Text>
           <View style={styles.dots} pointerEvents="box-none">
             <PageDots page={page} onPageChange={onPageChange} />
           </View>
@@ -136,10 +154,8 @@ export function HomePage({ page, onPageChange }: PageProps) {
               </Text>
             </Animated.View>
           ) : (
-            <PressableScale onPress={confirmSignOut} accessibilityLabel="Sign out" haptic="none">
-              <Text variant="label" tone="tertiary">
-                Sign out
-              </Text>
+            <PressableScale onPress={() => onPageChange(1)} accessibilityLabel="Account" haptic="none" scaleTo={0.9}>
+              <Icon name="person-circle-outline" size={26} tone="secondary" />
             </PressableScale>
           )}
         </View>
@@ -165,38 +181,18 @@ export function HomePage({ page, onPageChange }: PageProps) {
             ) : null}
 
             <View style={[styles.actions, { gap: theme.space.sm, marginTop: theme.space.lg }]}>
-              <ActionButton
-                label="Receive"
-                glyph="↓"
-                fill="accent"
-                disabled={!canTransact}
-                onPress={() => router.push('/receive')}
-              />
-              <ActionButton
-                label="Send"
-                glyph="↑"
-                fill="secondary"
-                disabled={!canTransact}
-                onPress={() => router.push('/send')}
-              />
-              <ActionButton label="Activity" glyph="≡" onPress={() => router.push('/activity')} />
+              <ActionButton label="Receive" icon="arrow-down" disabled={!canTransact} onPress={() => router.push('/receive')} />
+              <ActionButton label="Send" icon="arrow-up" disabled={!canTransact} onPress={() => router.push('/send')} />
+              <ActionButton label="Activity" icon="receipt-outline" onPress={() => router.push('/activity')} />
             </View>
           </Animated.View>
         )}
       </View>
 
-      <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
-
-      {/*
-       * Blocky himself — a presence you're talking to, not a contact-header
-       * avatar. Pinned above the chat, never inside the ScrollView, so he
-       * stays put as the conversation grows rather than scrolling away.
-       * Shrinks while typing, the same fold the balance above uses, so the
-       * keyboard never has to fight him for room.
-       */}
-      <Animated.View layout={LinearTransition.duration(180)} style={styles.mascotRow}>
-        <Mascot pose="happy" size={typing ? 44 : 104} />
-      </Animated.View>
+      {/* Blocky — fixed above the chat, never inside the ScrollView. */}
+      <View style={styles.stage}>
+        <MascotStage state={stage} busySize={typing || scrolled ? 44 : messages.length === 0 ? 96 : 64} />
+      </View>
 
       {/* --- Chat ---------------------------------------------------------- */}
       <ScrollView
@@ -205,6 +201,8 @@ export function HomePage({ page, onPageChange }: PageProps) {
         // Wider gaps between turns than within them, so each exchange reads as a unit.
         contentContainerStyle={[styles.chatContent, { gap: theme.space.xl }]}
         keyboardShouldPersistTaps="handled"
+        onScroll={onScroll}
+        scrollEventThrottle={64}
         onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
         // The visible area shrinks when the keyboard opens; keep the latest message in view.
         onLayout={() => scrollRef.current?.scrollToEnd({ animated: false })}
@@ -241,8 +239,6 @@ export function HomePage({ page, onPageChange }: PageProps) {
             }
           })
         )}
-
-        {busy ? <TypingIndicator /> : null}
       </ScrollView>
 
       <View
@@ -277,6 +273,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: 32,
   },
+  wordmark: {
+    fontSize: 18,
+    lineHeight: 24,
+  },
   // Centred on the screen regardless of what sits either side of it.
   dots: {
     position: 'absolute',
@@ -293,13 +293,10 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
   },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-  },
-  mascotRow: {
-    alignItems: 'center',
-    paddingTop: 12,
-    paddingBottom: 8,
+  stage: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
   chat: {
     flex: 1,

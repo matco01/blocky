@@ -1,62 +1,42 @@
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 import { useTheme } from '../theme';
-import { PressableScale } from './PressableScale';
+import { BlockPressable } from './BlockPressable';
+import { Icon, type IconName } from './Icon';
 import { Text } from './Text';
 
-export interface ActionButtonProps {
-  label: string;
-  /** A glyph. Kept as text so it needs no icon dependency. */
-  glyph: string;
-  onPress?: () => void;
-  /** `accent` and `secondary` are the brand's two action colours; `plain` is quiet. */
-  fill?: 'accent' | 'secondary' | 'plain';
-  disabled?: boolean;
-}
-
 /**
- * Receive, Send, Activity — compact pills under the balance.
- *
- * Small on purpose: the chat is the main surface, and these are shortcuts for
- * the things that are faster to tap than to type.
+ * Receive, Send, Activity — three identical square tiles under the balance.
+ * Identical on purpose: one coloured tile in a row of three reads as a carnival.
+ * Shortcuts for the things faster to tap than to type; the chat is the main surface.
  */
-export function ActionButton({ label, glyph, onPress, fill = 'plain', disabled }: ActionButtonProps) {
+export function ActionButton({
+  label,
+  icon,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  icon: IconName;
+  onPress?: () => void;
+  disabled?: boolean;
+}) {
   const theme = useTheme();
 
-  const background =
-    fill === 'accent' ? theme.colors.accent : fill === 'secondary' ? theme.colors.secondary : theme.colors.surface;
-  const color =
-    fill === 'accent' ? theme.colors.accentText : fill === 'secondary' ? theme.colors.secondaryText : theme.colors.textPrimary;
-
   return (
-    <PressableScale
+    <BlockPressable
       onPress={onPress}
       disabled={disabled}
       accessibilityLabel={label}
-      haptic="light"
-      style={[styles.pill, { backgroundColor: background, borderRadius: theme.radius.pill }]}
+      height={68}
+      fill={theme.colors.surface}
+      edge={theme.colors.borderStrong}
+      stroke={theme.colors.border}
+      style={{ flex: 1 }}
     >
-      <View style={styles.inner}>
-        <Text variant="bodyStrong" style={{ color }}>
-          {glyph}
-        </Text>
-        <Text variant="label" style={{ color }}>
-          {label}
-        </Text>
+      <View style={{ alignItems: 'center', gap: 4 }}>
+        <Icon name={icon} size={22} />
+        <Text variant="caption">{label}</Text>
       </View>
-    </PressableScale>
+    </BlockPressable>
   );
 }
-
-const styles = StyleSheet.create({
-  pill: {
-    flex: 1,
-    height: 44,
-    justifyContent: 'center',
-  },
-  inner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-});

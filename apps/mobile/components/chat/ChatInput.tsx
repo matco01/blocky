@@ -1,14 +1,12 @@
 import type { RefObject } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
-import { useTheme } from '../../theme';
-import { PressableScale } from '../PressableScale';
-import { Text } from '../Text';
+import { font, useTheme } from '../../theme';
+import { BlockPressable } from '../BlockPressable';
+import { Icon } from '../Icon';
 
 /**
- * The message box at the bottom of Home.
- *
- * Controlled from outside, so the suggestions can pre-fill it ("Send $") and
- * put the cursor there.
+ * The message box at the bottom of Home. Controlled from outside, so the
+ * suggestions can pre-fill it ("Send $") and put the cursor there.
  */
 export function ChatInput({
   value,
@@ -39,6 +37,7 @@ export function ChatInput({
         {
           backgroundColor: theme.colors.surface,
           borderColor: theme.colors.border,
+          borderWidth: theme.stroke,
           borderRadius: theme.radius.xl,
           paddingLeft: theme.space.lg,
         },
@@ -58,23 +57,18 @@ export function ChatInput({
         submitBehavior="submit"
         returnKeyType="send"
       />
-      <PressableScale
+      <BlockPressable
         onPress={submit}
         disabled={!canSend}
         accessibilityLabel="Send message"
-        haptic="light"
-        style={[
-          styles.send,
-          {
-            backgroundColor: canSend ? theme.colors.accent : 'transparent',
-            borderRadius: theme.radius.pill,
-          },
-        ]}
+        height={38}
+        radius={theme.radius.md}
+        fill={canSend ? theme.colors.accent : theme.colors.surfaceMuted}
+        edge={canSend ? theme.colors.accentEdge : theme.colors.border}
+        style={styles.send}
       >
-        <Text variant="bodyStrong" tone={canSend ? 'inverted' : 'tertiary'}>
-          ↑
-        </Text>
-      </PressableScale>
+        <Icon name="paper-plane" size={18} tone={canSend ? 'inverted' : 'tertiary'} />
+      </BlockPressable>
     </View>
   );
 }
@@ -83,23 +77,22 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingRight: 6,
-    paddingVertical: 6,
-    minHeight: 52,
+    paddingRight: 8,
+    paddingVertical: 8,
+    minHeight: 56,
   },
   input: {
     flex: 1,
+    fontFamily: font.regular,
     fontSize: 16,
+    lineHeight: 22,
     maxHeight: 120,
     paddingTop: 10,
     paddingBottom: 10,
+    includeFontPadding: false,
   },
   send: {
-    width: 38,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 42,
     marginLeft: 8,
   },
 });

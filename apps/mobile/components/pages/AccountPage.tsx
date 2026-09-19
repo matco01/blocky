@@ -11,9 +11,12 @@ import { api } from '../../lib/api';
 import { useSmartAccount } from '../../lib/smart-account';
 import { useTheme, type Appearance } from '../../theme';
 import { BlockyCard } from '../BlockyCard';
+import { Button } from '../Button';
+import { Icon, type IconName } from '../Icon';
 import { PageDots, type PageProps } from '../PageDots';
 import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
+import { Tile } from '../Tile';
 
 /**
  * Account — the second page of the pager, one swipe left of Home.
@@ -80,7 +83,7 @@ export function AccountPage({ page, onPageChange }: PageProps) {
       ]}
     >
       <View style={styles.header}>
-        <Text variant="bodyStrong">Account</Text>
+        <Text variant="title">Account</Text>
         <View style={styles.dots} pointerEvents="box-none">
           <PageDots page={page} onPageChange={onPageChange} />
         </View>
@@ -103,37 +106,38 @@ export function AccountPage({ page, onPageChange }: PageProps) {
       {/* --- Wallet --------------------------------------------------------- */}
       <Section title="Wallet">
         <Row
+          icon="wallet-outline"
           label="Address"
           value={address ? `${address.slice(0, 6)}…${address.slice(-4)}` : 'Setting up…'}
           action={copied ? 'Copied' : 'Copy'}
           onPress={address ? copyAddress : undefined}
         />
-        <Row label="Network" value="Arc Testnet" />
+        <Row icon="receipt-outline" label="Network" value="Arc Testnet" />
         <Row
+          icon="shield-checkmark-outline"
           label="Spending limits"
           value={policy ? `${displayUsd(policy.perTxCapUsd)} per send · ${displayUsd(policy.dailyCapUsd)} a day` : '—'}
           chevron
           onPress={() => router.push('/limits')}
+          last
         />
       </Section>
 
       {/* --- Preferences ---------------------------------------------------- */}
       <Section title="Preferences">
-        <Row label="Appearance" value={APPEARANCE_LABELS[theme.appearance]} chevron onPress={chooseAppearance} />
+        <Row icon="color-palette-outline" label="Appearance" value={APPEARANCE_LABELS[theme.appearance]} chevron onPress={chooseAppearance} last />
       </Section>
 
       {/* --- Security ------------------------------------------------------- */}
       <Section title="Security">
-        <Row label="Export private key" value="Coming soon" chevron onPress={explainExport} />
+        <Row icon="key-outline" label="Export private key" value="Coming soon" chevron onPress={explainExport} last />
       </Section>
 
       {/* --- Sign out ------------------------------------------------------- */}
-      <View style={{ marginTop: theme.space.xxl, alignItems: 'center', gap: theme.space.lg }}>
-        <PressableScale onPress={confirmSignOut} accessibilityLabel="Sign out" haptic="none">
-          <Text variant="bodyStrong" tone="danger">
-            Sign out
-          </Text>
-        </PressableScale>
+      <View style={{ marginTop: theme.space.xxl, gap: theme.space.lg, alignItems: 'center' }}>
+        <View style={{ alignSelf: 'stretch' }}>
+          <Button label="Sign out" variant="danger" haptic="none" onPress={confirmSignOut} />
+        </View>
         <Text variant="caption" tone="tertiary">
           Blocky {version}
         </Text>
@@ -156,37 +160,42 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   const theme = useTheme();
 
   return (
-    <View style={{ marginTop: theme.space.xxl, gap: theme.space.sm }}>
-      <Text variant="label" tone="tertiary" style={styles.sectionTitle}>
+    <View style={{ marginTop: theme.space.xl, gap: theme.space.sm }}>
+      <Text variant="label" tone="secondary" style={{ paddingHorizontal: 4 }}>
         {title}
       </Text>
-      <View style={[styles.group, { backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg }]}>
-        {children}
-      </View>
+      <Tile style={{ overflow: 'hidden' }}>{children}</Tile>
     </View>
   );
 }
 
 function Row({
+  icon,
   label,
   value,
   action,
   chevron,
   onPress,
+  last,
 }: {
+  icon: IconName;
   label: string;
   value: string;
   /** A short action word on the right, e.g. "Copy". */
   action?: string;
   chevron?: boolean;
   onPress?: (() => void) | undefined;
+  last?: boolean;
 }) {
   const theme = useTheme();
 
   const body = (
-    <View style={[styles.row, { borderBottomColor: theme.colors.border }]}>
+    <View style={[styles.row, { borderBottomColor: theme.colors.border, borderBottomWidth: last ? 0 : 1 }]}>
+      <View style={[styles.iconSquare, { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radius.sm }]}>
+        <Icon name={icon} size={18} tone="secondary" />
+      </View>
       <View style={styles.rowText}>
-        <Text variant="body">{label}</Text>
+        <Text variant="bodyStrong">{label}</Text>
         <Text variant="caption" tone="tertiary" numberOfLines={1}>
           {value}
         </Text>
@@ -196,11 +205,7 @@ function Row({
           {action}
         </Text>
       ) : null}
-      {chevron ? (
-        <Text variant="heading" tone="tertiary">
-          ›
-        </Text>
-      ) : null}
+      {chevron ? <Icon name="chevron-forward" size={18} tone="tertiary" /> : null}
     </View>
   );
 
@@ -220,7 +225,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 32,
+    height: 40,
   },
   dots: {
     position: 'absolute',
@@ -234,24 +239,21 @@ const styles = StyleSheet.create({
   center: {
     textAlign: 'center',
   },
-  sectionTitle: {
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    paddingHorizontal: 4,
-  },
-  group: {
-    overflow: 'hidden',
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  iconSquare: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rowText: {
     flex: 1,
-    gap: 2,
+    gap: 1,
   },
 });

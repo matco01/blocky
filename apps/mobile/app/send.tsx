@@ -6,15 +6,17 @@ import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
+import { Icon } from '../components/Icon';
 import { PlanReview } from '../components/PlanReview';
 import { PressableScale } from '../components/PressableScale';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { api } from '../lib/api';
 import { confirmWithBiometrics } from '../lib/biometrics';
 import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
 import { SubmittedButUnconfirmedError, useSmartAccount, type SendStage } from '../lib/smart-account';
-import { useTheme } from '../theme';
+import { font, useTheme } from '../theme';
 
 type Step =
   | { name: 'form' }
@@ -185,10 +187,8 @@ export default function SendScreen() {
 
         {step.name === 'done' ? (
           <View style={styles.status}>
-            <View style={[styles.check, { backgroundColor: theme.colors.positive, borderRadius: theme.radius.pill }]}>
-              <Text variant="title" tone="inverted">
-                ✓
-              </Text>
+            <View style={[styles.check, { backgroundColor: theme.colors.accentTint, borderRadius: theme.radius.xl }]}>
+              <Icon name="checkmark" size={36} tone="accent" />
             </View>
             <Text variant="title">Sent</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
@@ -204,6 +204,9 @@ export default function SendScreen() {
 
         {step.name === 'failed' ? (
           <View style={styles.status}>
+            <View style={[styles.check, { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radius.xl }]}>
+              <Icon name="alert-circle-outline" size={36} tone="secondary" />
+            </View>
             <Text variant="title">Not sent</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
               {step.message}
@@ -213,6 +216,9 @@ export default function SendScreen() {
 
         {step.name === 'unconfirmed' ? (
           <View style={styles.status}>
+            <View style={[styles.check, { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radius.xl }]}>
+              <Icon name="time-outline" size={36} tone="secondary" />
+            </View>
             <Text variant="title">Still confirming</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
               Your send of {sendAmountLabel(step.plan)} was submitted but is taking longer than usual to
@@ -223,15 +229,12 @@ export default function SendScreen() {
 
         <View style={{ gap: theme.space.md, marginTop: theme.space.xxl }}>
           {step.name === 'form' ? (
-            <>
-              <Button
-                label="Review"
-                disabled={!recipient || !amountValue || !ready}
-                loading={planning}
-                onPress={review}
-              />
-              <Button label="Cancel" variant="quiet" onPress={() => router.back()} />
-            </>
+            <Button
+              label="Review"
+              disabled={!recipient || !amountValue || !ready}
+              loading={planning}
+              onPress={review}
+            />
           ) : null}
 
           {step.name === 'review' ? (
@@ -282,7 +285,7 @@ function SendForm(props: {
 
   return (
     <View style={{ gap: theme.space.xl }}>
-      <Text variant="title">Send</Text>
+      <ScreenHeader title="Send" onClose={() => router.back()} />
 
       <View style={styles.amountBox}>
         <Text variant="balance" tone={props.amount ? 'primary' : 'tertiary'}>
@@ -311,7 +314,9 @@ function SendForm(props: {
           <PressableScale
             onPress={async () => props.setTo((await Clipboard.getStringAsync()).trim())}
             accessibilityLabel="Paste"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
           >
+            <Icon name="copy-outline" size={16} tone="accent" />
             <Text variant="label" tone="accent">
               Paste
             </Text>
@@ -411,10 +416,12 @@ const styles = StyleSheet.create({
     minHeight: 96,
   },
   amountInput: {
-    fontSize: 56,
-    fontWeight: '700',
+    fontFamily: font.extrabold,
+    fontSize: 48,
     minWidth: 60,
     fontVariant: ['tabular-nums'],
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   status: {
     flex: 1,
@@ -424,8 +431,8 @@ const styles = StyleSheet.create({
     minHeight: 320,
   },
   check: {
-    width: 72,
-    height: 72,
+    width: 76,
+    height: 76,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,

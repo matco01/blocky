@@ -1,7 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Appearance as SystemAppearance, useColorScheme } from 'react-native';
-import { colorSchemes, motion, radius, space, type, type ThemeColors } from './tokens';
+import { EDGE, colorSchemes, motion, radius, space, strokes, type, type ThemeColors } from './tokens';
 
 export * from './tokens';
 
@@ -14,6 +14,10 @@ export interface Theme {
   radius: typeof radius;
   type: typeof type;
   motion: typeof motion;
+  /** Stroke width around a tile: 2 in light, 1 in dark. */
+  stroke: number;
+  /** Height of the edge under a block. */
+  edge: number;
   scheme: 'light' | 'dark';
   appearance: Appearance;
   setAppearance: (appearance: Appearance) => void;
@@ -65,7 +69,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const scheme: 'light' | 'dark' = appearance === 'system' ? (system === 'dark' ? 'dark' : 'light') : appearance;
 
   const value = useMemo<Theme>(
-    () => ({ colors: colorSchemes[scheme], space, radius, type, motion, scheme, appearance, setAppearance }),
+    () => ({
+      colors: colorSchemes[scheme],
+      space,
+      radius,
+      type,
+      motion,
+      stroke: strokes[scheme],
+      edge: EDGE,
+      scheme,
+      appearance,
+      setAppearance,
+    }),
     [scheme, appearance, setAppearance],
   );
 

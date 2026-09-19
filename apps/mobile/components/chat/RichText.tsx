@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Platform, Text as RNText, StyleSheet, View, type TextStyle } from 'react-native';
 import { parseMarkdown, type Inline } from '../../lib/markdown';
-import { useTheme, type Theme } from '../../theme';
+import { font, useTheme, type Theme } from '../../theme';
 import { Text } from '../Text';
 
 /**
@@ -46,14 +46,14 @@ function Spans({ inlines, theme }: { inlines: Inline[]; theme: Theme }) {
     <>
       {inlines.map((span, index) => {
         const style: TextStyle[] = [];
-        if (span.bold) style.push({ fontWeight: '600', color: theme.colors.textPrimary, fontVariant: ['tabular-nums'] });
+        if (span.bold) style.push({ fontFamily: font.semibold, color: theme.colors.textPrimary, fontVariant: ['tabular-nums'] });
         if (span.italic) style.push({ fontStyle: 'italic' });
         if (span.code) {
           style.push({
             fontFamily: MONO,
             fontSize: 14,
             color: theme.colors.textSecondary,
-            backgroundColor: theme.colors.surface,
+            backgroundColor: theme.colors.surfaceMuted,
           });
         }
 

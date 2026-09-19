@@ -43,7 +43,7 @@ function Dot({ active }: { active: boolean }) {
     opacity: withTiming(active ? 1 : 0.35, { duration: 180 }),
   }));
 
-  return <Animated.View style={[styles.dot, { backgroundColor: theme.colors.textPrimary }, style]} />;
+  return <Animated.View style={[styles.dot, { backgroundColor: theme.colors.brand }, style]} />;
 }
 
 const styles = StyleSheet.create({

@@ -1,20 +1,17 @@
 import { displayUsd, parseUsd, type Plan } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
 import { useTheme } from '../theme';
+import { Icon } from './Icon';
 import { Text } from './Text';
+import { Tile } from './Tile';
 
 /**
  * The confirmation card.
  *
  * Every money-moving action renders exactly this: what leaves, where it goes,
- * the fee, and anything worth a second look. No exceptions, agent-initiated or
- * manual — the user learns one shape and can read it at a glance.
- *
- * Everything here comes from the server's plan, never from what the user typed.
- * If they typed "10" and the plan says 1,000, the card shows 1,000.
- *
- * The fee is one number in dollars. Gas is never broken out and never a
- * decision.
+ * the fee, and anything worth a second look. Everything comes from the server's
+ * plan, never from what the user typed. The fee is one number in dollars; gas
+ * is never broken out and never a decision.
  */
 export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: number }) {
   const theme = useTheme();
@@ -25,10 +22,10 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
   return (
     <View style={{ gap: theme.space.xl }}>
       <View style={styles.hero}>
-        <Text variant="label" tone="tertiary">
+        <Text variant="label" tone="secondary">
           You're sending
         </Text>
-        <Text variant="balance" style={styles.amount}>
+        <Text variant="balance">
           {outflow?.usdValue ? displayUsd(outflow.usdValue) : `${outflow?.displayAmount} ${outflow?.token.symbol}`}
         </Text>
         <Text variant="body" tone="secondary">
@@ -36,39 +33,27 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
         </Text>
       </View>
 
-      <View
-        style={[
-          styles.details,
-          { backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg, padding: theme.space.lg },
-        ]}
-      >
+      <Tile style={{ padding: theme.space.lg, gap: 14 }}>
         <Row label="Amount" value={`${outflow?.displayAmount ?? '0'} ${outflow?.token.symbol ?? ''}`} />
         <Row label="Network fee" value={fee} />
         {plan.recipient && plan.recipient.display !== plan.recipient.address ? (
           <Row label="Address" value={`${plan.recipient.address.slice(0, 10)}…${plan.recipient.address.slice(-8)}`} />
         ) : null}
-      </View>
+      </Tile>
 
       {plan.warnings.length > 0 ? (
         <View style={{ gap: theme.space.sm }}>
-          {plan.warnings.map((warning) => (
-            <View
-              key={warning.code}
-              style={[
-                styles.warning,
-                {
-                  borderRadius: theme.radius.md,
-                  padding: theme.space.md,
-                  backgroundColor: theme.colors.surface,
-                  borderLeftColor: warning.severity === 'danger' ? theme.colors.danger : theme.colors.warning,
-                },
-              ]}
-            >
-              <Text variant="caption" tone={warning.severity === 'danger' ? 'danger' : 'secondary'}>
-                {warning.message}
-              </Text>
-            </View>
-          ))}
+          {plan.warnings.map((warning) => {
+            const danger = warning.severity === 'danger';
+            return (
+              <Tile key={warning.code} tint={danger ? 'danger' : 'warning'} radius={theme.radius.md} style={styles.warning}>
+                <Icon name="alert-circle-outline" size={18} tone={danger ? 'danger' : 'warning'} />
+                <Text variant="caption" tone={danger ? 'danger' : 'warning'} style={{ flex: 1 }}>
+                  {warning.message}
+                </Text>
+              </Tile>
+            );
+          })}
         </View>
       ) : null}
 
@@ -97,19 +82,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  amount: {
-    marginVertical: 4,
-  },
-  details: {
-    gap: 14,
-  },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   warning: {
-    borderLeftWidth: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
   },
   expiry: {
     textAlign: 'center',

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { api } from '../lib/api';
@@ -64,7 +65,7 @@ export default function LimitsScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ gap: theme.space.sm }}>
-          <Text variant="title">Spending limits</Text>
+          <ScreenHeader title="Spending limits" onClose={() => router.back()} />
           <Text variant="body" tone="secondary">
             The most Blocky's assistant can propose. You still approve every send yourself.
           </Text>
@@ -90,7 +91,6 @@ export default function LimitsScreen() {
 
         <View style={{ gap: theme.space.md }}>
           <Button label="Save" disabled={!changed || Boolean(problem)} loading={saving} onPress={save} />
-          <Button label="Cancel" variant="quiet" onPress={() => router.back()} />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -11,13 +11,8 @@ export interface BalanceDisplayProps {
 }
 
 /**
- * The balance.
- *
- * One number, no token list, no network badge. Sized to share the screen with
- * the chat: still the first thing the eye lands on, but not the whole screen.
- *
- * Dollars and cents are split into separate weights so the eye lands on the
- * magnitude first.
+ * The balance. One number, no token list, no network badge. Dollars and cents
+ * at one size, cents in a lighter tone so the eye lands on the magnitude first.
  */
 export function BalanceDisplay({ totalUsd, loading = false, onPress }: BalanceDisplayProps) {
   const formatted = displayUsd(totalUsd);
@@ -26,15 +21,14 @@ export function BalanceDisplay({ totalUsd, loading = false, onPress }: BalanceDi
 
   return (
     <Pressable onPress={onPress} disabled={!onPress} style={styles.container}>
-      <Text variant="label" tone="tertiary" style={styles.label}>
+      <Text variant="caption" tone="secondary">
         Balance
       </Text>
-
       <View style={styles.amountRow} accessibilityRole="text" accessibilityLabel={`Balance ${formatted}`}>
-        <Text variant="balance" style={[styles.dollars, dim]}>
+        <Text variant="balance" style={dim}>
           {dollars}
         </Text>
-        <Text variant="balance" tone="tertiary" style={[styles.cents, dim]}>
+        <Text variant="balance" tone="tertiary" style={dim}>
           .{cents}
         </Text>
       </View>
@@ -45,22 +39,9 @@ export function BalanceDisplay({ totalUsd, loading = false, onPress }: BalanceDi
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-  },
-  label: {
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    marginBottom: 2,
+    gap: 2,
   },
   amountRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  dollars: {
-    fontSize: 44,
-    lineHeight: 52,
-  },
-  cents: {
-    fontSize: 30,
-    lineHeight: 52,
   },
 });

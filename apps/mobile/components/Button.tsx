@@ -1,16 +1,17 @@
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator } from 'react-native';
 import { useTheme } from '../theme';
-import { PressableScale, type PressableScaleProps } from './PressableScale';
+import { BlockPressable, type BlockPressableProps } from './BlockPressable';
+import { PressableScale } from './PressableScale';
 import { Text } from './Text';
 
 export interface ButtonProps {
   label: string;
   onPress?: () => void;
-  variant?: 'primary' | 'secondary' | 'quiet';
+  /** `danger` is for signing out and the like: a plain block with a red label. */
+  variant?: 'primary' | 'secondary' | 'quiet' | 'danger';
   loading?: boolean;
   disabled?: boolean;
-  /** `heavy` is for irreversible actions only — see PressableScale. */
-  haptic?: PressableScaleProps['haptic'];
+  haptic?: BlockPressableProps['haptic'];
   /** `compact` for buttons inside cards. */
   size?: 'regular' | 'compact';
 }
@@ -25,48 +26,45 @@ export function Button({
   size = 'regular',
 }: ButtonProps) {
   const theme = useTheme();
+  // A loading button must not accept a second tap: that is how a send gets submitted twice.
+  const blocked = disabled || loading;
 
-  const background =
-    variant === 'primary' ? theme.colors.accent : variant === 'secondary' ? theme.colors.surface : 'transparent';
-  const tone = variant === 'primary' ? 'inverted' : variant === 'quiet' ? 'secondary' : 'primary';
-
-  return (
-    <PressableScale
-      onPress={onPress}
-      // A loading button must not accept a second tap: that is how a send gets
-      // submitted twice.
-      disabled={disabled || loading}
-      haptic={haptic}
-      accessibilityLabel={label}
-      style={[
-        styles.button,
-        size === 'compact' && styles.compact,
-        { backgroundColor: background, borderRadius: size === 'compact' ? theme.radius.md : theme.radius.lg },
-      ]}
-    >
-      <View style={styles.inner}>
+  if (variant === 'quiet') {
+    return (
+      <PressableScale onPress={onPress} disabled={blocked} haptic={haptic} accessibilityLabel={label} style={{ minHeight: 48, justifyContent: 'center', alignItems: 'center' }}>
         {loading ? (
-          <ActivityIndicator color={variant === 'primary' ? theme.colors.textInverted : theme.colors.textSecondary} />
+          <ActivityIndicator color={theme.colors.textSecondary} />
         ) : (
-          <Text variant="bodyStrong" tone={tone}>
+          <Text variant="bodyStrong" tone="secondary">
             {label}
           </Text>
         )}
-      </View>
-    </PressableScale>
+      </PressableScale>
+    );
+  }
+
+  const primary = variant === 'primary';
+  const tone = primary ? 'inverted' : variant === 'danger' ? 'danger' : 'primary';
+
+  return (
+    <BlockPressable
+      onPress={onPress}
+      disabled={blocked}
+      haptic={haptic}
+      accessibilityLabel={label}
+      height={size === 'compact' ? 44 : 56}
+      radius={size === 'compact' ? theme.radius.md : theme.radius.lg}
+      fill={primary ? theme.colors.accent : theme.colors.surface}
+      edge={primary ? theme.colors.accentEdge : theme.colors.borderStrong}
+      stroke={primary ? undefined : theme.colors.border}
+    >
+      {loading ? (
+        <ActivityIndicator color={primary ? theme.colors.accentText : theme.colors.textSecondary} />
+      ) : (
+        <Text variant="bodyStrong" tone={tone} style={{ paddingHorizontal: 20 }}>
+          {label}
+        </Text>
+      )}
+    </BlockPressable>
   );
 }
-
-const styles = StyleSheet.create({
-  button: {
-    minHeight: 56,
-    justifyContent: 'center',
-  },
-  compact: {
-    minHeight: 42,
-  },
-  inner: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-});

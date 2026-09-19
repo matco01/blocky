@@ -206,16 +206,28 @@ money), a block of cheddar (money slang, maybe too jokey), a delivery box
 (sending as a package), a tiny vault. Avoid Lego-style studs (protected
 shape), dice (gambling) and pixel/voxel cubes (reads as Minecraft).
 
-### Palette: autumn wood and sprout
+### The Block system
 
-Being tried in [`theme/tokens.ts`](apps/mobile/theme/tokens.ts). Taken from the
-mascot: bark and walnut browns for the dark ground, birch and parchment cream
-for the light one, **sprout green as the single signature colour** (primary
-buttons and highlights only), amber for warnings, rust for errors, leaf green
-for money coming in. The card preview is deep forest with an amber glow.
+Defined in [`theme/tokens.ts`](apps/mobile/theme/tokens.ts); nothing reads a raw
+hex outside it.
 
-The point is to look like no other wallet: nothing cold, grey or blue, and
-deliberately far from Phantom's purple, which the first palette was too close to.
+- **Everything is a tile or a block.** Tiles are flat surfaces with a stroke
+  (2 px light, 1 px dark) and no shadow. Blocks are the tappable things: rounded
+  squares — never pills — sitting on a 4 px darker edge that collapses when
+  pressed ([`BlockPressable`](apps/mobile/components/BlockPressable.tsx)). The
+  edge is only ever on something tappable, so it reads as "press me".
+- **Green is the action, maroon is the identity, red is danger.** Both brand
+  colours come from the mascot — maroon is its body, the leaf green a fresher
+  descendant of its olive leaf. Maroon is never a button: a dark-red "Send $50"
+  next to green money-in and red errors reads as a warning to someone new to
+  all this. It carries the wordmark, the card and the user's own chat bubbles.
+- **Figtree** for everything, 800 for headlines. **Ionicons** only.
+- **Blocky is fixed above the chat**, beside a speech bubble that only appears
+  when there is nothing else to read (the empty state, "Thinking…") — never a
+  second place where replies show up. He shrinks once the conversation starts
+  and docks smaller when you scroll or type.
+- **No glass, no blur.** `expo-glass-effect` is iOS-26-only and renders a plain
+  view on Android; a design that only looks right on one platform isn't one.
 
 ## Things that will bite you
 

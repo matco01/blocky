@@ -1,4 +1,13 @@
+import {
+  Figtree_400Regular,
+  Figtree_500Medium,
+  Figtree_600SemiBold,
+  Figtree_700Bold,
+  Figtree_800ExtraBold,
+} from '@expo-google-fonts/figtree';
+import { Ionicons } from '@expo/vector-icons';
 import { PrivyProvider, usePrivy } from '@privy-io/expo';
+import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -45,13 +54,25 @@ function Gate() {
   const theme = useTheme();
   const { isReady, user, getAccessToken } = usePrivy();
 
+  // Held behind the same loading view as Privy, so the first frame is already in
+  // the right face. A load *error* counts as loaded: better the system font than
+  // an app that never opens.
+  const [fontsLoaded, fontError] = useFonts({
+    Figtree_400Regular,
+    Figtree_500Medium,
+    Figtree_600SemiBold,
+    Figtree_700Bold,
+    Figtree_800ExtraBold,
+    ...Ionicons.font,
+  });
+
   // Every API call carries a fresh Privy access token. Privy refreshes it; we
   // just ask for the current one at request time.
   useEffect(() => {
     setTokenGetter(getAccessToken);
   }, [getAccessToken]);
 
-  if (!isReady) {
+  if (!isReady || (!fontsLoaded && !fontError)) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.background }}>
         <ActivityIndicator color={theme.colors.textTertiary} />

@@ -18,14 +18,14 @@ export function BlockyCard() {
       accessibilityLabel="Blocky card preview, coming soon"
     >
       {/* Depth: the mascot's two colours, bleeding off the edges. */}
-      <View style={[styles.glow, styles.glowTop, { backgroundColor: palette.sprout500 }]} />
+      <View style={[styles.glow, styles.glowTop, { backgroundColor: palette.leaf700 }]} />
       <View style={[styles.glow, styles.glowBottom, { backgroundColor: palette.maroon600 }]} />
 
       <View style={styles.top}>
         <Text variant="heading" style={styles.onCard}>
           Blocky
         </Text>
-        <View style={[styles.chip, { borderRadius: theme.radius.pill }]}>
+        <View style={[styles.chip, { borderRadius: theme.radius.sm }]}>
           <Text variant="caption" style={styles.onCard}>
             Coming soon
           </Text>
@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.22)',
   },
   onCard: {
-    color: palette.cream50,
+    color: palette.white,
   },
   muted: {
     opacity: 0.8,

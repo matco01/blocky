@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useTheme } from '../../theme';
+import { Icon } from '../Icon';
 import { Text } from '../Text';
 import { RichText } from './RichText';
 
@@ -8,9 +9,9 @@ import { RichText } from './RichText';
  * The three kinds of chat row.
  *
  * The agent's replies are not bubbles. A reply is the content of the screen,
- * set like writing, full width. Only the user's messages sit in a bubble —
- * a quiet one, on the right — which keeps the conversation readable at a glance
- * without looking like a support widget.
+ * set like writing, full width. Only the user's messages sit in a bubble — a
+ * flat brand-tinted one on the right, no stroke (an outlined bubble reads as a
+ * disabled field).
  */
 
 const ENTER = FadeInDown.duration(260);
@@ -20,12 +21,7 @@ export function UserMessage({ text }: { text: string }) {
 
   return (
     <Animated.View entering={ENTER} style={styles.userRow}>
-      <View
-        style={[
-          styles.userBubble,
-          { backgroundColor: theme.colors.bubble, borderRadius: theme.radius.lg },
-        ]}
-      >
+      <View style={[styles.userBubble, { backgroundColor: theme.colors.brandTint, borderRadius: 18 }]}>
         <Text variant="body" selectable>
           {text}
         </Text>
@@ -68,8 +64,8 @@ export function ErrorMessage({ text, onRetry }: { text: string; onRetry: () => v
         accessibilityLabel={`${text} Tap to retry.`}
         style={[styles.error, { gap: theme.space.sm }]}
       >
-        <View style={[styles.errorDot, { backgroundColor: theme.colors.warning }]} />
-        <Text variant="caption" tone="secondary" style={styles.errorText}>
+        <Icon name="alert-circle-outline" size={16} tone="warning" />
+        <Text variant="caption" tone="secondary" style={{ flex: 1 }}>
           {text}{' '}
           <Text variant="caption" tone="accent">
             Tap to retry
@@ -84,22 +80,14 @@ const styles = StyleSheet.create({
   userRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    paddingLeft: 48,
+    paddingLeft: 56,
   },
   userBubble: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
   },
   error: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  errorDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  errorText: {
-    flex: 1,
   },
 });

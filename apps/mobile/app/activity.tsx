@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActivityRow } from '../components/ActivityRow';
-import { PressableScale } from '../components/PressableScale';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { api, type ActivityItem } from '../lib/api';
 import { useTheme } from '../theme';
@@ -45,12 +45,7 @@ export default function ActivityScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: theme.space.xl }]}>
-        <Text variant="title">Activity</Text>
-        <PressableScale onPress={() => router.back()} accessibilityLabel="Done" haptic="none">
-          <Text variant="bodyStrong" tone="accent">
-            Done
-          </Text>
-        </PressableScale>
+        <ScreenHeader title="Activity" onClose={() => router.back()} />
       </View>
 
       <ScrollView
@@ -95,9 +90,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 24,
     paddingBottom: 8,
   },

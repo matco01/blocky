@@ -49,11 +49,13 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.colors.background }]}
     >
-      <View style={[styles.content, { paddingTop: insets.top + 96, paddingBottom: insets.bottom + 24 }]}>
+      <View style={[styles.content, { paddingTop: insets.top + 72, paddingBottom: insets.bottom + 24 }]}>
         <View style={{ alignItems: 'center', gap: theme.space.lg }}>
-          <Mascot pose="neutral" size={112} />
+          <Mascot pose="happy" size={140} />
           <View style={{ alignItems: 'center', gap: theme.space.sm }}>
-            <Text variant="title">Blocky</Text>
+            <Text variant="title" tone="brand" style={{ fontSize: 34, lineHeight: 40 }}>
+              Blocky
+            </Text>
             <Text variant="body" tone="secondary" style={styles.center}>
               Your money, and an assistant that moves it for you.
             </Text>

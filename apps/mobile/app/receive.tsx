@@ -6,7 +6,9 @@ import { StyleSheet, View } from 'react-native';
 import QRCodeStyled from 'react-native-qrcode-styled';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
+import { Tile } from '../components/Tile';
 import { useSmartAccount } from '../lib/smart-account';
 import { useTheme } from '../theme';
 
@@ -14,9 +16,7 @@ import { useTheme } from '../theme';
  * Receive.
  *
  * An address, a QR code, and a copy button. The one piece of chain detail the
- * user genuinely needs is here: which network to send on. Getting that wrong
- * doesn't lose the money — it's the same address on every EVM chain — but it
- * lands somewhere this app doesn't show yet, which feels exactly like losing it.
+ * user genuinely needs is here: which network to send on.
  */
 export default function ReceiveScreen() {
   const theme = useTheme();
@@ -45,7 +45,7 @@ export default function ReceiveScreen() {
       ]}
     >
       <View style={{ gap: theme.space.sm }}>
-        <Text variant="title">Receive</Text>
+        <ScreenHeader title="Receive" onClose={() => router.back()} />
         <Text variant="body" tone="secondary">
           Send USDC on Arc Testnet to this address.
         </Text>
@@ -54,19 +54,16 @@ export default function ReceiveScreen() {
       <View style={styles.middle}>
         {address ? (
           <>
-            <View
-              style={[
-                styles.qr,
-                { backgroundColor: '#FFFFFF', borderRadius: theme.radius.xl, padding: theme.space.lg },
-              ]}
-            >
-              {/* Always dark-on-white, whatever the theme: scanners read contrast, not style. */}
+            {/* Always dark-on-white, whatever the theme: scanners read contrast, not style. */}
+            <Tile radius={theme.radius.xxl} style={[styles.qr, { backgroundColor: '#FFFFFF', padding: theme.space.lg }]}>
               <QRCodeStyled data={address} pieceSize={7} pieceBorderRadius={2} color="#0B0B0F" />
-            </View>
+            </Tile>
 
-            <Text variant="body" tabular style={styles.address} selectable>
-              {address}
-            </Text>
+            <Tile muted radius={theme.radius.md} style={{ paddingHorizontal: theme.space.md, paddingVertical: theme.space.sm }}>
+              <Text variant="caption" tabular style={styles.address} selectable>
+                {address}
+              </Text>
+            </Tile>
           </>
         ) : (
           <Text variant="body" tone="tertiary">
@@ -77,7 +74,6 @@ export default function ReceiveScreen() {
 
       <View style={{ gap: theme.space.md }}>
         <Button label={copied ? 'Copied' : 'Copy address'} onPress={copy} disabled={!address} />
-        <Button label="Done" variant="quiet" onPress={() => router.back()} />
       </View>
     </View>
   );
@@ -99,6 +95,5 @@ const styles = StyleSheet.create({
   },
   address: {
     textAlign: 'center',
-    paddingHorizontal: 12,
   },
 });
