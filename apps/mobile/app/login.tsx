@@ -51,7 +51,7 @@ export default function LoginScreen() {
     >
       <View style={[styles.content, { paddingTop: insets.top + 72, paddingBottom: insets.bottom + 24 }]}>
         <View style={{ alignItems: 'center', gap: theme.space.lg }}>
-          <Mascot pose="happy" size={140} />
+          <Mascot pose="neutral" size={140} idle />
           <View style={{ alignItems: 'center', gap: theme.space.sm }}>
             <Text variant="title" tone="brand" style={{ fontSize: 34, lineHeight: 40 }}>
               Blocky

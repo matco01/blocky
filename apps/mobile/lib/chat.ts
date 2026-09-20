@@ -1,6 +1,7 @@
 import type { Plan, PolicyDecision } from '@blocky/shared';
 import { useCallback, useRef, useState } from 'react';
 import { ApiError, api, type AgentResponse, type ChatTurn } from './api';
+import { ALL_CAPABILITIES, type Capability } from './capabilities';
 
 /**
  * Chat state for the home screen.
@@ -20,6 +21,8 @@ export type ChatMessage =
       decision: PolicyDecision | null;
       /** Why a request could not become a plan, in words the user can act on. */
       note: string | null;
+      /** Tappable actions, shown under the text. Set only by `showCapabilities`. */
+      capabilities: Capability[] | null;
     }
   | {
       id: string;
@@ -89,7 +92,26 @@ export function useChat() {
     [ask],
   );
 
-  return { messages, busy, send, retry };
+  /**
+   * "What can you do?" — answered locally, as tappable actions, instead of a
+   * paragraph from the model. The list is fixed and already known; there is
+   * nothing an LLM round-trip would add except latency and a wall of text.
+   */
+  const showCapabilities = useCallback(() => {
+    if (busyRef.current) return;
+    append({ id: id(), role: 'user', text: 'What can you do?' });
+    append({
+      id: id(),
+      role: 'assistant',
+      text: "Here's what I can help with:",
+      plan: null,
+      decision: null,
+      note: null,
+      capabilities: ALL_CAPABILITIES,
+    });
+  }, [append]);
+
+  return { messages, busy, send, retry, showCapabilities };
 }
 
 function fromResponse(response: AgentResponse): ChatMessage {
@@ -107,6 +129,7 @@ function fromResponse(response: AgentResponse): ChatMessage {
     plan: response.kind === 'plan' ? response.plan : null,
     decision: response.kind === 'plan' ? response.decision : null,
     note,
+    capabilities: null,
   };
 }
 

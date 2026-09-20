@@ -14,7 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { displayUsd } from '@blocky/shared';
 import { ActionButton } from '../ActionButton';
 import { BalanceDisplay } from '../BalanceDisplay';
-import { ChatEmpty, type Capability } from '../chat/ChatEmpty';
+import { CapabilityChips } from '../chat/CapabilityChips';
+import { ChatEmpty } from '../chat/ChatEmpty';
 import { ChatInput } from '../chat/ChatInput';
 import { ChatPlanCard } from '../chat/ChatPlanCard';
 import { MascotStage, type StageState } from '../chat/MascotStage';
@@ -24,6 +25,7 @@ import { PageDots, type PageProps } from '../PageDots';
 import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
 import { ApiError, api } from '../../lib/api';
+import type { Capability } from '../../lib/capabilities';
 import { useChat } from '../../lib/chat';
 import { handOffPlan, useSentPlans } from '../../lib/handoff';
 import { useKeyboardVisible } from '../../lib/keyboard';
@@ -56,7 +58,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const lastBalance = useRef<string | null>(null);
   const [focused, setFocused] = useState(true);
 
-  const { messages, busy, send, retry } = useChat();
+  const { messages, busy, send, retry, showCapabilities } = useChat();
   const isSent = useSentPlans();
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
@@ -64,16 +66,34 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const [scrolled, setScrolled] = useState(false);
   const typing = useKeyboardVisible();
 
+  // Whether the user is at (or near) the bottom of the conversation right now.
+  // A new message should only pull the view down when they were already
+  // there — otherwise reading back through the conversation gets yanked back
+  // to the bottom the moment a reply streams in.
+  const atBottomRef = useRef(true);
+
+  const submit = useCallback(
+    (text: string) => {
+      // Sending is always "take me to the latest" — the same as any chat app.
+      atBottomRef.current = true;
+      send(text);
+    },
+    [send],
+  );
+
   const pickCapability = useCallback(
     (capability: Capability) => {
       if (capability.action.kind === 'send') {
-        send(capability.action.text);
-      } else {
+        submit(capability.action.text);
+      } else if (capability.action.kind === 'prefill') {
         setDraft(capability.action.text);
         inputRef.current?.focus();
+      } else {
+        atBottomRef.current = true;
+        showCapabilities();
       }
     },
-    [send],
+    [submit, showCapabilities],
   );
 
   const fetchBalance = useCallback(async () => {
@@ -115,7 +135,9 @@ export function HomePage({ page, onPageChange }: PageProps) {
 
   // A threshold, not a per-frame value: the stage re-lays out once, not continuously.
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    setScrolled(event.nativeEvent.contentOffset.y > DOCK_AT);
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    setScrolled(contentOffset.y > DOCK_AT);
+    atBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 40;
   }, []);
 
   const shown =
@@ -203,9 +225,14 @@ export function HomePage({ page, onPageChange }: PageProps) {
         keyboardShouldPersistTaps="handled"
         onScroll={onScroll}
         scrollEventThrottle={64}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-        // The visible area shrinks when the keyboard opens; keep the latest message in view.
-        onLayout={() => scrollRef.current?.scrollToEnd({ animated: false })}
+        onContentSizeChange={() => {
+          if (atBottomRef.current) scrollRef.current?.scrollToEnd({ animated: true });
+        }}
+        // The visible area shrinks when the keyboard opens; keep the latest message
+        // in view — but only if that's where the user already was.
+        onLayout={() => {
+          if (atBottomRef.current) scrollRef.current?.scrollToEnd({ animated: false });
+        }}
       >
         {messages.length === 0 && !busy ? (
           <ChatEmpty onPick={pickCapability} />
@@ -233,6 +260,9 @@ export function HomePage({ page, onPageChange }: PageProps) {
                         }}
                       />
                     ) : null}
+                    {message.capabilities ? (
+                      <CapabilityChips capabilities={message.capabilities} onPick={pickCapability} />
+                    ) : null}
                   </AssistantMessage>
                 );
               }
@@ -250,7 +280,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
           paddingBottom: typing ? theme.space.sm : insets.bottom + theme.space.sm,
         }}
       >
-        <ChatInput value={draft} onChangeText={setDraft} onSend={send} busy={busy} inputRef={inputRef} />
+        <ChatInput value={draft} onChangeText={setDraft} onSend={submit} busy={busy} inputRef={inputRef} />
       </View>
     </KeyboardAvoidingView>
   );

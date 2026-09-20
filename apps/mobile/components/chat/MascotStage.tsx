@@ -9,7 +9,7 @@ import { ThinkingDots } from './TypingIndicator';
 export type StageState = 'empty' | 'busy' | 'conversation' | 'docked';
 
 const SIZE: Record<StageState, number> = { empty: 96, busy: 96, conversation: 64, docked: 44 };
-const POSE: Record<StageState, MascotPose> = { empty: 'happy', busy: 'neutral', conversation: 'neutral', docked: 'neutral' };
+const POSE: Record<StageState, MascotPose> = { empty: 'neutral', busy: 'neutral', conversation: 'neutral', docked: 'neutral' };
 
 /**
  * Blocky and, when there is nothing else to read, his speech bubble.
@@ -26,7 +26,7 @@ export function MascotStage({ state, busySize }: { state: StageState; busySize?:
 
   return (
     <Animated.View layout={LinearTransition.duration(180)} style={[styles.row, { gap: theme.space.md }]}>
-      <Mascot pose={POSE[state]} size={size} />
+      <Mascot pose={POSE[state]} size={size} idle />
 
       {bubble ? (
         <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)} style={styles.bubbleWrap}>
