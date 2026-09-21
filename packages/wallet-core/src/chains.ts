@@ -207,6 +207,16 @@ export function addressUrl(id: ChainId, address: Address): string {
   return `${CHAINS[id].explorerUrl}/address/${address}`;
 }
 
+/**
+ * ERC-4337 EntryPoint v0.7, at the same address on every chain that has it.
+ *
+ * Worth naming here because on Arc it shows up as a *counterparty*: gas is
+ * native USDC, so every user operation transfers its prefund to this address
+ * and the explorer reports that as an ordinary USDC transfer. Anything reading
+ * transfers as user activity has to know this one is the fee.
+ */
+export const ENTRY_POINT_V07: Address = '0x0000000071727de22e5e9d8baf0edac6f37da032';
+
 export const GATEWAY_CHAINS = Object.values(CHAINS).filter((c) => c.gateway);
 export const PAYMASTER_CHAINS = Object.values(CHAINS).filter((c) => c.paymaster);
 

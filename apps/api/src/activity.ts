@@ -1,3 +1,4 @@
+import { ENTRY_POINT_V07 } from '@blocky/wallet-core';
 import { formatUnits, type Address } from '@blocky/shared';
 import type { Execution } from './store';
 
@@ -98,6 +99,17 @@ export function mergeActivity(
     const sent = transfer.from === self;
     const received = transfer.to === self;
     if (!sent && !received) continue;
+
+    /*
+     * Gas, not a send. On Arc the native token is USDC, so a user operation
+     * pays its prefund as a USDC transfer to the EntryPoint — which the
+     * explorer reports like any other transfer, in the same transaction as the
+     * real one. Listing it would put a second row under every send, addressed
+     * to a contract the user has never heard of, usually for $0.00.
+     *
+     * The fee belongs on the confirmation card and nowhere else.
+     */
+    if (sent && transfer.to === ENTRY_POINT_V07) continue;
 
     const execution = sent ? executions.find((e) => e.txHash === transfer.txHash) : undefined;
     if (execution) seen.add(execution.id);
