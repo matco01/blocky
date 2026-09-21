@@ -26,10 +26,20 @@ import type { Store } from './store';
  *
  * message → intent → plan → policy decision, against the user's real wallet.
  * Signing happens on the device: the plan is stored, the app shows the card,
- * and the user approves with Face ID. Unattended execution needs the session
- * key's on-chain validator, which is not installed yet — so even an
- * `auto_execute` decision comes back for the user to approve, and the response
- * says so rather than implying a capability that does not exist.
+ * and the user approves with Face ID.
+ *
+ * Every plan comes back for the user to approve, including `auto_execute`.
+ * That outcome means the plan cleared the user's own limits, so the app can
+ * offer it as one tap instead of a review screen — it does not mean the agent
+ * may sign.
+ *
+ * This is a deliberate boundary, not an unfinished one. A key our server can
+ * sign with alone would be sufficient by itself to move a user's funds, which
+ * is the test both FinCEN ("total independent control") and MiCA ("the
+ * exercise of control over such crypto-assets on behalf of clients") use to
+ * decide whether you are custodying. Keeping the user's fingerprint on every
+ * transfer is what keeps Blocky a software provider. Revisit only with
+ * counsel, and preferably as a co-signer that is necessary but not sufficient.
  */
 
 /**
@@ -288,6 +298,14 @@ function statusFor(decision: PolicyDecision): string {
     case 'require_confirmation':
       return 'Needs your approval.';
     case 'auto_execute':
-      return "Within your limits — but unattended sending needs the on-chain session key, which isn't installed yet, so this needs your approval too.";
+      /*
+       * Deliberately not "sending now". `auto_execute` means the plan cleared
+       * the user's own limits, so the app offers it as a single tap instead of
+       * a review screen — it does not mean the agent may sign. Nothing moves
+       * money without the user's fingerprint, and that is a product boundary
+       * rather than a missing feature: a key that can move funds on its own
+       * would put us on the wrong side of the custody line.
+       */
+      return 'Within your limits — one tap to send.';
   }
 }

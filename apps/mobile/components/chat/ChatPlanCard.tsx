@@ -9,20 +9,28 @@ import { Tile } from '../Tile';
 /**
  * A send the agent proposed, as a card in the chat.
  *
- * It never executes from here. "Review & send" opens the same confirmation
- * screen as a manual send — one place where money is approved. A plan the
- * user's limits refuse shows why and has no button at all.
+ * It never executes from here. The button opens the same confirmation screen a
+ * manual send uses — one place where money is approved. A plan the user's
+ * limits refuse shows why and has no button at all.
+ *
+ * When the policy engine says the plan is already inside the user's limits, the
+ * button skips the review step and goes straight to the fingerprint. The card
+ * above it is the review: amount, recipient, fee and any warnings are all here,
+ * and the prompt names the amount again before anything is signed. What is
+ * saved is a redundant tap, not the approval — the agent still cannot move
+ * money on its own.
  */
 export function ChatPlanCard({
   plan,
   decision,
   sent,
-  onReview,
+  onApprove,
 }: {
   plan: Plan;
   decision: PolicyDecision | null;
   sent: boolean;
-  onReview: () => void;
+  /** `fast` skips the review step; it never skips the fingerprint. */
+  onApprove: (fast: boolean) => void;
 }) {
   const theme = useTheme();
 
@@ -30,12 +38,15 @@ export function ChatPlanCard({
   const amount = outflow?.usdValue ? displayUsd(outflow.usdValue) : `${outflow?.displayAmount} ${outflow?.token.symbol}`;
   const fee = parseUsd(plan.fee.totalUsd) === 0n ? 'Free' : displayUsd(plan.fee.totalUsd);
   const denied = decision?.outcome === 'deny';
+  const withinLimits = decision?.outcome === 'auto_execute';
 
   const status = denied
     ? { label: 'Blocked', tone: 'warning' as const }
     : sent
       ? { label: 'Sent', tone: 'positive' as const }
-      : { label: 'Needs approval', tone: 'tertiary' as const };
+      : withinLimits
+        ? { label: 'Within your limits', tone: 'secondary' as const }
+        : { label: 'Needs approval', tone: 'tertiary' as const };
 
   return (
     <Tile style={{ padding: theme.space.lg }}>
@@ -93,7 +104,12 @@ export function ChatPlanCard({
 
       {!denied && !sent ? (
         <View style={{ marginTop: theme.space.lg }}>
-          <Button label="Review & send" size="compact" haptic="medium" onPress={onReview} />
+          <Button
+            label={withinLimits ? `Send ${amount}` : 'Review & send'}
+            size="compact"
+            haptic={withinLimits ? 'heavy' : 'medium'}
+            onPress={() => onApprove(withinLimits)}
+          />
         </View>
       ) : null}
     </Tile>

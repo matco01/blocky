@@ -2,7 +2,7 @@ import { displayUsd, isDecimalString, isPlanExpired, type Plan, type RecipientRe
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
@@ -46,14 +46,28 @@ const STAGE_COPY: Record<SendStage, string> = {
  *
  * A plan proposed in the chat arrives by id and starts at the review step.
  * This is the only screen that approves money, whoever proposed it.
+ *
+ * A plan the user's own limits already cleared arrives with `autosend` and goes
+ * straight to the biometric prompt, skipping the review tap. That is a shortcut
+ * through the *screen*, never through the approval: the prompt still names the
+ * amount and the recipient, and nothing is signed without a fingerprint. The
+ * user is the authority on every transfer either way — which is what keeps this
+ * a wallet and not a custodian.
  */
 export default function SendScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { sendCalls, ready } = useSmartAccount();
 
-  const { planId } = useLocalSearchParams<{ planId?: string }>();
+  const { planId, autosend } = useLocalSearchParams<{ planId?: string; autosend?: string }>();
   const [handedOff] = useState(() => getHandedOffPlan(planId));
+
+  /*
+   * Fires once. If the user dismisses the fingerprint prompt we fall back to
+   * the ordinary review screen rather than asking again — a prompt that
+   * reappears on its own teaches people to approve without reading.
+   */
+  const autoSendPending = useRef(autosend === '1' && Boolean(handedOff));
 
   const [step, setStep] = useState<Step>(() =>
     handedOff ? { name: 'review', plan: handedOff } : { name: 'form' },
@@ -141,6 +155,16 @@ export default function SendScreen() {
     const recorded = await reportWithRetry(plan.id, txHash);
     setStep({ name: 'done', plan, recorded });
   }
+
+  /* Straight to the fingerprint for a plan the user's limits already cleared. */
+  useEffect(() => {
+    if (!autoSendPending.current) return;
+    // The smart account has to be ready before anything can be signed.
+    if (!ready || step.name !== 'review') return;
+
+    autoSendPending.current = false;
+    void send(step.plan);
+  }, [ready, step]);
 
   return (
     <KeyboardAvoidingView

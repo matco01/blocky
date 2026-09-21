@@ -254,9 +254,12 @@ export function HomePage({ page, onPageChange }: PageProps) {
                         plan={plan}
                         decision={message.decision}
                         sent={isSent(plan.id)}
-                        onReview={() => {
+                        onApprove={(fast) => {
                           handOffPlan(plan);
-                          router.push({ pathname: '/send', params: { planId: plan.id } });
+                          router.push({
+                            pathname: '/send',
+                            params: { planId: plan.id, ...(fast ? { autosend: '1' } : {}) },
+                          });
                         }}
                       />
                     ) : null}

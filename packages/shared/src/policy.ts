@@ -23,8 +23,15 @@ import { AddressSchema, DecimalSchema } from './primitives';
 
 export const PolicySchema = z.object({
   /**
-   * Master switch for agent autonomy. When false the agent can still *propose*
-   * plans, but every one of them needs a human tap. Off by default.
+   * Whether the agent's proposals may skip the review screen.
+   *
+   * Every transfer needs the user's fingerprint either way — the agent has no
+   * key and cannot sign. What this switches is how much ceremony stands in
+   * front of that fingerprint: off, a plan opens the full review screen; on, a
+   * plan inside the caps below is offered as a single tap.
+   *
+   * Off by default, because the caps only mean something once the user has
+   * seen what the agent proposes when supervised.
    */
   enabled: z.boolean(),
 
