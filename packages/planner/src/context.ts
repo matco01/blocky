@@ -63,9 +63,16 @@ export interface PlannerContext {
   isAddressFlagged(address: Address): Promise<boolean>;
 
   /**
-   * Dry run. Optional because a plan is still useful without one — but when it
-   * is absent the plan carries a `simulation_failed` warning rather than
-   * quietly pretending the check passed.
+   * Dry run. Never called by a plain transfer — there's no logic in an
+   * ERC-20 transfer call that can fail beyond what the balance and gas checks
+   * already cover, so simulating one would tell the user nothing about their
+   * actual send. This exists for the swap path: a router call has real logic
+   * (slippage, an allowance, a pool that's moved) that only a dry run catches.
+   *
+   * Optional because a plan is still useful without one — but when a caller
+   * that needs it finds it absent, the plan should carry a
+   * `simulation_failed` warning rather than quietly pretending the check
+   * passed.
    */
   simulate?(chainId: ChainId, calls: readonly PreparedCall[]): Promise<Simulation>;
 }

@@ -1,11 +1,18 @@
 import { useLoginWithEmail, useLoginWithOAuth } from '@privy-io/expo';
 import { useLoginWithPasskey } from '@privy-io/expo/passkey';
-import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
-import { Mascot } from '../components/Mascot';
-import { Text } from '../components/Text';
+import { IntroHero } from '../components/IntroHero';
 import { TextField } from '../components/TextField';
 import { config } from '../lib/config';
 import { useTheme } from '../theme';
@@ -16,6 +23,11 @@ import { useTheme } from '../theme';
  * No seed phrase, no "write these 12 words down". An email code today; a
  * passkey (Face ID) once a relying-party domain is configured. The wallet is
  * created behind the scenes on first login.
+ *
+ * Opens with Blocky arriving (see `IntroHero`). The form is laid out from the
+ * start — invisible, not absent — so the hero's resting place is already
+ * known when the intro measures where to glide to, and nothing shifts when
+ * the form fades in.
  */
 export default function LoginScreen() {
   const theme = useTheme();
@@ -30,6 +42,21 @@ export default function LoginScreen() {
   const [stage, setStage] = useState<'email' | 'code'>('email');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const reduced = useReducedMotion();
+  const [revealed, setRevealed] = useState(false);
+  const [skipped, setSkipped] = useState(false);
+  const form = useSharedValue(reduced ? 1 : 0);
+
+  useEffect(() => {
+    if (!revealed || reduced) return;
+    form.value = withDelay(80, withTiming(1, { duration: 420, easing: Easing.out(Easing.cubic) }));
+  }, [revealed, reduced, form]);
+
+  const formStyle = useAnimatedStyle(() => ({
+    opacity: form.value,
+    transform: [{ translateY: (1 - form.value) * 24 }],
+  }));
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -57,19 +84,9 @@ export default function LoginScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={{ alignItems: 'center', gap: theme.space.lg }}>
-          <Mascot pose="neutral" size={140} idle />
-          <View style={{ alignItems: 'center', gap: theme.space.sm }}>
-            <Text variant="title" tone="brand" style={{ fontSize: 34, lineHeight: 40 }}>
-              Blocky
-            </Text>
-            <Text variant="body" tone="secondary" style={styles.center}>
-              Your money, and an assistant that moves it for you.
-            </Text>
-          </View>
-        </View>
+        <IntroHero skipped={skipped} onReveal={() => setRevealed(true)} />
 
-        <View style={{ gap: theme.space.lg }}>
+        <Animated.View style={[{ gap: theme.space.lg }, formStyle]} pointerEvents={revealed ? 'auto' : 'none'}>
           {stage === 'email' ? (
             <>
               <TextField
@@ -144,8 +161,18 @@ export default function LoginScreen() {
               }
             />
           ) : null}
-        </View>
+        </Animated.View>
       </ScrollView>
+
+      {/* While he's arriving, a tap anywhere skips straight to the form. */}
+      {revealed ? null : (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => setSkipped(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Skip intro"
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -156,8 +183,5 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 24,
     justifyContent: 'space-between',
-  },
-  center: {
-    textAlign: 'center',
   },
 });

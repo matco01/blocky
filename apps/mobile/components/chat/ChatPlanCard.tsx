@@ -40,6 +40,25 @@ export function ChatPlanCard({
   const denied = decision?.outcome === 'deny';
   const withinLimits = decision?.outcome === 'auto_execute';
 
+  /*
+   * `new_recipient` is hidden unconditionally: it only restates what "Needs
+   * approval" already says a few lines up, on every plan that has it.
+   *
+   * `simulation_failed` is hidden only at `warn` severity — the "we don't
+   * know" case, which today is every plan, since nothing in the planner
+   * dry-runs a plain transfer (see `plan.ts`). It is never hidden at `danger`
+   * severity: that means a simulation actually ran and found a real revert,
+   * which is exactly the kind of thing a glance should still show. Once the
+   * swap path starts simulating for real, this stays correct without needing
+   * to change — a real problem still shows; a shrug still doesn't.
+   *
+   * The full review screen shows everything regardless; this card is the
+   * glance.
+   */
+  const compactWarnings = plan.warnings.filter(
+    (warning) => warning.code !== 'new_recipient' && !(warning.code === 'simulation_failed' && warning.severity === 'warn'),
+  );
+
   const status = denied
     ? { label: 'Blocked', tone: 'warning' as const }
     : sent
@@ -82,9 +101,9 @@ export function ChatPlanCard({
         </Text>
       </View>
 
-      {!denied && plan.warnings.length > 0 ? (
+      {!denied && compactWarnings.length > 0 ? (
         <View style={{ gap: 4, marginTop: theme.space.sm }}>
-          {plan.warnings.slice(0, 2).map((warning) => (
+          {compactWarnings.slice(0, 2).map((warning) => (
             <Text key={warning.code} variant="caption" tone={warning.severity === 'danger' ? 'danger' : 'secondary'}>
               {warning.message}
             </Text>

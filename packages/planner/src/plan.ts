@@ -10,7 +10,6 @@ import {
   type PreparedCall,
   type ResolvedRecipient,
   type ResolvedToken,
-  type Simulation,
   type TransferIntent,
   type Warning,
 } from '@blocky/shared';
@@ -18,13 +17,7 @@ import { DEFAULT_CHAIN, canPayForGeneralAction, getChain, selectGasStrategy } fr
 import { assetDelta, resolveAmount } from './amount';
 import { erc20TransferCall } from './calls';
 import { fail, type PlanFailure, type PlannerContext } from './context';
-import {
-  destinationWarnings,
-  feeWarnings,
-  recipientWarnings,
-  simulationWarnings,
-  tokenWarnings,
-} from './warnings';
+import { destinationWarnings, feeWarnings, recipientWarnings, tokenWarnings } from './warnings';
 
 /**
  * Intent in, Plan out.
@@ -165,7 +158,6 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
     }),
   ];
 
-  const simulation = ctx.simulate ? await ctx.simulate(chainId, calls) : null;
   const flagged = await ctx.isAddressFlagged(recipient.address);
 
   const fee: Fee = {
@@ -182,7 +174,6 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
     ...recipientWarnings(recipient, flagged),
     ...tokenWarnings(token),
     ...feeWarnings(fee.totalUsd, outflow[0]?.usdValue ?? null),
-    ...simulationWarnings(simulation),
     ...destinationWarnings({
       chainName: chain.name,
       canActThere: canPayForGeneralAction(gasContext),
@@ -207,7 +198,14 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
       fee,
       warnings,
       calls,
-      simulation,
+      /*
+       * A plain ERC-20 transfer never dry-runs, whether or not the context can
+       * simulate: nothing in a transfer call can fail in a way the balance and
+       * gas checks above haven't covered. `ctx.simulate` is for the swap path,
+       * where a router, slippage or an allowance can revert in ways only a dry
+       * run catches.
+       */
+      simulation: null,
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + PLAN_TTL_MS).toISOString(),
     },

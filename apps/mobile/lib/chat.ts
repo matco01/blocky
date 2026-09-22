@@ -1,8 +1,11 @@
+import { isResetPhrase } from './resetPhrase';
+
+export { isResetPhrase };
+
 import type { Plan, PolicyDecision } from '@blocky/shared';
 import { useCallback, useRef, useState } from 'react';
 import { ApiError, api, type AgentResponse, type ChatTurn } from './api';
 import { ALL_CAPABILITIES, type Capability } from './capabilities';
-
 /**
  * Chat state for the home screen.
  *
@@ -47,22 +50,36 @@ export function useChat() {
   messagesRef.current = messages;
   const busyRef = useRef(false);
 
+  /**
+   * Bumped by `reset`. A request in flight when the chat is reset must not
+   * resurrect its reply into the now-empty conversation once it lands — `ask`
+   * checks this against the value it started with and drops a stale answer
+   * rather than appending it.
+   */
+  const generationRef = useRef(0);
+
   const append = useCallback((message: ChatMessage) => {
     setMessages((current) => [...current, message]);
   }, []);
 
   const ask = useCallback(
     async (text: string, history: ChatTurn[]) => {
+      const generation = generationRef.current;
       busyRef.current = true;
       setBusy(true);
 
       try {
-        append(fromResponse(await api.agentChat(text, history)));
+        const response = await api.agentChat(text, history);
+        if (generationRef.current === generation) append(fromResponse(response));
       } catch (error) {
-        append({ id: id(), role: 'error', text: describeError(error), retry: { text, history } });
+        if (generationRef.current === generation) {
+          append({ id: id(), role: 'error', text: describeError(error), retry: { text, history } });
+        }
       } finally {
-        busyRef.current = false;
-        setBusy(false);
+        if (generationRef.current === generation) {
+          busyRef.current = false;
+          setBusy(false);
+        }
       }
     },
     [append],
@@ -93,6 +110,21 @@ export function useChat() {
   );
 
   /**
+   * Append a user line and a plain assistant reply to it, locally — no
+   * network, no history sent, no plan. For the handful of things answered
+   * without the agent (see `showCapabilities`, and appearance commands in
+   * `HomePage`) so the exchange still reads as one in the transcript, rather
+   * than the typed text just vanishing with nothing to show it was handled.
+   */
+  const sayLocally = useCallback(
+    (userText: string, replyText: string) => {
+      append({ id: id(), role: 'user', text: userText });
+      append({ id: id(), role: 'assistant', text: replyText, plan: null, decision: null, note: null, capabilities: null });
+    },
+    [append],
+  );
+
+  /**
    * "What can you do?" — answered locally, as tappable actions, instead of a
    * paragraph from the model. The list is fixed and already known; there is
    * nothing an LLM round-trip would add except latency and a wall of text.
@@ -111,8 +143,22 @@ export function useChat() {
     });
   }, [append]);
 
-  return { messages, busy, send, retry, showCapabilities };
+  /**
+   * "Reset the chat" — wipe the conversation and go back to the greeting
+   * screen. Works even mid-request: nothing here waits on `busy`, because a
+   * stuck or slow request is exactly when someone is likeliest to want out.
+   */
+  const reset = useCallback(() => {
+    generationRef.current += 1;
+    busyRef.current = false;
+    setBusy(false);
+    setMessages([]);
+  }, []);
+
+  return { messages, busy, send, retry, showCapabilities, reset, sayLocally };
 }
+
+
 
 function fromResponse(response: AgentResponse): ChatMessage {
   const note =

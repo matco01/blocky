@@ -217,38 +217,24 @@ describe('warnings', () => {
     expect(warning?.severity).toBe('danger');
   });
 
-  it('warns when no dry run was available', async () => {
-    const plan = await planOk();
-
-    expect(codes(plan)).toContain('simulation_failed');
-  });
-
-  it('says nothing about simulation when it succeeded', async () => {
+  it('never dry-runs a plain transfer, even when the context can simulate one', async () => {
+    // A transfer has no logic beyond what the balance and gas checks already
+    // cover, so simulating one would tell the user nothing real — it's the
+    // swap path that needs this, once there's router logic that can revert.
+    let called = false;
     const plan = await planOk(
       {},
       fakeContext({
-        simulate: async () => ({ status: 'success', revertReason: null, actualInflow: null }),
+        simulate: async () => {
+          called = true;
+          return { status: 'success', revertReason: null, actualInflow: null };
+        },
       }),
     );
 
+    expect(called).toBe(false);
+    expect(plan.simulation).toBeNull();
     expect(codes(plan)).not.toContain('simulation_failed');
-  });
-
-  it('treats a reverting simulation as danger', async () => {
-    const plan = await planOk(
-      {},
-      fakeContext({
-        simulate: async () => ({
-          status: 'reverted',
-          revertReason: 'ERC20: insufficient allowance',
-          actualInflow: null,
-        }),
-      }),
-    );
-
-    const warning = plan.warnings.find((w) => w.code === 'simulation_failed');
-    expect(warning?.severity).toBe('danger');
-    expect(warning?.message).toContain('insufficient allowance');
   });
 });
 

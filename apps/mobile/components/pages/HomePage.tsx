@@ -9,6 +9,7 @@ import {
   type NativeSyntheticEvent,
   type TextInput,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { displayUsd } from '@blocky/shared';
@@ -26,7 +27,8 @@ import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
 import { ApiError, api } from '../../lib/api';
 import type { Capability } from '../../lib/capabilities';
-import { useChat } from '../../lib/chat';
+import { matchAppearanceCommand } from '../../lib/appearanceCommand';
+import { isResetPhrase, useChat } from '../../lib/chat';
 import { handOffPlan, useSentPlans } from '../../lib/handoff';
 import { useKeyboardVisible } from '../../lib/keyboard';
 import { useTheme } from '../../theme';
@@ -62,7 +64,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const lastBalance = useRef<string | null>(null);
   const [focused, setFocused] = useState(true);
 
-  const { messages, busy, send, retry, showCapabilities } = useChat();
+  const { messages, busy, send, retry, showCapabilities, reset, sayLocally } = useChat();
   const isSent = useSentPlans();
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
@@ -77,11 +79,29 @@ export function HomePage({ page, onPageChange }: PageProps) {
 
   const submit = useCallback(
     (text: string) => {
+      if (isResetPhrase(text)) {
+        reset();
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        return;
+      }
+
+      const appearance = matchAppearanceCommand(text);
+      if (appearance) {
+        const target = appearance === 'toggle' ? (theme.appearance === 'dark' ? 'light' : 'dark') : appearance;
+        const already = theme.appearance === target;
+
+        atBottomRef.current = true;
+        if (!already) theme.setAppearance(target);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        sayLocally(text.trim(), already ? `Already in ${target} mode.` : `Switched to ${target} mode.`);
+        return;
+      }
+
       // Sending is always "take me to the latest" — the same as any chat app.
       atBottomRef.current = true;
       send(text);
     },
-    [send],
+    [send, reset, sayLocally, theme],
   );
 
   const pickCapability = useCallback(
