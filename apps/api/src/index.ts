@@ -4,6 +4,7 @@ import { CHAIN } from '@blocky/shared';
 import {
   createChainReader,
   fetchGatewayBalances,
+  fetchWalletHoldings,
   getChain,
   rpcConfigFromEnv,
 } from '@blocky/wallet-core';
@@ -40,6 +41,7 @@ const app = createApp({
     ? createAgentHandler(store, env.ANTHROPIC_API_KEY, reader, explorerTransfers)
     : null,
   gatewayBalances: (address) => fetchGatewayBalances(address, { testnet: true }),
+  walletHoldings: (address) => fetchWalletHoldings(reader, address),
   explorerTransfers,
   logRequests: true,
 });

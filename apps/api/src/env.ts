@@ -29,8 +29,11 @@ const EnvSchema = z.object({
    */
   ARC_TESTNET_RPC_URL: z.string().url().default('https://rpc.testnet.arc.network'),
 
-  /** Base Sepolia. Optional; only needed for multichain work. */
-  BASE_SEPOLIA_RPC_URL: z.string().url().optional(),
+  /** Base Sepolia. Defaults to Base's own public endpoint — fine for development. */
+  BASE_SEPOLIA_RPC_URL: z.string().url().default('https://sepolia.base.org'),
+
+  /** Arbitrum Sepolia. Defaults to Arbitrum's own public endpoint. */
+  ARBITRUM_SEPOLIA_RPC_URL: z.string().url().default('https://sepolia-rollup.arbitrum.io/rpc'),
 
   /**
    * Ethereum mainnet, for ENS lookups only — we do not transact there.

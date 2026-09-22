@@ -14,3 +14,4 @@ export * from './receipts';
 export * from './gateway';
 export * from './prices';
 export * from './ecosystem';
+export * from './holdings';

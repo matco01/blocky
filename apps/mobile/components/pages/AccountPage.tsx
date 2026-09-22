@@ -112,7 +112,8 @@ export function AccountPage({ page, onPageChange }: PageProps) {
           action={copied ? 'Copied' : 'Copy'}
           onPress={address ? copyAddress : undefined}
         />
-        <Row icon="receipt-outline" label="Network" value="Arc Testnet" />
+        <Row icon="globe-outline" label="Network" value="Arc Testnet" />
+        <Row icon="receipt-outline" label="Activity" value="Everything sent and received" chevron onPress={() => router.push('/activity')} />
         <Row
           icon="shield-checkmark-outline"
           label="Spending limits"

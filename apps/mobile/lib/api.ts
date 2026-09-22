@@ -52,6 +52,14 @@ const BalanceSchema = z.object({
       perChain: z.array(z.object({ chainId: z.number(), balanceUsd: z.string() })),
     })
     .nullable(),
+  /** Native currency on other chains — ETH sitting on Base Sepolia, say. Not spendable through a plan. */
+  otherHoldings: z.array(
+    z.object({ chainId: z.number(), symbol: z.string(), amount: z.string(), decimals: z.number(), usd: z.string().nullable() }),
+  ),
+});
+
+const BalanceHistorySchema = z.object({
+  snapshots: z.array(z.object({ spendableUsd: z.string(), investmentsUsd: z.string(), takenAt: z.string() })),
 });
 
 const ActivityItemSchema = z.object({
@@ -92,6 +100,7 @@ export interface ChatTurn {
 
 export type Me = z.infer<typeof MeSchema>;
 export type Balance = z.infer<typeof BalanceSchema>;
+export type BalanceHistory = z.infer<typeof BalanceHistorySchema>;
 export type ActivityItem = z.infer<typeof ActivityItemSchema>;
 
 /* -------------------------------------------------------------------------- */
@@ -150,6 +159,8 @@ export const api = {
   me: () => request('/v1/me', MeSchema),
 
   balance: () => request('/v1/balance', BalanceSchema),
+
+  balanceHistory: () => request('/v1/balance/history', BalanceHistorySchema),
 
   activity: () => request('/v1/activity', ActivitySchema),
 

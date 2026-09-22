@@ -83,6 +83,7 @@ function app() {
     identity,
     agent,
     gatewayBalances: () => gateway(),
+    walletHoldings: async () => [],
     explorerTransfers: () => explorer(),
     receiptPolling: { attempts: 1, delayMs: 0 },
   };

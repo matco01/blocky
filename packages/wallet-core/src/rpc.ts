@@ -277,6 +277,7 @@ export function createChainReader(config: RpcConfig): ChainReader {
 export function rpcConfigFromEnv(env: {
   ARC_TESTNET_RPC_URL?: string | undefined;
   BASE_SEPOLIA_RPC_URL?: string | undefined;
+  ARBITRUM_SEPOLIA_RPC_URL?: string | undefined;
   ETHEREUM_RPC_URL?: string | undefined;
 }): RpcConfig {
   const urls: Partial<Record<ChainId, string>> = {};
@@ -287,6 +288,10 @@ export function rpcConfigFromEnv(env: {
 
   if (env.BASE_SEPOLIA_RPC_URL) {
     urls[CHAIN.baseSepolia] = env.BASE_SEPOLIA_RPC_URL;
+  }
+
+  if (env.ARBITRUM_SEPOLIA_RPC_URL) {
+    urls[CHAIN.arbitrumSepolia] = env.ARBITRUM_SEPOLIA_RPC_URL;
   }
 
   /*

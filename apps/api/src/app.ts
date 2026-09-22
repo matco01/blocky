@@ -7,6 +7,8 @@ import {
   TransferIntentSchema,
   evaluatePolicy,
   formatUnits,
+  formatUsd,
+  parseUsd,
   planOutflowUsd,
   type Address,
 } from '@blocky/shared';
@@ -19,6 +21,7 @@ import {
   isSessionExpired,
   type ChainReader,
   type GatewayBalances,
+  type TokenHolding,
 } from '@blocky/wallet-core';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
@@ -43,6 +46,8 @@ export interface AppDeps {
       ) => Promise<AgentResponse>)
     | null;
   gatewayBalances: (address: Address) => Promise<GatewayBalances>;
+  /** Native-currency holdings on other chains — never throws; a dead chain reports nothing found. */
+  walletHoldings: (address: Address) => Promise<TokenHolding[]>;
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>;
   /** How long to wait for a just-submitted transaction to become visible. */
   receiptPolling?: { attempts: number; delayMs: number };
@@ -138,6 +143,10 @@ export function createApp(deps: AppDeps) {
    * can spend them yet. A failed Gateway read degrades to `gateway: null`; a
    * failed wallet read is a 503 — never a zero, which would read as "your
    * money is gone".
+   *
+   * `otherHoldings` is native currency on other chains — ETH sitting on Base
+   * Sepolia, say. Not spendable through a plan either, and never on the
+   * critical path: a failed read degrades to an empty list, same as Gateway.
    */
   app.get('/v1/balance', async (c) => {
     const wallet = walletOf(c);
@@ -145,9 +154,10 @@ export function createApp(deps: AppDeps) {
 
     const chain = getChain(DEFAULT_CHAIN);
 
-    const [spendable, gateway] = await Promise.allSettled([
+    const [spendable, gateway, otherHoldings] = await Promise.allSettled([
       reader.erc20Balance(chain.id, chain.usdc, wallet),
       deps.gatewayBalances(wallet),
+      deps.walletHoldings(wallet),
     ]);
 
     if (spendable.status === 'rejected') {
@@ -155,13 +165,40 @@ export function createApp(deps: AppDeps) {
     }
 
     const display = formatUnits(spendable.value, 6);
+    const gatewayValue = gateway.status === 'fulfilled' ? gateway.value : null;
+    const holdings = otherHoldings.status === 'fulfilled' ? otherHoldings.value : [];
+
+    // Best-effort history: a throttled snapshot off a real read, never a
+    // reason for the balance response itself to fail.
+    const spendableUsd = parseUsd(display) + parseUsd(gatewayValue?.totalUsd ?? '0');
+    const investmentsUsd = holdings.reduce((sum, h) => sum + (h.usd ? parseUsd(h.usd) : 0n), 0n);
+    void store
+      .recordBalanceSnapshot(c.get('user').id, {
+        spendableUsd: formatUsd(spendableUsd),
+        investmentsUsd: formatUsd(investmentsUsd),
+      })
+      .catch(() => {});
 
     return c.json({
       chainId: chain.id,
       totalUsd: display,
       usdc: { amount: spendable.value.toString(), displayAmount: display },
-      gateway: gateway.status === 'fulfilled' ? gateway.value : null,
+      gateway: gatewayValue,
+      otherHoldings: holdings,
     });
+  });
+
+  /**
+   * Balance history, split the same way the portfolio screen is. Only ever
+   * what `/v1/balance` has actually recorded — no backfill, no interpolation
+   * between two real points.
+   */
+  app.get('/v1/balance/history', async (c) => {
+    const days = 30;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const snapshots = await store.listBalanceSnapshots(c.get('user').id, since);
+
+    return c.json({ snapshots });
   });
 
   /* ------------------------------------------------------------------------ */

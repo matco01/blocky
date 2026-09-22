@@ -136,4 +136,25 @@ export const sessions = pgTable(
   (table) => [index('sessions_user_idx').on(table.userId)],
 );
 
-export const schema = { users, policies, plans, executions, contacts, sessions };
+/**
+ * A point-in-time read of the wallet's value, split the same way the
+ * portfolio screen is: spendable (stablecoins — Arc plus Gateway) versus
+ * investments (everything else). Taken opportunistically off the back of a
+ * real `/v1/balance` read and throttled — never backfilled, never guessed at
+ * a time nobody actually checked the wallet.
+ */
+export const balanceSnapshots = pgTable(
+  'balance_snapshots',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    spendableUsd: numeric('spendable_usd', { precision: 38, scale: 6 }).notNull(),
+    investmentsUsd: numeric('investments_usd', { precision: 38, scale: 6 }).notNull(),
+    takenAt: timestamp('taken_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('balance_snapshots_user_taken_idx').on(table.userId, table.takenAt)],
+);
+
+export const schema = { users, policies, plans, executions, contacts, sessions, balanceSnapshots };

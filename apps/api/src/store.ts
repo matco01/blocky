@@ -11,7 +11,7 @@ import {
 import type { SessionPermissions } from '@blocky/wallet-core';
 import { and, desc, eq, gte, inArray, isNull, gt, sql } from 'drizzle-orm';
 import type { Db } from './db/client';
-import { contacts, executions, plans, policies, sessions, users } from './db/schema';
+import { balanceSnapshots, contacts, executions, plans, policies, sessions, users } from './db/schema';
 
 /**
  * Persistence, behind an interface.
@@ -55,6 +55,12 @@ export interface Execution {
 export interface Contact {
   label: string;
   address: Address;
+}
+
+export interface BalanceSnapshot {
+  spendableUsd: string;
+  investmentsUsd: string;
+  takenAt: Date;
 }
 
 export interface SessionRecord {
@@ -132,6 +138,21 @@ export interface Store {
   findContact(userId: string, label: string): Promise<Contact | null>;
   listContacts(userId: string): Promise<Contact[]>;
   deleteContact(userId: string, label: string): Promise<boolean>;
+
+  /**
+   * Record a balance snapshot, throttled to at most one per `minIntervalMs`
+   * (default one hour) per user. Called opportunistically off a real
+   * `/v1/balance` read, so history accrues at however often the app actually
+   * asks — never backfilled, never a guess at a time nobody checked.
+   */
+  recordBalanceSnapshot(
+    userId: string,
+    values: { spendableUsd: string; investmentsUsd: string },
+    now?: Date,
+    minIntervalMs?: number,
+  ): Promise<void>;
+  /** Snapshots since `since`, oldest first — a line chart reads left to right. */
+  listBalanceSnapshots(userId: string, since: Date): Promise<BalanceSnapshot[]>;
 }
 
 /** Labels match case- and whitespace-insensitively: users type "sam", not "Sam". */
@@ -392,6 +413,39 @@ export function createStore(db: Db): Store {
         .returning({ key: contacts.labelKey });
 
       return removed.length > 0;
+    },
+
+    async recordBalanceSnapshot(userId, values, now = new Date(), minIntervalMs = 60 * 60 * 1000) {
+      const [latest] = await db
+        .select({ takenAt: balanceSnapshots.takenAt })
+        .from(balanceSnapshots)
+        .where(eq(balanceSnapshots.userId, userId))
+        .orderBy(desc(balanceSnapshots.takenAt))
+        .limit(1);
+
+      if (latest && now.getTime() - latest.takenAt.getTime() < minIntervalMs) return;
+
+      await db.insert(balanceSnapshots).values({
+        id: crypto.randomUUID(),
+        userId,
+        spendableUsd: values.spendableUsd,
+        investmentsUsd: values.investmentsUsd,
+        takenAt: now,
+      });
+    },
+
+    async listBalanceSnapshots(userId, since) {
+      const rows = await db
+        .select()
+        .from(balanceSnapshots)
+        .where(and(eq(balanceSnapshots.userId, userId), gte(balanceSnapshots.takenAt, since)))
+        .orderBy(balanceSnapshots.takenAt);
+
+      return rows.map((row) => ({
+        spendableUsd: formatUsd(parseUsd(row.spendableUsd)),
+        investmentsUsd: formatUsd(parseUsd(row.investmentsUsd)),
+        takenAt: row.takenAt,
+      }));
     },
   };
 }

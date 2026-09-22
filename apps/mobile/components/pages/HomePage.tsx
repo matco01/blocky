@@ -205,7 +205,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
             <View style={[styles.actions, { gap: theme.space.sm, marginTop: theme.space.lg }]}>
               <ActionButton label="Receive" icon="arrow-down" disabled={!canTransact} onPress={() => router.push('/receive')} />
               <ActionButton label="Send" icon="arrow-up" disabled={!canTransact} onPress={() => router.push('/send')} />
-              <ActionButton label="Activity" icon="receipt-outline" onPress={() => router.push('/activity')} />
+              <ActionButton label="Portfolio" icon="pie-chart-outline" onPress={() => router.push('/portfolio')} />
             </View>
           </Animated.View>
         )}
