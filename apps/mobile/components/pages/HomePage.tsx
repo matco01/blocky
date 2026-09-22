@@ -18,9 +18,9 @@ import { CapabilityChips } from '../chat/CapabilityChips';
 import { ChatEmpty } from '../chat/ChatEmpty';
 import { ChatInput } from '../chat/ChatInput';
 import { ChatPlanCard } from '../chat/ChatPlanCard';
-import { MascotStage, type StageState } from '../chat/MascotStage';
-import { AssistantMessage, ErrorMessage, UserMessage } from '../chat/Messages';
+import { AssistantMessage, ErrorMessage, ThinkingRow, UserMessage } from '../chat/Messages';
 import { Icon } from '../Icon';
+import { Mascot } from '../Mascot';
 import { PageDots, type PageProps } from '../PageDots';
 import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
@@ -40,15 +40,19 @@ type BalanceState =
 /** How often the balance refreshes while Home is on screen, so incoming money shows up. */
 const BALANCE_POLL_MS = 20_000;
 
-/** Scroll offset past which Blocky docks to his smallest size. */
-const DOCK_AT = 24;
-
 /**
  * Home — the first page of the pager.
  *
- * The balance, three shortcuts, Blocky, and the chat. The chat is the main
- * surface: anything more involved than a plain send is something you say, not
+ * The balance, three shortcuts, and the chat. The chat is the main surface:
+ * anything more involved than a plain send is something you say, not
  * somewhere you navigate to. Account is one swipe to the left.
+ *
+ * Blocky has no chrome of his own above the chat any more — no floating
+ * mascot bar, nothing that docks or shrinks as you scroll. He lives inside
+ * the message list instead (see `Messages.tsx`), which is also what fixed a
+ * real bug: a sibling that resizes itself above a ScrollView resizes that
+ * ScrollView's own viewport, and doing that while someone is mid-scroll is
+ * what made scrolling feel broken. Nothing here does that any more.
  */
 export function HomePage({ page, onPageChange }: PageProps) {
   const theme = useTheme();
@@ -63,7 +67,6 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const [draft, setDraft] = useState('');
-  const [scrolled, setScrolled] = useState(false);
   const typing = useKeyboardVisible();
 
   // Whether the user is at (or near) the bottom of the conversation right now.
@@ -133,24 +136,14 @@ export function HomePage({ page, onPageChange }: PageProps) {
     return () => clearInterval(timer);
   }, [focused, balance.state, fetchBalance]);
 
-  // A threshold, not a per-frame value: the stage re-lays out once, not continuously.
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    setScrolled(contentOffset.y > DOCK_AT);
     atBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 40;
   }, []);
 
   const shown =
     balance.state === 'ready' ? balance.balance : balance.state === 'error' ? (balance.lastBalance ?? '0') : '0';
   const canTransact = balance.state === 'ready' || (balance.state === 'error' && balance.lastBalance !== null);
-
-  const stage: StageState = busy
-    ? 'busy'
-    : typing || scrolled
-      ? 'docked'
-      : messages.length === 0
-        ? 'empty'
-        : 'conversation';
 
   return (
     <KeyboardAvoidingView behavior="padding" style={[styles.screen, { backgroundColor: theme.colors.background }]}>
@@ -211,11 +204,6 @@ export function HomePage({ page, onPageChange }: PageProps) {
         )}
       </View>
 
-      {/* Blocky — fixed above the chat, never inside the ScrollView. */}
-      <View style={styles.stage}>
-        <MascotStage state={stage} busySize={typing || scrolled ? 44 : messages.length === 0 ? 96 : 64} />
-      </View>
-
       {/* --- Chat ---------------------------------------------------------- */}
       <ScrollView
         ref={scrollRef}
@@ -235,42 +223,55 @@ export function HomePage({ page, onPageChange }: PageProps) {
         }}
       >
         {messages.length === 0 && !busy ? (
-          <ChatEmpty onPick={pickCapability} />
+          <View style={{ gap: theme.space.lg }}>
+            <View style={styles.greetingRow}>
+              <Mascot pose="neutral" size={96} idle />
+              <Text variant="bodyStrong">Hi! What do you want to do?</Text>
+            </View>
+            <ChatEmpty onPick={pickCapability} />
+          </View>
         ) : (
-          messages.map((message) => {
-            switch (message.role) {
-              case 'user':
-                return <UserMessage key={message.id} text={message.text} />;
+          <>
+            {messages.map((message, index) => {
+              switch (message.role) {
+                case 'user':
+                  return <UserMessage key={message.id} text={message.text} />;
 
-              case 'error':
-                return <ErrorMessage key={message.id} text={message.text} onRetry={() => retry(message.id)} />;
+                case 'error':
+                  return <ErrorMessage key={message.id} text={message.text} onRetry={() => retry(message.id)} />;
 
-              case 'assistant': {
-                const plan = message.plan;
-                return (
-                  <AssistantMessage key={message.id} text={message.text} note={message.note}>
-                    {plan ? (
-                      <ChatPlanCard
-                        plan={plan}
-                        decision={message.decision}
-                        sent={isSent(plan.id)}
-                        onApprove={(fast) => {
-                          handOffPlan(plan);
-                          router.push({
-                            pathname: '/send',
-                            params: { planId: plan.id, ...(fast ? { autosend: '1' } : {}) },
-                          });
-                        }}
-                      />
-                    ) : null}
-                    {message.capabilities ? (
-                      <CapabilityChips capabilities={message.capabilities} onPick={pickCapability} />
-                    ) : null}
-                  </AssistantMessage>
-                );
+                case 'assistant': {
+                  const plan = message.plan;
+                  // Blocky rides beside his newest reply only — the one still
+                  // last in the whole thread, not every reply he's ever sent.
+                  const isLatest = index === messages.length - 1;
+
+                  return (
+                    <AssistantMessage key={message.id} text={message.text} note={message.note} avatar={isLatest}>
+                      {plan ? (
+                        <ChatPlanCard
+                          plan={plan}
+                          decision={message.decision}
+                          sent={isSent(plan.id)}
+                          onApprove={(fast) => {
+                            handOffPlan(plan);
+                            router.push({
+                              pathname: '/send',
+                              params: { planId: plan.id, ...(fast ? { autosend: '1' } : {}) },
+                            });
+                          }}
+                        />
+                      ) : null}
+                      {message.capabilities ? (
+                        <CapabilityChips capabilities={message.capabilities} onPick={pickCapability} />
+                      ) : null}
+                    </AssistantMessage>
+                  );
+                }
               }
-            }
-          })
+            })}
+            {busy ? <ThinkingRow /> : null}
+          </>
         )}
       </ScrollView>
 
@@ -326,10 +327,10 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
   },
-  stage: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   chat: {
     flex: 1,
