@@ -1,5 +1,6 @@
-import { displayUsd, parseUsd, type Plan } from '@blocky/shared';
+import { shortAddress, type Plan } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
+import { planAmountLabel, planFeeLabel } from '../lib/planLabels';
 import { useTheme } from '../theme';
 import { Icon } from './Icon';
 import { Text } from './Text';
@@ -17,7 +18,7 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
   const theme = useTheme();
 
   const outflow = plan.outflow[0];
-  const fee = parseUsd(plan.fee.totalUsd) === 0n ? 'Free' : displayUsd(plan.fee.totalUsd);
+  const fee = planFeeLabel(plan);
 
   return (
     <View style={{ gap: theme.space.xl }}>
@@ -26,7 +27,7 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
           You're sending
         </Text>
         <Text variant="balance">
-          {outflow?.usdValue ? displayUsd(outflow.usdValue) : `${outflow?.displayAmount} ${outflow?.token.symbol}`}
+          {planAmountLabel(plan)}
         </Text>
         <Text variant="body" tone="secondary">
           to {plan.recipient?.display ?? 'yourself'}
@@ -37,7 +38,7 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
         <Row label="Amount" value={`${outflow?.displayAmount ?? '0'} ${outflow?.token.symbol ?? ''}`} />
         <Row label="Network fee" value={fee} />
         {plan.recipient && plan.recipient.display !== plan.recipient.address ? (
-          <Row label="Address" value={`${plan.recipient.address.slice(0, 10)}…${plan.recipient.address.slice(-8)}`} />
+          <Row label="Address" value={shortAddress(plan.recipient.address, 10, 8)} />
         ) : null}
       </Tile>
 

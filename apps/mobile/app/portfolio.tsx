@@ -1,4 +1,4 @@
-import { displayUsd, formatUnits, formatUsd, parseUsd } from '@blocky/shared';
+import { displayUsd, formatUnits, parseUsd } from '@blocky/shared';
 import { CHAINS } from '@blocky/wallet-core';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
@@ -314,7 +314,7 @@ function HoldingsSection({
     );
   }
 
-  const [dollars, cents] = displayUsd(formatUsd(data.totalCents)).split('.');
+  const [dollars, cents] = displayUsd(data.totalCents).split('.');
 
   return (
     <>
@@ -351,7 +351,7 @@ function HoldingsSection({
         </View>
       ) : null}
 
-      <View style={[styles.legend, { marginTop: theme.space.xl, gap: theme.space.sm }]}>
+      <View style={{ marginTop: theme.space.xl, gap: theme.space.sm }}>
         {shaped.map((holding, i) => {
           const pct = data.totalCents > 0n ? (Number(holding.usdCents) / Number(data.totalCents)) * 100 : 0;
           const color = holding.key === 'other' ? theme.colors.borderStrong : slotColor(i, colors);
@@ -362,7 +362,7 @@ function HoldingsSection({
                 {holding.label}
               </Text>
               <Text variant="body" tone="secondary">
-                {displayUsd(formatUsd(holding.usdCents))}
+                {displayUsd(holding.usdCents)}
               </Text>
               <Text variant="caption" tone="tertiary" style={styles.pct}>
                 {pct.toFixed(pct >= 10 ? 0 : 1)}%
@@ -439,7 +439,6 @@ const styles = StyleSheet.create({
   donut: {
     alignItems: 'center',
   },
-  legend: {},
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',

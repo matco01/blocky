@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native';
 import Animated, {
   Easing,
@@ -65,14 +65,13 @@ const T = {
 /** Poses swapped to during the intro. Mounted once, invisibly, so the first swap never blanks for a frame while the image decodes. */
 const WARM_POSES: MascotPose[] = ['neutral', 'lookLeft', 'lookRight', 'happy'];
 
-export function IntroHero({ skipped, onReveal }: { skipped: boolean; onReveal: () => void }) {
+export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skipped: boolean; onReveal: () => void }) {
   const theme = useTheme();
   const { height: screenHeight } = useWindowDimensions();
   const reduced = useReducedMotion();
 
   const [stage, setStage] = useState<Stage>(reduced ? 'done' : 'waiting');
   const [pose, setPose] = useState<MascotPose>(reduced ? 'neutral' : 'closedEyes');
-  const [idle, setIdle] = useState(reduced);
 
   const glide = useSharedValue(0);
   const fall = useSharedValue(reduced ? 0 : -screenHeight);
@@ -97,10 +96,16 @@ export function IntroHero({ skipped, onReveal }: { skipped: boolean; onReveal: (
     onRevealRef.current();
   }
 
+  /** Where every path ends: standing still, blinking. */
+  function rest() {
+    finished.current = true;
+    setStage('done');
+    setPose('neutral');
+  }
+
   /** Jump straight to the resting state — for a skip, or reduced motion. */
   function finish() {
     if (finished.current) return;
-    finished.current = true;
 
     timers.current.forEach(clearTimeout);
     timers.current = [];
@@ -114,9 +119,7 @@ export function IntroHero({ skipped, onReveal }: { skipped: boolean; onReveal: (
     shadow.value = 0;
     tagline.value = 1;
 
-    setStage('done');
-    setPose('neutral');
-    setIdle(true);
+    rest();
     revealOnce();
   }
 
@@ -160,12 +163,7 @@ export function IntroHero({ skipped, onReveal }: { skipped: boolean; onReveal: (
     at(T.hop, () => setPose('happy'));
     at(T.hop + 280, () => void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}));
     at(T.settle, revealOnce);
-    at(T.idle, () => {
-      finished.current = true;
-      setStage('done');
-      setPose('neutral');
-      setIdle(true);
-    });
+    at(T.idle, rest);
   }
 
   function onLayout(event: LayoutChangeEvent) {
@@ -211,11 +209,11 @@ export function IntroHero({ skipped, onReveal }: { skipped: boolean; onReveal: (
           )),
         )}
         <Animated.View style={[styles.mascot, mascotStyle]}>
-          <Mascot pose={pose} size={MASCOT} idle={idle} />
+          <Mascot pose={pose} size={MASCOT} idle={stage === 'done'} />
         </Animated.View>
 
         {stage === 'play' ? (
-          <View style={styles.warm} pointerEvents="none">
+          <View style={[StyleSheet.absoluteFill, styles.warm]} pointerEvents="none">
             {WARM_POSES.map((warm) => (
               <Mascot key={warm} pose={warm} size={MASCOT} style={StyleSheet.absoluteFill} />
             ))}
@@ -237,7 +235,7 @@ export function IntroHero({ skipped, onReveal }: { skipped: boolean; onReveal: (
       </View>
     </Animated.View>
   );
-}
+});
 
 /** One letter of the wordmark, dropping in like a block and settling with a wobble. */
 function DropLetter({ char, index, stage }: { char: string; index: number; stage: Stage }) {
@@ -337,11 +335,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   warm: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
     // Not zero: a fully transparent view can be skipped by the renderer, and
     // then nothing is decoded ahead of time.
     opacity: 0.01,

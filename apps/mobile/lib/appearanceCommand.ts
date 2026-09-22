@@ -64,3 +64,9 @@ export function matchAppearanceCommand(text: string): AppearanceCommand {
   if (/\?\s*$/.test(trimmed)) return null;
   return mode;
 }
+
+/** The appearance a command lands on, given the one showing now. */
+export function resolveAppearance(command: 'dark' | 'light' | 'toggle', current: 'dark' | 'light'): 'dark' | 'light' {
+  if (command !== 'toggle') return command;
+  return current === 'dark' ? 'light' : 'dark';
+}

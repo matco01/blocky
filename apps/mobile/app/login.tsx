@@ -1,7 +1,7 @@
 import { useLoginWithEmail, useLoginWithOAuth } from '@privy-io/expo';
 import { useLoginWithPasskey } from '@privy-io/expo/passkey';
-import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -45,6 +45,7 @@ export default function LoginScreen() {
 
   const reduced = useReducedMotion();
   const [revealed, setRevealed] = useState(false);
+  const reveal = useCallback(() => setRevealed(true), []);
   const [skipped, setSkipped] = useState(false);
   const form = useSharedValue(reduced ? 1 : 0);
 
@@ -84,7 +85,7 @@ export default function LoginScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <IntroHero skipped={skipped} onReveal={() => setRevealed(true)} />
+        <IntroHero skipped={skipped} onReveal={reveal} />
 
         <Animated.View style={[{ gap: theme.space.lg }, formStyle]} pointerEvents={revealed ? 'auto' : 'none'}>
           {stage === 'email' ? (

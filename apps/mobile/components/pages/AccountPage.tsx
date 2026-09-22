@@ -1,4 +1,4 @@
-import { displayUsd, type Policy } from '@blocky/shared';
+import { displayUsd, shortAddress, type Policy } from '@blocky/shared';
 import { usePrivy } from '@privy-io/expo';
 import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
@@ -100,7 +100,7 @@ export function AccountPage({ page, onPageChange }: PageProps) {
         <Row
           icon="wallet-outline"
           label="Address"
-          value={address ? `${address.slice(0, 6)}…${address.slice(-4)}` : 'Setting up…'}
+          value={address ? shortAddress(address) : 'Setting up…'}
           action={copied ? 'Copied' : 'Copy'}
           onPress={address ? copyAddress : undefined}
         />

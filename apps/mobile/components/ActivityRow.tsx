@@ -1,4 +1,4 @@
-import { displayUsd } from '@blocky/shared';
+import { displayUsd, shortAddress } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
 import type { ActivityItem } from '../lib/api';
 import { useTheme } from '../theme';
@@ -15,7 +15,7 @@ export function ActivityRow({ item }: { item: ActivityItem }) {
   const sent = item.direction === 'sent';
   const failed = item.status === 'reverted';
 
-  const title = sent ? `Sent to ${short(item.counterparty)}` : `Received from ${short(item.counterparty)}`;
+  const title = sent ? `Sent to ${shortAddress(item.counterparty)}` : `Received from ${shortAddress(item.counterparty)}`;
   const amount = `${sent ? '−' : '+'}${displayUsd(item.amount)}`;
 
   return (
@@ -43,10 +43,6 @@ export function ActivityRow({ item }: { item: ActivityItem }) {
       </Text>
     </View>
   );
-}
-
-function short(address: string): string {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
 function when(iso: string): string {

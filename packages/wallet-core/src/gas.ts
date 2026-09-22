@@ -52,8 +52,6 @@ export interface GasPlan {
   networkUsd: string;
   /** Surcharge, folded into `totalUsd`. Never shown as its own line. */
   paymasterUsd: string;
-  /** Internal explanation for logs and support, not for the UI. */
-  reason: string;
 }
 
 export type GasResult =
@@ -81,7 +79,6 @@ export function selectGasStrategy(ctx: GasContext): GasResult {
           totalUsd: formatUsd(network),
           networkUsd: formatUsd(network),
           paymasterUsd: '0',
-          reason: `${chain.name}: gas paid natively in USDC`,
         },
       };
     }
@@ -103,7 +100,6 @@ export function selectGasStrategy(ctx: GasContext): GasResult {
           totalUsd: formatUsd(total),
           networkUsd: formatUsd(network),
           paymasterUsd: formatUsd(surcharge),
-          reason: 'Circle Paymaster, gas deducted in USDC',
         },
       };
     }
@@ -118,7 +114,6 @@ export function selectGasStrategy(ctx: GasContext): GasResult {
         totalUsd: formatUsd(network),
         networkUsd: formatUsd(network),
         paymasterUsd: '0',
-        reason: `Fallback: paying gas in ${chain.nativeCurrency.symbol}`,
       },
     };
   }

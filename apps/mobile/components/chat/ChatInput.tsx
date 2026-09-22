@@ -13,16 +13,19 @@ export function ChatInput({
   onChangeText,
   onSend,
   busy,
+  allowWhileBusy,
   inputRef,
 }: {
   value: string;
   onChangeText: (text: string) => void;
   onSend: (text: string) => void;
   busy: boolean;
+  /** Text that may still be sent mid-request — "reset the chat" is how you get out of a stuck one. */
+  allowWhileBusy?: (text: string) => boolean;
   inputRef?: RefObject<TextInput | null>;
 }) {
   const theme = useTheme();
-  const canSend = value.trim().length > 0 && !busy;
+  const canSend = value.trim().length > 0 && (!busy || (allowWhileBusy?.(value) ?? false));
 
   function submit() {
     if (!canSend) return;

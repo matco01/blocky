@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
-import { CHAIN } from '@blocky/shared';
 import {
+  DEFAULT_CHAIN,
   createChainReader,
   fetchGatewayBalances,
   fetchWalletHoldings,
@@ -28,10 +28,10 @@ const database = await openDatabase(
 
 const store = createStore(database.db);
 const reader = createChainReader(rpcConfigFromEnv(env));
-const arc = getChain(CHAIN.arcTestnet);
+const home = getChain(DEFAULT_CHAIN);
 
 const explorerTransfers = (address: Parameters<typeof fetchExplorerTransfers>[0]) =>
-  fetchExplorerTransfers(address, { apiBase: `${arc.explorerUrl}/api/v2`, token: arc.usdc });
+  fetchExplorerTransfers(address, { apiBase: `${home.explorerUrl}/api/v2`, token: home.usdc });
 
 const app = createApp({
   store,

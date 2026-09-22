@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { INTENT_TYPES } from './intent';
 import { formatUsd, parseUsd } from './money';
-import type { Plan } from './plan';
+import { isPlanExpired, type Plan } from './plan';
 import { AddressSchema, DecimalSchema } from './primitives';
 
 /**
@@ -99,7 +99,11 @@ export type PolicyReason = z.infer<typeof PolicyReasonSchema>;
 
 export const PolicyDecisionSchema = z.object({
   outcome: z.enum([
-    /** Session key may sign this now, unattended. */
+    /**
+     * Inside every limit the user set: offered as a single tap straight to the
+     * fingerprint, skipping the review screen. Not unattended — the agent has
+     * no key, and every transfer still needs the user's own signature.
+     */
     'auto_execute',
     /** Offer it to the user; they tap to sign with Face ID. */
     'require_confirmation',
@@ -198,7 +202,7 @@ export function evaluatePolicy({ policy, plan, spentTodayUsd, now }: PolicyInput
 
   /* --- Everything below downgrades to "ask the human" -------------------- */
 
-  if (isPlanExpiredAt(plan, now)) {
+  if (isPlanExpired(plan, now)) {
     confirmations.push({
       code: 'plan_expired',
       message: 'This quote expired — re-checking prices before continuing.',
@@ -259,6 +263,3 @@ export function evaluatePolicy({ policy, plan, spentTodayUsd, now }: PolicyInput
   };
 }
 
-function isPlanExpiredAt(plan: Plan, now: Date | undefined): boolean {
-  return new Date(plan.expiresAt).getTime() <= (now ?? new Date()).getTime();
-}

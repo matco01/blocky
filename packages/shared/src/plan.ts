@@ -95,9 +95,13 @@ export type AssetDelta = z.infer<typeof AssetDeltaSchema>;
 export const FeeSchema = z.object({
   totalUsd: DecimalSchema,
   paidIn: z.enum([
-    /** Circle Gateway's gas-free USDC path. */
+    /**
+     * Someone else pays. Not produced today — see `gas.ts` for why that tier
+     * was removed — but kept so it can return with a real sponsoring
+     * paymaster, and so plans stored before then still parse.
+     */
     'sponsored',
-    /** Circle Paymaster: gas deducted in USDC from the transaction itself. */
+    /** Gas in USDC: natively on Arc, or through Circle Paymaster elsewhere. */
     'usdc',
     /** Fallback only; means the user needed a native balance. Should be rare. */
     'native',
@@ -188,10 +192,3 @@ export function isPlanExpired(plan: Plan, now: Date = new Date()): boolean {
   return new Date(plan.expiresAt).getTime() <= now.getTime();
 }
 
-/** The most serious warning attached to a plan, if any. */
-export function highestSeverity(plan: Plan): Warning['severity'] | null {
-  if (plan.warnings.some((w) => w.severity === 'danger')) return 'danger';
-  if (plan.warnings.some((w) => w.severity === 'warn')) return 'warn';
-  if (plan.warnings.some((w) => w.severity === 'info')) return 'info';
-  return null;
-}

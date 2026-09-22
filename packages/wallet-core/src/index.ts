@@ -1,12 +1,13 @@
 /**
- * @blocky/wallet-core — chains, accounts, session keys, and who pays for gas.
+ * @blocky/wallet-core — chains, chain reads, Circle Gateway, prices, session
+ * keys, and who pays for gas.
  *
- * Vendor SDKs (Privy, ZeroDev, Circle) are reachable only through the
- * interfaces in `account.ts`. Nothing outside this package imports them.
+ * Everything here is read-only or pure. Signing is not: it happens on the
+ * device, in `apps/mobile/lib/smart-account.ts`, because that is where the
+ * key is — so that file talks to Privy, ZeroDev and viem directly.
  */
 
 export * from './chains';
-export * from './account';
 export * from './session';
 export * from './gas';
 export * from './rpc';

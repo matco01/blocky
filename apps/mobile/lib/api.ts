@@ -36,12 +36,6 @@ export function setTokenGetter(getter: TokenGetter) {
 /*  Schemas                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const MeSchema = z.object({
-  userId: z.string(),
-  walletAddress: z.string().nullable(),
-  chainId: z.number(),
-});
-
 const BalanceSchema = z.object({
   chainId: z.number(),
   totalUsd: z.string(),
@@ -98,7 +92,6 @@ export interface ChatTurn {
   content: string;
 }
 
-export type Me = z.infer<typeof MeSchema>;
 export type Balance = z.infer<typeof BalanceSchema>;
 export type BalanceHistory = z.infer<typeof BalanceHistorySchema>;
 export type ActivityItem = z.infer<typeof ActivityItemSchema>;
@@ -156,8 +149,6 @@ async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit
 /* -------------------------------------------------------------------------- */
 
 export const api = {
-  me: () => request('/v1/me', MeSchema),
-
   balance: () => request('/v1/balance', BalanceSchema),
 
   balanceHistory: () => request('/v1/balance/history', BalanceHistorySchema),

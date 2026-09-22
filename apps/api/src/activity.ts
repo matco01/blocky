@@ -1,5 +1,5 @@
 import { ENTRY_POINT_V07 } from '@blocky/wallet-core';
-import { formatUnits, type Address } from '@blocky/shared';
+import { formatUsd, type Address } from '@blocky/shared';
 import type { Execution } from './store';
 
 /**
@@ -93,7 +93,7 @@ export function mergeActivity(
 ): ActivityItem[] {
   const self = wallet.toLowerCase();
   const items: ActivityItem[] = [];
-  const seen = new Set<string>();
+  const indexed = new Set(transfers.map((transfer) => transfer.txHash));
 
   for (const transfer of transfers) {
     const sent = transfer.from === self;
@@ -112,7 +112,6 @@ export function mergeActivity(
     if (sent && transfer.to === ENTRY_POINT_V07) continue;
 
     const execution = sent ? executions.find((e) => e.txHash === transfer.txHash) : undefined;
-    if (execution) seen.add(execution.id);
 
     items.push({
       id: `${transfer.txHash}:${transfer.logIndex}`,
@@ -120,7 +119,7 @@ export function mergeActivity(
       direction: sent && !received ? 'sent' : 'received',
       txHash: transfer.txHash,
       counterparty: sent ? transfer.to : transfer.from,
-      amount: formatUnits(transfer.value, 6),
+      amount: formatUsd(transfer.value),
       status: execution?.status ?? 'success',
       summary: execution?.summary ?? null,
       timestamp: transfer.timestamp,
@@ -129,8 +128,7 @@ export function mergeActivity(
 
   // Our sends the explorer has not indexed yet still belong in the feed.
   for (const execution of executions) {
-    if (seen.has(execution.id)) continue;
-    if (transfers.some((t) => t.txHash === execution.txHash)) continue;
+    if (indexed.has(execution.txHash)) continue;
 
     items.push({
       id: execution.id,

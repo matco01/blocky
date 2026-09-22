@@ -23,9 +23,6 @@ import type {
  * tests pass a fake.
  */
 export interface PlannerContext {
-  /** The user's own address — the `self` recipient, and the account we spend from. */
-  accountAddress(): Promise<Address>;
-
   /**
    * Resolve a token reference to a real contract.
    *
@@ -96,8 +93,6 @@ export interface PlanFailure {
   code: PlanFailureCode;
   message: string;
 }
-
-export type PlanResult<T> = { ok: true; plan: T } | { ok: false; failure: PlanFailure };
 
 export function fail(code: PlanFailureCode, message: string): { ok: false; failure: PlanFailure } {
   return { ok: false, failure: { code, message } };

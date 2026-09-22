@@ -5,7 +5,7 @@ import { Icon, type IconName } from './Icon';
 import { Text } from './Text';
 
 /**
- * Receive, Send, Activity — three identical square tiles under the balance.
+ * Receive, Send, Portfolio — three identical square tiles under the balance.
  * Identical on purpose: one coloured tile in a row of three reads as a carnival.
  * Shortcuts for the things faster to tap than to type; the chat is the main surface.
  */

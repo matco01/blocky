@@ -1,6 +1,6 @@
 import {
-  CHAIN,
-  formatUnits,
+  formatUsd,
+  shortAddress,
   type Address,
   type ChainId,
   type RecipientRef,
@@ -53,11 +53,23 @@ export function createPlannerContext({
   userId,
   account,
 }: PlannerDeps): PlannerContext {
-  return {
-    async accountAddress() {
-      return account;
-    },
+  /*
+   * One read per token for the life of this context (one plan). For a USDC
+   * send, `balanceOf` and `usdcBalanceUsd` ask about the same balance, and the
+   * planner asks both at once.
+   */
+  const balances = new Map<string, Promise<bigint>>();
+  function balance(chainId: ChainId, token: Address): Promise<bigint> {
+    const key = `${chainId}:${token}`;
+    let read = balances.get(key);
+    if (!read) {
+      read = reader.erc20Balance(chainId, token, account);
+      balances.set(key, read);
+    }
+    return read;
+  }
 
+  return {
     async resolveToken(ref: TokenRef, chainId: ChainId): Promise<ResolvedToken | null> {
       const chain = getChain(chainId);
 
@@ -128,13 +140,11 @@ export function createPlannerContext({
     },
 
     async balanceOf(token: ResolvedToken) {
-      return reader.erc20Balance(token.chainId, token.address, account);
+      return balance(token.chainId, token.address);
     },
 
     async usdcBalanceUsd(chainId: ChainId) {
-      const balance = await reader.erc20Balance(chainId, getChain(chainId).usdc, account);
-
-      return formatUnits(balance, 6);
+      return formatUsd(await balance(chainId, getChain(chainId).usdc));
     },
 
     async hasNativeBalance(chainId: ChainId) {
@@ -155,7 +165,7 @@ export function createPlannerContext({
       if (chain.gasPaidInUsdc) {
         // Arc: the fee is already USDC, at 18 decimals. Cross to 6 in the one
         // function allowed to, which rounds up.
-        return formatUnits(nativeToUsdcUnits(nativeCost), 6);
+        return formatUsd(nativeToUsdcUnits(nativeCost));
       }
 
       // Native token priced in USD is a feed we do not have yet. This path is
@@ -163,7 +173,7 @@ export function createPlannerContext({
       // becomes real when the price feed lands with M5.
       const nativeUsdPrice = chain.nativeCurrency.symbol === 'ETH' ? 3000n : 1n;
 
-      return formatUnits(nativeToUsdcUnits(nativeCost * nativeUsdPrice), 6);
+      return formatUsd(nativeToUsdcUnits(nativeCost * nativeUsdPrice));
     },
 
     async isAddressFlagged() {
@@ -205,7 +215,7 @@ async function addressFor(
 
       return {
         address: ref.address,
-        display: ensName ?? truncate(ref.address),
+        display: ensName ?? shortAddress(ref.address),
         ensName,
         contactLabel: null,
       };
@@ -253,6 +263,3 @@ async function addressFor(
   }
 }
 
-function truncate(address: Address): string {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}

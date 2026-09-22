@@ -57,6 +57,16 @@ export const AddressSchema = z
 
 export type Address = `0x${string}`;
 
+/**
+ * `0x1234…abcd` — for the places an address has to be shown but no name is
+ * known. One definition, so the app and the API's confirmation-card text
+ * always shorten the same way. Wider views (the full review screen) pass more
+ * characters rather than rolling their own.
+ */
+export function shortAddress(address: string, head = 6, tail = 4): string {
+  return `${address.slice(0, head)}…${address.slice(-tail)}`;
+}
+
 export const HexSchema = z
   .string()
   .regex(/^0x(?:[0-9a-fA-F]{2})*$/, 'Must be 0x-prefixed hex with an even number of digits');

@@ -16,15 +16,12 @@ export function CapabilityChips({ capabilities, onPick }: { capabilities: Capabi
           key={capability.title}
           onPress={() => onPick(capability)}
           accessibilityLabel={capability.title}
-          style={[
-            styles.chip,
-            {
-              backgroundColor: theme.colors.surfaceMuted,
-              borderRadius: theme.radius.md,
-              paddingHorizontal: theme.space.md,
-              paddingVertical: theme.space.sm + 2,
-            },
-          ]}
+          style={{
+            backgroundColor: theme.colors.surfaceMuted,
+            borderRadius: theme.radius.md,
+            paddingHorizontal: theme.space.md,
+            paddingVertical: theme.space.sm + 2,
+          }}
         >
           <Text variant="label">{capability.title}</Text>
         </PressableScale>
@@ -38,5 +35,4 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
-  chip: {},
 });

@@ -1,4 +1,4 @@
-import { CHAIN, type Address, type ChainId } from '@blocky/shared';
+import { CHAIN, formatUsd, type Address, type ChainId } from '@blocky/shared';
 import {
   TransactionReceiptNotFoundError,
   createPublicClient,
@@ -46,10 +46,10 @@ const VIEM_CHAINS: Record<ChainId, Chain> = {
 /**
  * Chain reads.
  *
- * The only file in the product that talks to an RPC endpoint, and the only one
- * that imports viem — same containment rule the rest of `wallet-core` applies
- * to vendor SDKs. Everything here is read-only: no signing, no broadcasting,
- * nothing that changes state.
+ * The server's only door to an RPC endpoint, and the only file in the shared
+ * packages that imports viem. (The app's signing path has its own client — it
+ * has to run where the key is.) Everything here is read-only: no signing, no
+ * broadcasting, nothing that changes state.
  *
  * These are primitives, not policy. Deciding what to do with a balance belongs
  * to the planner; this just fetches it.
@@ -304,4 +304,22 @@ export function rpcConfigFromEnv(env: {
   }
 
   return { urls };
+}
+
+/**
+ * Spendable USDC in a wallet on one chain: base units, and the same amount as
+ * a dollar string (USDC's 6 decimals are the dollar scale).
+ *
+ * The Home screen, the agent's `get_balance` and the planner all read this, and
+ * they must never disagree — the agent would talk the user out of a send the
+ * planner would build, or promise one it then refuses. One function keeps
+ * them the same read.
+ */
+export async function readUsdcBalance(
+  reader: ChainReader,
+  chainId: ChainId,
+  owner: Address,
+): Promise<{ amount: bigint; usd: string }> {
+  const amount = await reader.erc20Balance(chainId, CHAINS[chainId].usdc, owner);
+  return { amount, usd: formatUsd(amount) };
 }

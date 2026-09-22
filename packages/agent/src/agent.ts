@@ -129,6 +129,12 @@ export async function runAgentTurn(
       system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
       tools: TOOLS,
       messages,
+      /*
+       * And one on the conversation: the SDK marks the last block, so each step
+       * of a tool loop reads everything up to the previous step from cache
+       * rather than paying full input price for the whole history again.
+       */
+      cache_control: { type: 'ephemeral' },
     });
 
     accumulate(usage, response.usage);
@@ -178,7 +184,7 @@ export async function runAgentTurn(
       continue;
     }
 
-    /* --- Read-only tools: execute all, answer in one message --------------- */
+    /* --- Every other tool: execute all, answer in one message ------------- */
 
     const results = await Promise.all(
       toolUses.map(async (use): Promise<Anthropic.ToolResultBlockParam> => {

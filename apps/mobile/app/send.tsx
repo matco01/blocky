@@ -1,4 +1,4 @@
-import { displayUsd, isDecimalString, isPlanExpired, type Plan, type RecipientRef } from '@blocky/shared';
+import { isDecimalString, isPlanExpired, type Plan, type RecipientRef } from '@blocky/shared';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -15,6 +15,7 @@ import { TextField } from '../components/TextField';
 import { api } from '../lib/api';
 import { confirmWithBiometrics } from '../lib/biometrics';
 import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
+import { planAmountLabel } from '../lib/planLabels';
 import { SubmittedButUnconfirmedError, useSmartAccount, type SendStage } from '../lib/smart-account';
 import { font, useTheme } from '../theme';
 
@@ -119,7 +120,7 @@ export default function SendScreen() {
     }
 
     setApprovalError(null);
-    const approval = await confirmWithBiometrics(`Send ${sendAmountLabel(plan)}`);
+    const approval = await confirmWithBiometrics(`Send ${planAmountLabel(plan)}`);
     if (!approval.ok) {
       setApprovalError(approval.message);
       return;
@@ -204,7 +205,7 @@ export default function SendScreen() {
           <View style={styles.status}>
             <Text variant="heading">{STAGE_COPY[step.stage]}</Text>
             <Text variant="body" tone="secondary">
-              {sendAmountLabel(step.plan)} to {step.plan.recipient?.display}
+              {planAmountLabel(step.plan)} to {step.plan.recipient?.display}
             </Text>
           </View>
         ) : null}
@@ -216,7 +217,7 @@ export default function SendScreen() {
             </View>
             <Text variant="title">Sent</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
-              {sendAmountLabel(step.plan)} to {step.plan.recipient?.display}
+              {planAmountLabel(step.plan)} to {step.plan.recipient?.display}
             </Text>
             {!step.recorded ? (
               <Text variant="caption" tone="tertiary" style={styles.center}>
@@ -245,7 +246,7 @@ export default function SendScreen() {
             </View>
             <Text variant="title">Still confirming</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
-              Your send of {sendAmountLabel(step.plan)} was submitted but is taking longer than usual to
+              Your send of {planAmountLabel(step.plan)} was submitted but is taking longer than usual to
               confirm. Check Activity in a minute before trying again, so you don't send it twice.
             </Text>
           </View>
@@ -264,7 +265,7 @@ export default function SendScreen() {
           {step.name === 'review' ? (
             <>
               <Button
-                label={secondsLeft === 0 ? 'Get a new quote' : `Send ${sendAmountLabel(step.plan)}`}
+                label={secondsLeft === 0 ? 'Get a new quote' : `Send ${planAmountLabel(step.plan)}`}
                 haptic={secondsLeft === 0 ? 'light' : 'heavy'}
                 loading={planning}
                 onPress={() => void send(step.plan)}
@@ -399,12 +400,6 @@ function parseAmount(input: string): string | null {
   if ((value.split('.')[1]?.length ?? 0) > 6) return null;
   if (/^0(\.0*)?$/.test(value)) return null;
   return value;
-}
-
-function sendAmountLabel(plan: Plan): string {
-  const outflow = plan.outflow[0];
-  if (!outflow) return '';
-  return outflow.usdValue ? displayUsd(outflow.usdValue) : `${outflow.displayAmount} ${outflow.token.symbol}`;
 }
 
 function secondsUntil(iso: string): number {

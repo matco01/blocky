@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchAppearanceCommand } from './appearanceCommand';
+import { matchAppearanceCommand, resolveAppearance } from './appearanceCommand';
 
 /**
  * The inversion is the whole point of this matcher: "turn off dark mode" and
@@ -83,5 +83,17 @@ describe('plain wallet requests that happen to contain "on" or "off"', () => {
     'switch my recipient to sam',
   ])('%s', (text) => {
     expect(matchAppearanceCommand(text)).toBeNull();
+  });
+});
+
+describe('resolveAppearance', () => {
+  it('toggles to the other appearance', () => {
+    expect(resolveAppearance('toggle', 'dark')).toBe('light');
+    expect(resolveAppearance('toggle', 'light')).toBe('dark');
+  });
+
+  it('an explicit target wins whatever is showing', () => {
+    expect(resolveAppearance('dark', 'dark')).toBe('dark');
+    expect(resolveAppearance('light', 'dark')).toBe('light');
   });
 });

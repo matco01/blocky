@@ -6,11 +6,11 @@ import {
   RecipientRefSchema,
   TransferIntentSchema,
   evaluatePolicy,
-  formatUnits,
   formatUsd,
   parseUsd,
   planOutflowUsd,
   type Address,
+  type Plan,
 } from '@blocky/shared';
 import {
   CHAINS,
@@ -22,6 +22,7 @@ import {
   type ChainReader,
   type GatewayBalances,
   type TokenHolding,
+  readUsdcBalance,
 } from '@blocky/wallet-core';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
@@ -100,7 +101,7 @@ export function createApp(deps: AppDeps) {
     return c.json({ userId: user.id, walletAddress: user.walletAddress, chainId: DEFAULT_CHAIN });
   });
 
-  /** Chains the app knows about, so the client never hardcodes a chain list. */
+  /** The chains the API knows about, for a client that doesn't bundle `@blocky/wallet-core`. */
   app.get('/v1/chains', (c) =>
     c.json({
       defaultChainId: DEFAULT_CHAIN,
@@ -155,7 +156,7 @@ export function createApp(deps: AppDeps) {
     const chain = getChain(DEFAULT_CHAIN);
 
     const [spendable, gateway, otherHoldings] = await Promise.allSettled([
-      reader.erc20Balance(chain.id, chain.usdc, wallet),
+      readUsdcBalance(reader, chain.id, wallet),
       deps.gatewayBalances(wallet),
       deps.walletHoldings(wallet),
     ]);
@@ -164,13 +165,13 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: 'balance_unavailable', message: 'Balance is temporarily unavailable.' }, 503);
     }
 
-    const display = formatUnits(spendable.value, 6);
+    const { amount, usd: display } = spendable.value;
     const gatewayValue = gateway.status === 'fulfilled' ? gateway.value : null;
     const holdings = otherHoldings.status === 'fulfilled' ? otherHoldings.value : [];
 
     // Best-effort history: a throttled snapshot off a real read, never a
     // reason for the balance response itself to fail.
-    const spendableUsd = parseUsd(display) + parseUsd(gatewayValue?.totalUsd ?? '0');
+    const spendableUsd = amount + parseUsd(gatewayValue?.totalUsd ?? '0');
     const investmentsUsd = holdings.reduce((sum, h) => sum + (h.usd ? parseUsd(h.usd) : 0n), 0n);
     void store
       .recordBalanceSnapshot(c.get('user').id, {
@@ -182,7 +183,7 @@ export function createApp(deps: AppDeps) {
     return c.json({
       chainId: chain.id,
       totalUsd: display,
-      usdc: { amount: spendable.value.toString(), displayAmount: display },
+      usdc: { amount: amount.toString(), displayAmount: display },
       gateway: gatewayValue,
       otherHoldings: holdings,
     });
@@ -271,14 +272,6 @@ export function createApp(deps: AppDeps) {
   });
 
   /**
-   * "I signed and submitted plan X; here is the transaction."
-   *
-   * Not taken on trust. The receipt must contain exactly the transfer the plan
-   * describes — token contract, sender, recipient, amount — or it is not an
-   * execution of this plan and nothing is recorded. Otherwise any hash could be
-   * attached to any plan.
-   */
-  /**
    * A fresh quote for a plan whose price window has passed.
    *
    * Rebuilt from the stored plan rather than from anything the app sends, and
@@ -296,12 +289,13 @@ export function createApp(deps: AppDeps) {
     if (!stored) return c.json({ error: 'No such plan' }, 404);
 
     const { plan, origin } = stored;
-    const outflow = plan.outflow[0];
-    const call = plan.calls[0];
+    const transfer = singleTransfer(plan);
 
-    if (plan.intentType !== 'transfer' || !outflow || !call || !plan.recipient) {
-      return c.json({ error: 'unsupported_plan', message: 'Only transfers can be re-quoted.' }, 422);
+    if (!transfer) {
+      return c.json({ error: 'unsupported_plan', message: 'Only single transfers can be re-quoted.' }, 422);
     }
+
+    const { call, outflow, recipient } = transfer;
 
     const intent = TransferIntentSchema.parse({
       type: 'transfer',
@@ -313,9 +307,9 @@ export function createApp(deps: AppDeps) {
       amount: { kind: 'token', value: outflow.displayAmount },
       // A contact keeps its label on the card. Anything else is pinned to the
       // exact address the user already saw, never re-resolved from a name.
-      recipient: plan.recipient.contactLabel
-        ? { kind: 'contact', label: plan.recipient.contactLabel }
-        : { kind: 'address', address: plan.recipient.address },
+      recipient: recipient.contactLabel
+        ? { kind: 'contact', label: recipient.contactLabel }
+        : { kind: 'address', address: recipient.address },
       chainId: call.chainId,
       rationale: plan.modelRationale || 'Re-quoted.',
     });
@@ -326,11 +320,8 @@ export function createApp(deps: AppDeps) {
     }
 
     if (origin === 'agent') {
-      const decision = evaluatePolicy({
-        policy: await store.getPolicy(userId),
-        plan: outcome.plan,
-        spentTodayUsd: await store.spentTodayUsd(userId),
-      });
+      const [policy, spentTodayUsd] = await Promise.all([store.getPolicy(userId), store.spentTodayUsd(userId)]);
+      const decision = evaluatePolicy({ policy, plan: outcome.plan, spentTodayUsd });
 
       if (decision.outcome === 'deny') {
         return c.json(
@@ -346,6 +337,14 @@ export function createApp(deps: AppDeps) {
 
   const ExecutionBodySchema = z.object({ txHash: TxHashSchema });
 
+  /**
+   * "I signed and submitted plan X; here is the transaction."
+   *
+   * Not taken on trust. The receipt must contain exactly the transfer the plan
+   * describes — token contract, sender, recipient, amount — or it is not an
+   * execution of this plan and nothing is recorded. Otherwise any hash could be
+   * attached to any plan.
+   */
   app.post('/v1/plans/:id/executions', async (c) => {
     const wallet = walletOf(c);
     if (wallet instanceof Response) return wallet;
@@ -360,14 +359,13 @@ export function createApp(deps: AppDeps) {
     if (!stored) return c.json({ error: 'No such plan' }, 404);
 
     const { plan, origin } = stored;
-    const call = plan.calls[0];
-    const outflow = plan.outflow[0];
+    const transfer = singleTransfer(plan);
 
-    // The only plan shape the planner builds today. Anything else is not
-    // something this route knows how to verify, so it refuses.
-    if (plan.intentType !== 'transfer' || plan.calls.length !== 1 || !call || !outflow || !plan.recipient) {
+    if (!transfer) {
       return c.json({ error: 'unsupported_plan', message: 'Only single transfers can be verified.' }, 422);
     }
+
+    const { call, outflow, recipient } = transfer;
 
     const txHash = parsed.data.txHash.toLowerCase() as `0x${string}`;
     const receipt = await pollReceipt(() => reader.transactionReceipt(call.chainId, txHash), polling);
@@ -382,7 +380,7 @@ export function createApp(deps: AppDeps) {
     const matches = containsTransfer(receipt, {
       token: call.to,
       from: wallet,
-      to: plan.recipient.address,
+      to: recipient.address,
       amount: BigInt(outflow.amount),
     });
 
@@ -405,7 +403,7 @@ export function createApp(deps: AppDeps) {
         origin,
         chainId: call.chainId,
         txHash,
-        counterparty: plan.recipient.address,
+        counterparty: recipient.address,
         amount: outflow.displayAmount,
         /*
          * USDC is always priced. An unpriced plan cannot auto-execute (the
@@ -598,4 +596,16 @@ async function pollReceipt<T>(
     if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
   return null;
+}
+
+/**
+ * The only plan shape the planner builds today: one transfer, one call, one
+ * recipient. Every route that has to take a stored plan apart asks here, so
+ * they can't drift into accepting different shapes.
+ */
+function singleTransfer(plan: Plan) {
+  const [call] = plan.calls;
+  const [outflow] = plan.outflow;
+  if (plan.intentType !== 'transfer' || plan.calls.length !== 1 || !call || !outflow || !plan.recipient) return null;
+  return { call, outflow, recipient: plan.recipient };
 }

@@ -6,7 +6,7 @@ export type TileTint = 'accent' | 'brand' | 'warning' | 'danger';
 
 /**
  * A flat surface with a stroke — the one place the stroke lives. Cards, inputs,
- * the speech bubble, grouped rows. A tinted tile drops the stroke: the colour
+ * plan cards, grouped rows. A tinted tile drops the stroke: the colour
  * is the boundary. Tiles are never pressable and never have an edge.
  */
 export function Tile({

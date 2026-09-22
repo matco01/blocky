@@ -1,6 +1,5 @@
 import {
   displayUsd,
-  formatUnits,
   parseUsd,
   type AssetDelta,
   type ChainId,
@@ -69,16 +68,14 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
 
   /* --- Resolve what the model only named ---------------------------------- */
 
-  const token = await ctx.resolveToken(intent.token, chainId);
+  const [token, recipient] = await Promise.all([
+    ctx.resolveToken(intent.token, chainId),
+    ctx.resolveRecipient(intent.recipient),
+  ]);
 
   if (!token) {
-    return fail(
-      'unknown_token',
-      describeUnknownToken(intent),
-    );
+    return fail('unknown_token', describeUnknownToken(intent));
   }
-
-  const recipient = await ctx.resolveRecipient(intent.recipient);
 
   if (!recipient) {
     return fail('unknown_recipient', "I couldn't work out who that is. Give me an address or a saved contact.");
@@ -86,32 +83,33 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
 
   /* --- Work out how much ------------------------------------------------- */
 
-  const [unitPrice, balance, hasNative, usdcBalanceUsd] = await Promise.all([
+  /*
+   * The fee is estimated against a placeholder call, because the exact amount
+   * does not change the gas cost of an ERC-20 transfer — the calldata is the
+   * same length either way. That lets it run alongside the balance reads
+   * rather than after them.
+   */
+  const probeCall = erc20TransferCall({
+    chainId,
+    token,
+    to: recipient.address,
+    amount: 0n,
+    displayAmount: '0',
+    recipientDisplay: recipient.display,
+  });
+
+  const [unitPrice, balance, hasNative, usdcBalanceUsd, networkFeeUsd, flagged] = await Promise.all([
     ctx.priceOf(token),
     ctx.balanceOf(token),
     ctx.hasNativeBalance(chainId),
     // Asked for independently of the token being sent: gas is taken in USDC
     // whatever is moving.
     ctx.usdcBalanceUsd(chainId),
+    ctx.estimateNetworkFeeUsd(chainId, [probeCall]),
+    ctx.isAddressFlagged(recipient.address),
   ]);
 
-  /*
-   * "Send everything" has to leave room for the fee when the fee comes out of
-   * the same token. Estimated against a placeholder call, because the exact
-   * amount does not change the gas cost of an ERC-20 transfer — the calldata is
-   * the same length either way.
-   */
   const isUsdc = token.address === chain.usdc;
-  const probeCall = erc20TransferCall({
-    chainId,
-    token,
-    to: recipient.address,
-    amount: balance,
-    displayAmount: formatUnits(balance, token.decimals),
-    recipientDisplay: recipient.display,
-  });
-
-  const networkFeeUsd = await ctx.estimateNetworkFeeUsd(chainId, [probeCall]);
 
   const gasContext = {
     chainId,
@@ -145,7 +143,7 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
 
   /* --- Build the transaction --------------------------------------------- */
 
-  const outflow: AssetDelta[] = [assetDelta(token, amount.amount, unitPrice)];
+  const delta = assetDelta(token, amount.amount, unitPrice);
 
   const calls: PreparedCall[] = [
     erc20TransferCall({
@@ -153,12 +151,10 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
       token,
       to: recipient.address,
       amount: amount.amount,
-      displayAmount: outflow[0]?.displayAmount ?? '0',
+      displayAmount: delta.displayAmount,
       recipientDisplay: recipient.display,
     }),
   ];
-
-  const flagged = await ctx.isAddressFlagged(recipient.address);
 
   const fee: Fee = {
     totalUsd: gas.plan.totalUsd,
@@ -173,7 +169,7 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
   const warnings: Warning[] = [
     ...recipientWarnings(recipient, flagged),
     ...tokenWarnings(token),
-    ...feeWarnings(fee.totalUsd, outflow[0]?.usdValue ?? null),
+    ...feeWarnings(fee.totalUsd, delta.usdValue),
     ...destinationWarnings({
       chainName: chain.name,
       canActThere: canPayForGeneralAction(gasContext),
@@ -190,9 +186,9 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
     plan: {
       id: crypto.randomUUID(),
       intentType: 'transfer',
-      summary: summarise(outflow[0], recipient, fee),
+      summary: summarise(delta, recipient, fee),
       modelRationale: intent.rationale,
-      outflow,
+      outflow: [delta],
       inflow: [],
       recipient,
       fee,
@@ -224,13 +220,7 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
  * misunderstood the request produces a visible mismatch rather than a
  * convincing story.
  */
-function summarise(
-  outflow: AssetDelta | undefined,
-  recipient: ResolvedRecipient,
-  fee: Fee,
-): string {
-  if (!outflow) return 'Nothing to send';
-
+function summarise(outflow: AssetDelta, recipient: ResolvedRecipient, fee: Fee): string {
   const value = outflow.usdValue === null ? '' : ` (${displayUsd(outflow.usdValue)})`;
   const cost = parseUsd(fee.totalUsd) === 0n ? 'No fee' : `${displayUsd(fee.totalUsd)} fee`;
 

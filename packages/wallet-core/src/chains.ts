@@ -199,14 +199,6 @@ export function usdcAddress(id: ChainId): Address {
   return CHAINS[id].usdc;
 }
 
-export function txUrl(id: ChainId, hash: string): string {
-  return `${CHAINS[id].explorerUrl}/tx/${hash}`;
-}
-
-export function addressUrl(id: ChainId, address: Address): string {
-  return `${CHAINS[id].explorerUrl}/address/${address}`;
-}
-
 /**
  * ERC-4337 EntryPoint v0.7, at the same address on every chain that has it.
  *
@@ -216,9 +208,6 @@ export function addressUrl(id: ChainId, address: Address): string {
  * transfers as user activity has to know this one is the fee.
  */
 export const ENTRY_POINT_V07: Address = '0x0000000071727de22e5e9d8baf0edac6f37da032';
-
-export const GATEWAY_CHAINS = Object.values(CHAINS).filter((c) => c.gateway);
-export const PAYMASTER_CHAINS = Object.values(CHAINS).filter((c) => c.paymaster);
 
 /* -------------------------------------------------------------------------- */
 /*  Arc's two decimal scales                                                   */

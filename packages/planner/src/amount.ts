@@ -1,5 +1,6 @@
 import {
   formatUnits,
+  formatUsd,
   parseUnits,
   tokenAmountForUsd,
   usdValueOf,
@@ -103,10 +104,6 @@ export function assetDelta(
     token,
     amount: amount.toString(),
     displayAmount: formatUnits(amount, token.decimals),
-    usdValue: unitPrice === null ? null : formatUsdValue(amount, token, unitPrice),
+    usdValue: unitPrice === null ? null : formatUsd(usdValueOf(amount, token.decimals, unitPrice)),
   };
-}
-
-function formatUsdValue(amount: bigint, token: ResolvedToken, unitPrice: string): string {
-  return formatUnits(usdValueOf(amount, token.decimals, unitPrice), 6);
 }

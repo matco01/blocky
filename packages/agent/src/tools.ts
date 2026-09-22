@@ -120,6 +120,14 @@ export function unwrapIntentInput(input: unknown): unknown {
   return input;
 }
 
+/** For tools that take nothing — the user and wallet are bound server-side, never supplied by the model. */
+const NO_INPUT: Anthropic.Tool['input_schema'] = {
+  type: 'object',
+  properties: {},
+  required: [],
+  additionalProperties: false,
+};
+
 export const PROPOSE_INTENT = 'propose_intent';
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -127,25 +135,25 @@ export const TOOLS: Anthropic.Tool[] = [
     name: 'get_balance',
     description:
       "The user's spendable balance, in USDC and in dollars. One figure — the USDC in their wallet on Arc. There is no per-chain balance to explain and no bridging step to mention.",
-    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    input_schema: NO_INPUT,
   },
   {
     name: 'get_policy',
     description:
       "The user's spending limits for sends you propose: the most per send (perTxCapUsd), the most per day (dailyCapUsd), which actions and tokens are allowed, and settings for unattended sending — which is not available yet, so every send needs their approval regardless. Describe these in plain words, as spending limits; never use field names or phrases like \"auto-approve threshold\" or \"unattended execution\".",
-    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    input_schema: NO_INPUT,
   },
   {
     name: 'list_contacts',
     description:
       "The user's saved contacts, as labels with addresses. Check this before proposing a transfer to a name — a label the user has not saved will not resolve, and inventing one is not possible. If several contacts could match what the user said, ask which rather than picking.",
-    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    input_schema: NO_INPUT,
   },
   {
     name: 'get_supported_chains',
     description:
       'The chains Blocky supports, with names and whether each is a testnet. Use this only when the user asks about networks directly; routing is the planner\'s job and not something to raise unprompted.',
-    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    input_schema: NO_INPUT,
   },
   {
     name: 'get_token_price',
@@ -197,13 +205,13 @@ export const TOOLS: Anthropic.Tool[] = [
     name: 'get_arc_ecosystem',
     description:
       'What is actually live on Arc right now, ranked by TVL (total value locked) — for questions like "what are the best apps on Arc" or "is there anywhere to lend/stake USDC". No APY or yield figure is included, because there is no reliable one to give yet; if the user asks for a specific rate, say you don\'t have a trustworthy number rather than estimating one. A protocol appearing here is not a recommendation and never a basis for propose_intent — Blocky only sends plain USDC transfers today.',
-    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    input_schema: NO_INPUT,
   },
   {
     name: 'get_recent_activity',
     description:
       `The user's recent sends and received payments — amounts, counterparties, timestamps, and whether each went through. Use this for anything about the past (what did I send, when did I last pay Sam, how much came in this week). It has nothing to do with what a future send would cost — that is the planner's job, not this.`,
-    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    input_schema: NO_INPUT,
   },
   {
     name: PROPOSE_INTENT,
@@ -213,7 +221,3 @@ export const TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-/** Tools the agent may call and loop on. `propose_intent` is not one — it ends the turn. */
-export const READ_ONLY_TOOLS = TOOLS.filter((tool) => tool.name !== PROPOSE_INTENT).map(
-  (tool) => tool.name,
-);

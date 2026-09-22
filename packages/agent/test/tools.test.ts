@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PROPOSE_INTENT, READ_ONLY_TOOLS, TOOLS, untrusted, untrustedJson } from '../src/tools';
+import { PROPOSE_INTENT, TOOLS, untrusted, untrustedJson } from '../src/tools';
 import { UNTRUSTED_CLOSE, UNTRUSTED_OPEN } from '../src/system-prompt';
 
 /**
@@ -72,10 +72,6 @@ describe('the tool surface', () => {
     const moneyTools = TOOLS.filter((tool) => tool.name === PROPOSE_INTENT);
 
     expect(moneyTools).toHaveLength(1);
-  });
-
-  it('never offers propose_intent as a loopable read-only tool', () => {
-    expect(READ_ONLY_TOOLS).not.toContain(PROPOSE_INTENT);
   });
 
   it('never lets a tool schema take something that could name a different user', () => {

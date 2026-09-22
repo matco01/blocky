@@ -11,7 +11,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTheme } from '../../theme';
 
-/** Three softly pulsing dots while the agent works. Lives in Blocky's speech bubble. */
+/** Three softly pulsing dots while the agent works, beside Blocky in the thinking row. */
 export function ThinkingDots() {
   const theme = useTheme();
 

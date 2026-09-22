@@ -8,7 +8,12 @@
  * is worse than admitting we don't have one.
  */
 
+import { cached } from './cache';
+
 const API = 'https://api.llama.fi';
+
+/** The full protocol list is megabytes; TVL rankings barely move within the hour. */
+const PROTOCOLS_TTL_MS = 15 * 60_000;
 const CHAIN = 'Arc';
 
 /** Plenty to answer "what's popular", small enough to stay cheap in context. */
@@ -26,7 +31,11 @@ export interface ArcProtocol {
  * `chainTvls[CHAIN]` — never the top-level `tvl`, which is the protocol's
  * total across every chain it runs on, not what's actually on Arc.
  */
-export async function getArcProtocols(fetchImpl: typeof fetch = fetch): Promise<ArcProtocol[]> {
+export function getArcProtocols(fetchImpl: typeof fetch = fetch): Promise<ArcProtocol[]> {
+  return cached(fetchImpl, 'arc-protocols', PROTOCOLS_TTL_MS, () => fetchArcProtocols(fetchImpl));
+}
+
+async function fetchArcProtocols(fetchImpl: typeof fetch): Promise<ArcProtocol[]> {
   const response = await fetchImpl(`${API}/protocols`);
 
   if (!response.ok) {

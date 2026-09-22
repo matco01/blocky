@@ -1,7 +1,3 @@
-import { isResetPhrase } from './resetPhrase';
-
-export { isResetPhrase };
-
 import type { Plan, PolicyDecision } from '@blocky/shared';
 import { useCallback, useRef, useState } from 'react';
 import { ApiError, api, type AgentResponse, type ChatTurn } from './api';
@@ -117,9 +113,9 @@ export function useChat() {
    * than the typed text just vanishing with nothing to show it was handled.
    */
   const sayLocally = useCallback(
-    (userText: string, replyText: string) => {
+    (userText: string, replyText: string, capabilities: Capability[] | null = null) => {
       append({ id: id(), role: 'user', text: userText });
-      append({ id: id(), role: 'assistant', text: replyText, plan: null, decision: null, note: null, capabilities: null });
+      append(assistantMessage(replyText, { capabilities }));
     },
     [append],
   );
@@ -131,17 +127,8 @@ export function useChat() {
    */
   const showCapabilities = useCallback(() => {
     if (busyRef.current) return;
-    append({ id: id(), role: 'user', text: 'What can you do?' });
-    append({
-      id: id(),
-      role: 'assistant',
-      text: "Here's what I can help with:",
-      plan: null,
-      decision: null,
-      note: null,
-      capabilities: ALL_CAPABILITIES,
-    });
-  }, [append]);
+    sayLocally('What can you do?', "Here's what I can help with:", ALL_CAPABILITIES);
+  }, [sayLocally]);
 
   /**
    * "Reset the chat" — wipe the conversation and go back to the greeting
@@ -158,7 +145,14 @@ export function useChat() {
   return { messages, busy, send, retry, showCapabilities, reset, sayLocally };
 }
 
+type AssistantMessage = Extract<ChatMessage, { role: 'assistant' }>;
 
+function assistantMessage(
+  text: string,
+  extra: Partial<Pick<AssistantMessage, 'plan' | 'decision' | 'note' | 'capabilities'>> = {},
+): AssistantMessage {
+  return { id: id(), role: 'assistant', text, plan: null, decision: null, note: null, capabilities: null, ...extra };
+}
 
 function fromResponse(response: AgentResponse): ChatMessage {
   const note =
@@ -168,15 +162,9 @@ function fromResponse(response: AgentResponse): ChatMessage {
         ? "I couldn't work that out. Try saying it another way."
         : null;
 
-  return {
-    id: id(),
-    role: 'assistant',
-    text: response.reply,
-    plan: response.kind === 'plan' ? response.plan : null,
-    decision: response.kind === 'plan' ? response.decision : null,
-    note,
-    capabilities: null,
-  };
+  return response.kind === 'plan'
+    ? assistantMessage(response.reply, { plan: response.plan, decision: response.decision, note })
+    : assistantMessage(response.reply, { note });
 }
 
 /**

@@ -75,7 +75,7 @@ export const palette = {
 
 export interface ThemeColors {
   background: string;
-  /** Tiles: cards, inputs, the speech bubble. */
+  /** Tiles: cards, inputs, grouped rows. */
   surface: string;
   /** Quieter tiles: chips, icon squares, an idle input. */
   surfaceMuted: string;

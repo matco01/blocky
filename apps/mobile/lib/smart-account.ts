@@ -85,11 +85,9 @@ export function useSmartAccount() {
       onStage?.('preparing');
 
       const address = wallet.address.toLowerCase() as Address;
-      const provider = await wallet.getProvider();
-
       // The delegation only needs signing once. Including it again would cost
       // the 25,000-gas authorization charge on every send for nothing.
-      const delegated = await isDelegatedToKernel(address);
+      const [provider, delegated] = await Promise.all([wallet.getProvider(), isDelegatedToKernel(address)]);
 
       let eip7702Auth: Awaited<ReturnType<typeof signAuthorization>> | undefined;
       if (!delegated) {

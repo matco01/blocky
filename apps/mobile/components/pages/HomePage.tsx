@@ -1,6 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AppState,
   KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
@@ -16,7 +17,6 @@ import { displayUsd } from '@blocky/shared';
 import { ActionButton } from '../ActionButton';
 import { BalanceDisplay } from '../BalanceDisplay';
 import { CapabilityChips } from '../chat/CapabilityChips';
-import { ChatEmpty } from '../chat/ChatEmpty';
 import { ChatInput } from '../chat/ChatInput';
 import { ChatPlanCard } from '../chat/ChatPlanCard';
 import { AssistantMessage, ErrorMessage, ThinkingRow, UserMessage } from '../chat/Messages';
@@ -26,11 +26,12 @@ import { PageDots, type PageProps } from '../PageDots';
 import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
 import { ApiError, api } from '../../lib/api';
-import type { Capability } from '../../lib/capabilities';
-import { matchAppearanceCommand } from '../../lib/appearanceCommand';
-import { isResetPhrase, useChat } from '../../lib/chat';
+import { STARTER_CAPABILITIES, type Capability } from '../../lib/capabilities';
+import { matchAppearanceCommand, resolveAppearance } from '../../lib/appearanceCommand';
+import { useChat } from '../../lib/chat';
 import { handOffPlan, useSentPlans } from '../../lib/handoff';
 import { useKeyboardVisible } from '../../lib/keyboard';
+import { isResetPhrase } from '../../lib/resetPhrase';
 import { useTheme } from '../../theme';
 
 type BalanceState =
@@ -63,6 +64,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const [balance, setBalance] = useState<BalanceState>({ state: 'loading' });
   const lastBalance = useRef<string | null>(null);
   const [focused, setFocused] = useState(true);
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
 
   const { messages, busy, send, retry, showCapabilities, reset, sayLocally } = useChat();
   const isSent = useSentPlans();
@@ -87,7 +89,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
 
       const appearance = matchAppearanceCommand(text);
       if (appearance) {
-        const target = appearance === 'toggle' ? (theme.appearance === 'dark' ? 'light' : 'dark') : appearance;
+        const target = resolveAppearance(appearance, theme.appearance);
         const already = theme.appearance === target;
 
         atBottomRef.current = true;
@@ -123,7 +125,12 @@ export function HomePage({ page, onPageChange }: PageProps) {
     try {
       const result = await api.balance();
       lastBalance.current = result.totalUsd;
-      setBalance({ state: 'ready', balance: result.totalUsd });
+      // Same number as last poll: keep the same state object, so nothing re-renders.
+      setBalance((current) =>
+        current.state === 'ready' && current.balance === result.totalUsd
+          ? current
+          : { state: 'ready', balance: result.totalUsd },
+      );
     } catch (error) {
       if (error instanceof ApiError && error.code === 'wallet_not_ready') {
         setBalance({ state: 'setting-up' });
@@ -148,13 +155,19 @@ export function HomePage({ page, onPageChange }: PageProps) {
     }, [fetchBalance]),
   );
 
-  // Poll while visible, faster while the wallet is still being created.
   useEffect(() => {
-    if (!focused) return;
+    const subscription = AppState.addEventListener('change', (state) => setAppActive(state === 'active'));
+    return () => subscription.remove();
+  }, []);
+
+  // Poll only while Home is actually on screen — not behind Account, another
+  // route, or a backgrounded app — and faster while the wallet is being created.
+  useEffect(() => {
+    if (!focused || !appActive || page !== 0) return;
     const interval = balance.state === 'setting-up' ? 2000 : BALANCE_POLL_MS;
     const timer = setInterval(() => void fetchBalance(), interval);
     return () => clearInterval(timer);
-  }, [focused, balance.state, fetchBalance]);
+  }, [focused, appActive, page, balance.state, fetchBalance]);
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
@@ -248,7 +261,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
               <Mascot pose="neutral" size={96} idle />
               <Text variant="bodyStrong">Hi! What do you want to do?</Text>
             </View>
-            <ChatEmpty onPick={pickCapability} />
+            <CapabilityChips capabilities={STARTER_CAPABILITIES} onPick={pickCapability} />
           </View>
         ) : (
           <>
@@ -304,7 +317,14 @@ export function HomePage({ page, onPageChange }: PageProps) {
           paddingBottom: typing ? theme.space.sm : insets.bottom + theme.space.sm,
         }}
       >
-        <ChatInput value={draft} onChangeText={setDraft} onSend={submit} busy={busy} inputRef={inputRef} />
+        <ChatInput
+          value={draft}
+          onChangeText={setDraft}
+          onSend={submit}
+          busy={busy}
+          allowWhileBusy={isResetPhrase}
+          inputRef={inputRef}
+        />
       </View>
     </KeyboardAvoidingView>
   );

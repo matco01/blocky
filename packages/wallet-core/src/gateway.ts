@@ -2,15 +2,16 @@ import { formatUsd, parseUsd, type Address, type ChainId, type Hex } from '@bloc
 import { CHAINS } from './chains';
 
 /**
- * Circle Gateway balances.
+ * Circle Gateway: balances, and the burn intents that move them.
  *
- * Read-only for now. Gateway holds USDC a user has *deposited* into its wallet
- * contract, which is separate from the USDC sitting in their own wallet —
- * adding the two is not double counting. But Gateway funds are not spendable by
- * a plain transfer: moving them needs a burn intent and a `gatewayMint`, which
- * is not built yet. So this is reported alongside the spendable balance, never
- * folded into it. A balance the Send button cannot spend is a confirmation card
- * that fails.
+ * Gateway holds USDC a user has *deposited* into its wallet contract, which is
+ * separate from the USDC sitting in their own wallet — adding the two is not
+ * double counting. But Gateway funds are not spendable by a plain transfer:
+ * moving them needs a signed burn intent and a `gatewayMint` on the
+ * destination. The burn-intent half is below; nothing in the planner or the
+ * app uses it yet. So this balance is reported alongside the spendable one,
+ * never folded into it. A balance the Send button cannot spend is a
+ * confirmation card that fails.
  *
  * Request and response shapes verified against the live testnet API.
  */

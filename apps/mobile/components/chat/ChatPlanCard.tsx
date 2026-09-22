@@ -1,5 +1,6 @@
-import { displayUsd, parseUsd, type Plan, type PolicyDecision } from '@blocky/shared';
+import type { Plan, PolicyDecision } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
+import { planAmountLabel, planFeeLabel } from '../../lib/planLabels';
 import { useTheme } from '../../theme';
 import { Button } from '../Button';
 import { Icon } from '../Icon';
@@ -34,30 +35,14 @@ export function ChatPlanCard({
 }) {
   const theme = useTheme();
 
-  const outflow = plan.outflow[0];
-  const amount = outflow?.usdValue ? displayUsd(outflow.usdValue) : `${outflow?.displayAmount} ${outflow?.token.symbol}`;
-  const fee = parseUsd(plan.fee.totalUsd) === 0n ? 'Free' : displayUsd(plan.fee.totalUsd);
+  const amount = planAmountLabel(plan);
+  const fee = planFeeLabel(plan);
   const denied = decision?.outcome === 'deny';
   const withinLimits = decision?.outcome === 'auto_execute';
 
-  /*
-   * `new_recipient` is hidden unconditionally: it only restates what "Needs
-   * approval" already says a few lines up, on every plan that has it.
-   *
-   * `simulation_failed` is hidden only at `warn` severity — the "we don't
-   * know" case, which today is every plan, since nothing in the planner
-   * dry-runs a plain transfer (see `plan.ts`). It is never hidden at `danger`
-   * severity: that means a simulation actually ran and found a real revert,
-   * which is exactly the kind of thing a glance should still show. Once the
-   * swap path starts simulating for real, this stays correct without needing
-   * to change — a real problem still shows; a shrug still doesn't.
-   *
-   * The full review screen shows everything regardless; this card is the
-   * glance.
-   */
-  const compactWarnings = plan.warnings.filter(
-    (warning) => warning.code !== 'new_recipient' && !(warning.code === 'simulation_failed' && warning.severity === 'warn'),
-  );
+  // `new_recipient` only restates the "Needs approval" status above. The full
+  // review screen shows every warning; this card is the glance.
+  const compactWarnings = plan.warnings.filter((warning) => warning.code !== 'new_recipient');
 
   const status = denied
     ? { label: 'Blocked', tone: 'warning' as const }

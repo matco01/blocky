@@ -11,7 +11,12 @@
  * to that rule for exactly one purpose: display.
  */
 
+import { cached } from './cache';
+
 const API = 'https://coins.llama.fi/prices/current';
+
+/** Prices move, but not enough in a minute to matter for something read out loud. */
+const PRICE_TTL_MS = 60_000;
 
 /**
  * Symbols we can answer for, mapped to DefiLlama's coingecko-slug identifiers.
@@ -67,6 +72,10 @@ export async function getTokenPriceUsd(
   const slug = KNOWN_SYMBOLS[symbol.trim().toUpperCase()];
   if (!slug) return null;
 
+  return cached(fetchImpl, slug, PRICE_TTL_MS, () => fetchPrice(slug, fetchImpl));
+}
+
+async function fetchPrice(slug: string, fetchImpl: typeof fetch): Promise<PriceQuote | null> {
   const key = `coingecko:${slug}`;
   const response = await fetchImpl(`${API}/${key}`);
 

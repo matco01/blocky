@@ -4,7 +4,6 @@ import { buildPlan } from '@blocky/planner';
 import {
   AddressSchema,
   evaluatePolicy,
-  formatUnits,
   type Address,
   type Plan,
   type PolicyDecision,
@@ -13,8 +12,8 @@ import {
   CHAINS,
   DEFAULT_CHAIN,
   getArcProtocols,
-  getChain,
   getTokenPriceUsd,
+  readUsdcBalance,
   type ChainReader,
 } from '@blocky/wallet-core';
 import { mergeActivity, type ExplorerTransfer } from './activity';
@@ -43,11 +42,11 @@ import type { Store } from './store';
  */
 
 /**
- * Read-only tools, bound to one user.
+ * The agent's tools, bound to one user.
  *
- * Constructed per request and closed over a single `userId`, so there is no
- * argument the model could supply that would read somebody else's data — the
- * tools take no arguments at all.
+ * Constructed per request and closed over a single `userId` and wallet, so no
+ * argument the model supplies can reach somebody else's data. Most only read;
+ * the contact tools write, but only to this user's own address book.
  */
 export function agentToolsFor(
   store: Store,
@@ -67,16 +66,12 @@ export function agentToolsFor(
      * spend yet.
      */
     async getBalance() {
-      const chainId = DEFAULT_CHAIN;
-      const usdc = getChain(chainId).usdc;
-
       try {
-        const amount = await reader.erc20Balance(chainId, usdc, account);
-        const display = formatUnits(amount, 6);
+        const { amount, usd } = await readUsdcBalance(reader, DEFAULT_CHAIN, account);
 
         return {
-          totalUsd: display,
-          usdc: { amount: amount.toString(), displayAmount: display, usdValue: display },
+          totalUsd: usd,
+          usdc: { amount: amount.toString(), displayAmount: usd, usdValue: usd },
         };
       } catch {
         // Say we could not read it. A zero here reads as "you have no money",

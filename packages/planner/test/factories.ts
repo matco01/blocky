@@ -2,7 +2,6 @@ import { CHAIN, type Address, type ResolvedRecipient, type ResolvedToken } from 
 import { CHAINS } from '@blocky/wallet-core';
 import type { PlannerContext } from '../src/context';
 
-export const ACCOUNT = '0x1111111111111111111111111111111111111111' as Address;
 export const ALICE = '0x2222222222222222222222222222222222222222' as Address;
 
 export const USDC_ARC: ResolvedToken = {
@@ -36,7 +35,6 @@ export const KNOWN_RECIPIENT: ResolvedRecipient = {
  */
 export function fakeContext(overrides: Partial<PlannerContext> = {}): PlannerContext {
   return {
-    accountAddress: async () => ACCOUNT,
     resolveToken: async () => USDC_ARC,
     resolveRecipient: async () => KNOWN_RECIPIENT,
     priceOf: async () => '1',

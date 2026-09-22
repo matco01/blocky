@@ -9,7 +9,6 @@ export interface PageProps {
   onPageChange: (page: number) => void;
 }
 
-export const PAGE_COUNT = 2;
 const LABELS = ['Home', 'Account'];
 
 /**
