@@ -1,12 +1,12 @@
 import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Appearance as SystemAppearance, useColorScheme } from 'react-native';
+import { Appearance as SystemAppearance } from 'react-native';
 import { EDGE, colorSchemes, motion, radius, space, strokes, type, type ThemeColors } from './tokens';
 
 export * from './tokens';
 
-/** What the user chose. `system` follows the phone. */
-export type Appearance = 'system' | 'light' | 'dark';
+/** What the user chose. */
+export type Appearance = 'light' | 'dark';
 
 export interface Theme {
   colors: ThemeColors;
@@ -34,11 +34,10 @@ const APPEARANCE_KEY = 'blocky.appearance';
 const DEFAULT_APPEARANCE: Appearance = 'light';
 
 function isAppearance(value: unknown): value is Appearance {
-  return value === 'system' || value === 'light' || value === 'dark';
+  return value === 'light' || value === 'dark';
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const system = useColorScheme();
   const [appearance, setAppearanceState] = useState<Appearance>(DEFAULT_APPEARANCE);
 
   useEffect(() => {
@@ -58,7 +57,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
    * needs expo-navigation-bar, a native module (one rebuild).
    */
   useEffect(() => {
-    SystemAppearance.setColorScheme(appearance === 'system' ? 'unspecified' : appearance);
+    SystemAppearance.setColorScheme(appearance);
   }, [appearance]);
 
   const setAppearance = useCallback((next: Appearance) => {
@@ -66,22 +65,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     void SecureStore.setItemAsync(APPEARANCE_KEY, next).catch(() => {});
   }, []);
 
-  const scheme: 'light' | 'dark' = appearance === 'system' ? (system === 'dark' ? 'dark' : 'light') : appearance;
-
   const value = useMemo<Theme>(
     () => ({
-      colors: colorSchemes[scheme],
+      colors: colorSchemes[appearance],
       space,
       radius,
       type,
       motion,
-      stroke: strokes[scheme],
+      stroke: strokes[appearance],
       edge: EDGE,
-      scheme,
+      scheme: appearance,
       appearance,
       setAppearance,
     }),
-    [scheme, appearance, setAppearance],
+    [appearance, setAppearance],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

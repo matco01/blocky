@@ -5,11 +5,11 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../lib/api';
 import { useSmartAccount } from '../../lib/smart-account';
-import { useTheme, type Appearance } from '../../theme';
+import { useTheme } from '../../theme';
 import { BlockyCard } from '../BlockyCard';
 import { Button } from '../Button';
 import { Icon, type IconName } from '../Icon';
@@ -57,14 +57,6 @@ export function AccountPage({ page, onPageChange }: PageProps) {
       'Export private key',
       "This will let you move your wallet to another app, like MetaMask. For your safety it runs in a secure page from our wallet provider rather than inside the app, and that page isn't set up yet.",
     );
-  }
-
-  function chooseAppearance() {
-    Alert.alert('Appearance', undefined, [
-      { text: APPEARANCE_LABELS.system, onPress: () => theme.setAppearance('system') },
-      { text: APPEARANCE_LABELS.dark, onPress: () => theme.setAppearance('dark') },
-      { text: APPEARANCE_LABELS.light, onPress: () => theme.setAppearance('light') },
-    ]);
   }
 
   function confirmSignOut() {
@@ -126,7 +118,13 @@ export function AccountPage({ page, onPageChange }: PageProps) {
 
       {/* --- Preferences ---------------------------------------------------- */}
       <Section title="Preferences">
-        <Row icon="color-palette-outline" label="Appearance" value={APPEARANCE_LABELS[theme.appearance]} chevron onPress={chooseAppearance} last />
+        <ToggleRow
+          icon="color-palette-outline"
+          label="Dark mode"
+          value={theme.appearance === 'dark'}
+          onValueChange={(value) => theme.setAppearance(value ? 'dark' : 'light')}
+          last
+        />
       </Section>
 
       {/* --- Security ------------------------------------------------------- */}
@@ -146,12 +144,6 @@ export function AccountPage({ page, onPageChange }: PageProps) {
     </ScrollView>
   );
 }
-
-const APPEARANCE_LABELS: Record<Appearance, string> = {
-  system: 'Same as phone',
-  light: 'Light',
-  dark: 'Dark',
-};
 
 /* -------------------------------------------------------------------------- */
 /*  Pieces                                                                     */
@@ -216,6 +208,41 @@ function Row({
     </PressableScale>
   ) : (
     body
+  );
+}
+
+/** A row that ends in a switch instead of a chevron — the native thumb already slides, no extra animation needed. */
+function ToggleRow({
+  icon,
+  label,
+  value,
+  onValueChange,
+  last,
+}: {
+  icon: IconName;
+  label: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  last?: boolean;
+}) {
+  const theme = useTheme();
+
+  return (
+    <View style={[styles.row, { borderBottomColor: theme.colors.border, borderBottomWidth: last ? 0 : 1 }]}>
+      <View style={[styles.iconSquare, { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radius.sm }]}>
+        <Icon name={icon} size={18} tone="secondary" />
+      </View>
+      <Text variant="bodyStrong" style={{ flex: 1 }}>
+        {label}
+      </Text>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: theme.colors.border, true: theme.colors.accent }}
+        thumbColor={theme.colors.background}
+        accessibilityLabel={label}
+      />
+    </View>
   );
 }
 
