@@ -1,7 +1,7 @@
-import { useLoginWithEmail } from '@privy-io/expo';
+import { useLoginWithEmail, useLoginWithOAuth } from '@privy-io/expo';
 import { useLoginWithPasskey } from '@privy-io/expo/passkey';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
 import { Mascot } from '../components/Mascot';
@@ -23,6 +23,7 @@ export default function LoginScreen() {
 
   const { sendCode, loginWithCode } = useLoginWithEmail();
   const { loginWithPasskey } = useLoginWithPasskey();
+  const { login: loginWithOAuth } = useLoginWithOAuth();
 
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -46,10 +47,16 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.screen, { backgroundColor: theme.colors.background }]}
     >
-      <View style={[styles.content, { paddingTop: insets.top + 72, paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 72, paddingBottom: insets.bottom + 24 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={{ alignItems: 'center', gap: theme.space.lg }}>
           <Mascot pose="neutral" size={140} idle />
           <View style={{ alignItems: 'center', gap: theme.space.sm }}>
@@ -119,6 +126,15 @@ export default function LoginScreen() {
             </>
           )}
 
+          {stage === 'email' ? (
+            <Button
+              label="Continue with Google"
+              variant="secondary"
+              loading={busy}
+              onPress={() => run(() => loginWithOAuth({ provider: 'google' }))}
+            />
+          ) : null}
+
           {config.passkeyRelyingParty && stage === 'email' ? (
             <Button
               label="Sign in with a passkey"
@@ -129,7 +145,7 @@ export default function LoginScreen() {
             />
           ) : null}
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -137,7 +153,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
     justifyContent: 'space-between',
   },
