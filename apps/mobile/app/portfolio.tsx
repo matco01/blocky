@@ -20,13 +20,14 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { HistoryChart } from '../components/HistoryChart';
 import { PortfolioDonut } from '../components/PortfolioDonut';
 import { PressableScale } from '../components/PressableScale';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { ScrubChart, type ChartPoint } from '../components/ScrubChart';
 import { Text } from '../components/Text';
 import { Tile } from '../components/Tile';
 import { api, type BalanceHistory } from '../lib/api';
+import { useModalTopPadding } from '../lib/screenInsets';
 import { useTheme } from '../theme';
 
 /**
@@ -74,7 +75,8 @@ interface Holding {
 interface TabData {
   holdings: Holding[];
   totalCents: bigint;
-  history: number[];
+  /** Recorded snapshots, oldest first. Only real readings — never interpolated. */
+  history: ChartPoint[];
 }
 
 type Load =
@@ -86,11 +88,14 @@ type Load =
 export default function PortfolioScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const topPadding = useModalTopPadding();
   const { width: windowWidth } = useWindowDimensions();
 
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<Tab>('spendable');
+  // A finger dragging along the chart must not also swipe the pager.
+  const [scrubbing, setScrubbing] = useState(false);
 
   const scrollRef = useRef<Animated.ScrollView>(null);
   const scrollX = useSharedValue(0);
@@ -148,12 +153,12 @@ export default function PortfolioScreen() {
         spendable: {
           holdings: spendableHoldings,
           totalCents: spendableTotal,
-          history: historyResult.snapshots.map((s) => Number(s.spendableUsd)),
+          history: historyResult.snapshots.map((s) => ({ t: Date.parse(s.takenAt), v: Number(s.spendableUsd) })),
         },
         investments: {
           holdings: investmentHoldings,
           totalCents: investmentsTotal,
-          history: historyResult.snapshots.map((s) => Number(s.investmentsUsd)),
+          history: historyResult.snapshots.map((s) => ({ t: Date.parse(s.takenAt), v: Number(s.investmentsUsd) })),
         },
       });
     } catch (error) {
@@ -206,7 +211,7 @@ export default function PortfolioScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.header, { paddingTop: theme.space.xl }]}>
+      <View style={[styles.header, { paddingTop: topPadding }]}>
         <ScreenHeader title="Portfolio" onClose={() => router.back()} />
       </View>
 
@@ -239,6 +244,7 @@ export default function PortfolioScreen() {
           ref={scrollRef}
           horizontal
           pagingEnabled
+          scrollEnabled={!scrubbing}
           showsHorizontalScrollIndicator={false}
           onScroll={onPagerScroll}
           scrollEventThrottle={16}
@@ -267,6 +273,8 @@ export default function PortfolioScreen() {
               data={load.investments}
               colors={colors}
               chartWidth={chartWidth}
+              chart
+              onScrubbingChange={setScrubbing}
               emptyTitle="No investments yet."
               emptySubtitle="ETH and other assets you hold will show up here."
             />
@@ -293,16 +301,26 @@ function HoldingsSection({
   data,
   colors,
   chartWidth,
+  chart = false,
+  onScrubbingChange,
   emptyTitle,
   emptySubtitle,
 }: {
   data: TabData;
   colors: readonly string[];
   chartWidth: number;
+  /**
+   * Investments only. Spendable money is dollars: its line is flat except
+   * when money comes in or goes out, which the activity feed already tells
+   * better. Prices move investments, and that is what a chart is for.
+   */
+  chart?: boolean;
+  onScrubbingChange?: (scrubbing: boolean) => void;
   emptyTitle: string;
   emptySubtitle: string;
 }) {
   const theme = useTheme();
+  const [scrubIndex, setScrubIndex] = useState<number | null>(null);
 
   // The chart can only place a value it can price. Priced holdings past the
   // four named slots fold into one "Other" wedge; an unpriced holding is real
@@ -333,27 +351,55 @@ function HoldingsSection({
     );
   }
 
-  const [dollars, cents] = displayUsd(data.totalCents).split('.');
+  const showChart = chart && data.history.length >= 2;
+  const scrubbed = scrubIndex === null ? null : (data.history[scrubIndex] ?? null);
+
+  // While scrubbing, the headline is that moment's recorded value; otherwise
+  // it is the live total. Either way the change is measured from the start of
+  // the period on screen.
+  const shownValue = scrubbed ? usdFromNumber(scrubbed.v) : data.totalCents;
+  const start = data.history[0];
+  const change = showChart && start ? describeChange(start.v, Number(shownValue) / 1e6) : null;
+
+  const [dollars, cents] = displayUsd(shownValue).split('.');
 
   return (
     <>
       <View style={[styles.hero, { marginTop: theme.space.lg }]}>
         <Text variant="caption" tone="secondary">
-          Total value
+          {scrubbed ? formatMoment(scrubbed.t) : 'Total value'}
         </Text>
         <View style={styles.amountRow}>
-          <Text variant="balance">{dollars}</Text>
-          <Text variant="balance" tone="tertiary">
+          <Text variant="balance" tabular>
+            {dollars}
+          </Text>
+          <Text variant="balance" tone="tertiary" tabular>
             .{cents}
           </Text>
         </View>
+        {change && start ? (
+          <Text variant="caption" tone={change.tone} tabular>
+            {change.text}
+            <Text variant="caption" tone="tertiary">
+              {'  '}
+              {scrubbed ? `since ${formatDay(start.t)}` : periodLabel(start.t)}
+            </Text>
+          </Text>
+        ) : null}
       </View>
 
-      {data.history.length >= 2 ? (
+      {showChart ? (
         <View style={{ marginTop: theme.space.lg }}>
-          <HistoryChart values={data.history} width={chartWidth} />
-          <Text variant="caption" tone="tertiary" style={styles.center}>
-            Last 30 days
+          <ScrubChart
+            points={data.history}
+            width={chartWidth}
+            onScrub={(index) => {
+              setScrubIndex(index);
+              onScrubbingChange?.(index !== null);
+            }}
+          />
+          <Text variant="caption" tone="tertiary" style={[styles.center, { marginTop: theme.space.xs }]}>
+            Hold and drag to look back
           </Text>
         </View>
       ) : null}
@@ -408,6 +454,39 @@ function HoldingsSection({
       </View>
     </>
   );
+}
+
+/** A drawn USD figure back to 6-decimal base units, for display only. */
+function usdFromNumber(value: number): bigint {
+  return BigInt(Math.round(value * 1e6));
+}
+
+/** "+$12.34 (+2.1%)" in green, red for a fall, grey for no change. */
+function describeChange(from: number, to: number): { text: string; tone: 'positive' | 'danger' | 'secondary' } {
+  const diff = to - from;
+  const cents = Math.round(diff * 100);
+  const sign = cents > 0 ? '+' : cents < 0 ? '−' : '';
+  const amount = displayUsd(usdFromNumber(Math.abs(diff)));
+  const pct = from > 0 ? ` (${sign}${Math.abs((diff / from) * 100).toFixed(Math.abs(diff / from) >= 0.1 ? 1 : 2)}%)` : '';
+
+  return {
+    text: `${sign}${amount}${pct}`,
+    tone: cents > 0 ? 'positive' : cents < 0 ? 'danger' : 'secondary',
+  };
+}
+
+function formatMoment(t: number): string {
+  return new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function formatDay(t: number): string {
+  return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+/** History only goes back as far as it was recorded; say so rather than claiming 30 days. */
+function periodLabel(start: number): string {
+  const days = Math.round((Date.now() - start) / 86_400_000);
+  return days >= 29 ? 'past 30 days' : days >= 1 ? `since ${formatDay(start)}` : 'today';
 }
 
 const styles = StyleSheet.create({
