@@ -255,6 +255,34 @@ describe('recording an execution', () => {
     expect(body.execution.status).toBe('success');
   });
 
+  /** "People you have already sent to" — the one-tap path in Limits depends on this. */
+  it('remembers the recipient once the send is verified on-chain', async () => {
+    expect(await store.isKnownRecipient('did:privy:alice', SAM)).toBe(false);
+
+    const plan = await planSend('10');
+    chain.receipts.set(hash('a'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+    await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('a') } });
+
+    expect(await store.isKnownRecipient('did:privy:alice', SAM)).toBe(true);
+  });
+
+  it('keeps the allowlist server-side: saving limits can neither wipe nor extend it', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('a'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+    await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('a') } });
+
+    const { body: policy } = await call('/v1/policy', { token: 'alice-token' });
+    const { status } = await call('/v1/policy', {
+      token: 'alice-token',
+      method: 'PUT',
+      body: { ...policy, recipientAllowlist: [MALLORY_WALLET] },
+    });
+
+    expect(status).toBe(200);
+    expect(await store.isKnownRecipient('did:privy:alice', SAM)).toBe(true);
+    expect(await store.isKnownRecipient('did:privy:alice', MALLORY_WALLET)).toBe(false);
+  });
+
   /** Any hash attached to any plan would otherwise pass. */
   it('refuses a transaction that moved a different amount, and records nothing', async () => {
     const plan = await planSend('10');
@@ -268,6 +296,7 @@ describe('recording an execution', () => {
 
     expect(status).toBe(422);
     expect(await store.listExecutions('did:privy:alice')).toEqual([]);
+    expect(await store.isKnownRecipient('did:privy:alice', SAM)).toBe(false);
   });
 
   it('refuses a transfer sent from someone else’s wallet', async () => {

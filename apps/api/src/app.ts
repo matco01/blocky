@@ -124,8 +124,18 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: 'Invalid policy', issues: parsed.error.issues }, 400);
     }
 
-    await store.setPolicy(c.get('user').id, parsed.data);
-    return c.json(parsed.data);
+    /*
+     * The recipient allowlist is server-owned: it only grows when a verified
+     * send lands (see the executions route). Whatever the client sends is
+     * ignored, so a stale Limits screen can't wipe it, and a client can't
+     * declare a stranger "already sent to".
+     */
+    const userId = c.get('user').id;
+    const { recipientAllowlist } = await store.getPolicy(userId);
+    const policy = { ...parsed.data, recipientAllowlist };
+
+    await store.setPolicy(userId, policy);
+    return c.json(policy);
   });
 
   /* ------------------------------------------------------------------------ */
@@ -416,6 +426,17 @@ export function createApp(deps: AppDeps) {
 
       // Verified against the receipt above, so it settles immediately.
       await store.settleExecution(execution.id, 'success');
+
+      /*
+       * A recipient becomes "known" only here: after a send the user approved
+       * with their own fingerprint has landed on-chain. That is what the
+       * one-tap path in Limits means by "people you have already sent to".
+       * Best effort — the transfer happened either way, and failing the
+       * request now would have the app retry into a 409.
+       */
+      await store.addKnownRecipient(userId, recipient.address).catch((error: unknown) => {
+        console.error('addKnownRecipient failed', error);
+      });
 
       return c.json({ execution: { ...execution, status: 'success' } }, 201);
     } catch (error) {
