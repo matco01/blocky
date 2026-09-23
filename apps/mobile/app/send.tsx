@@ -13,6 +13,7 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { api } from '../lib/api';
+import { useModalTopPadding } from '../lib/screenInsets';
 import { confirmWithBiometrics } from '../lib/biometrics';
 import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
 import { planAmountLabel, planDestinationLabel, planVerb } from '../lib/planLabels';
@@ -58,6 +59,7 @@ const STAGE_COPY: Record<SendStage, string> = {
 export default function SendScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const topPadding = useModalTopPadding();
   const { sendCalls, ready } = useSmartAccount();
 
   const { planId, autosend } = useLocalSearchParams<{ planId?: string; autosend?: string }>();
@@ -175,7 +177,7 @@ export default function SendScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: theme.space.xl, paddingBottom: insets.bottom + theme.space.xl },
+          { paddingTop: topPadding, paddingBottom: insets.bottom + theme.space.xl },
         ]}
         keyboardShouldPersistTaps="handled"
       >

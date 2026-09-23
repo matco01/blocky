@@ -6,6 +6,7 @@ import { ActivityRow } from '../components/ActivityRow';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { api, type ActivityItem } from '../lib/api';
+import { useModalTopPadding } from '../lib/screenInsets';
 import { useTheme } from '../theme';
 
 type Load =
@@ -17,6 +18,7 @@ type Load =
 export default function ActivityScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const topPadding = useModalTopPadding();
 
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
@@ -44,7 +46,7 @@ export default function ActivityScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
-      <View style={[styles.header, { paddingTop: theme.space.xl }]}>
+      <View style={[styles.header, { paddingTop: topPadding }]}>
         <ScreenHeader title="Activity" onClose={() => router.back()} />
       </View>
 

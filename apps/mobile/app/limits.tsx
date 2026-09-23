@@ -9,6 +9,7 @@ import { Tile } from '../components/Tile';
 import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { api } from '../lib/api';
+import { useModalTopPadding } from '../lib/screenInsets';
 import { useTheme } from '../theme';
 
 /**
@@ -27,6 +28,7 @@ import { useTheme } from '../theme';
 export default function LimitsScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const topPadding = useModalTopPadding();
 
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [perSend, setPerSend] = useState('');
@@ -84,7 +86,7 @@ export default function LimitsScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: theme.space.xl, paddingBottom: insets.bottom + theme.space.xl, gap: theme.space.xl },
+          { paddingTop: topPadding, paddingBottom: insets.bottom + theme.space.xl, gap: theme.space.xl },
         ]}
         keyboardShouldPersistTaps="handled"
       >

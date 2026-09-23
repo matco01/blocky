@@ -10,6 +10,7 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { Tile } from '../components/Tile';
 import { useSmartAccount } from '../lib/smart-account';
+import { useModalTopPadding } from '../lib/screenInsets';
 import { useTheme } from '../theme';
 
 /**
@@ -21,6 +22,7 @@ import { useTheme } from '../theme';
 export default function ReceiveScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const topPadding = useModalTopPadding();
   const { address } = useSmartAccount();
 
   const [copied, setCopied] = useState(false);
@@ -39,7 +41,7 @@ export default function ReceiveScreen() {
         styles.screen,
         {
           backgroundColor: theme.colors.background,
-          paddingTop: theme.space.xl,
+          paddingTop: topPadding,
           paddingBottom: insets.bottom + theme.space.xl,
         },
       ]}
