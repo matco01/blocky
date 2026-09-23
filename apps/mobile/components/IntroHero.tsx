@@ -17,12 +17,14 @@ import { Mascot, type MascotPose } from './Mascot';
 import { Text } from './Text';
 
 /**
- * The sign-in screen's opening: Blocky arrives.
+ * The sign-in screen's opening: Blocky lands on his own name.
  *
- * A shadow grows on an empty screen; he drops in asleep, lands with a squash
- * and a puff of dust, wakes, looks around, and hops. The letters of his name
- * drop in after him like small blocks landing. Then everything glides up into
- * its resting place and the sign-in form rises in underneath.
+ * The wordmark appears first, on its own, with a shadow growing on top of it.
+ * He drops in asleep and lands on the letters — they give under him, the
+ * middle ones most, in a ripple outward — with a squash and a puff of dust.
+ * He wakes, looks around, and hops; the letters give again, less, when he comes
+ * down. Then everything glides up into its resting place and the sign-in form
+ * rises in underneath.
  *
  * It lives on the sign-in screen because that screen is only reachable signed
  * out — so this plays for someone new, or someone coming back, and never
@@ -47,20 +49,38 @@ const MASCOT = 140;
  */
 const FEET = 0.83;
 
+/** The wordmark he stands on. Bigger than a title: it is a platform now. */
+const LETTER_SIZE = 46;
+const LETTER_LINE = 52;
+
+/**
+ * How far below the top of the text's line box the tops of the tall letters
+ * (B, l, k) sit. His feet land on that line, so this is what to nudge if he
+ * looks like he's hovering over the letters or sinking into them.
+ */
+const LETTER_TOP_INSET = 9;
+
+/** How far the wordmark tucks up under the artwork so his feet meet the letters. */
+const OVERLAP = MASCOT * (1 - FEET) + LETTER_TOP_INSET;
+
 /** Every beat, in ms from the start. */
 const T = {
-  fall: 150, // he starts to drop
-  land: 600, // ...and hits the ground
-  wake: 900, // eyes open
-  lookLeft: 1100,
-  lookRight: 1350,
-  letters: 1000, // first letter drops
-  letterGap: 70,
-  tagline: 1450,
-  hop: 1600, // happy hop
-  settle: 2000, // glide up; the form rises
-  idle: 2400, // back to his ordinary idle blinking
+  word: 0, // the wordmark fades in, alone
+  fall: 350, // he starts to drop
+  land: 800, // ...and hits the letters
+  wake: 1100, // eyes open
+  lookLeft: 1300,
+  lookRight: 1550,
+  tagline: 1650,
+  hop: 1800, // happy hop
+  hopLand: 2080, // ...and back down onto the letters
+  settle: 2250, // glide up; the form rises
+  idle: 2650, // back to his ordinary idle blinking
 } as const;
+
+/** How long a letter takes to give under him, and to spring back. */
+const PRESS_MS = 70;
+const RECOVER_MS = 280;
 
 /** Poses swapped to during the intro. Mounted once, invisibly, so the first swap never blanks for a frame while the image decodes. */
 const WARM_POSES: MascotPose[] = ['neutral', 'lookLeft', 'lookRight', 'happy'];
@@ -79,6 +99,7 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
   const squashY = useSharedValue(1);
   const hop = useSharedValue(0);
   const shadow = useSharedValue(0);
+  const word = useSharedValue(reduced ? 1 : 0);
   const tagline = useSharedValue(reduced ? 1 : 0);
 
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -96,7 +117,7 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
     onRevealRef.current();
   }
 
-  /** Where every path ends: standing still, blinking. */
+  /** Where every path ends: standing on his name, blinking. */
   function rest() {
     finished.current = true;
     setStage('done');
@@ -109,7 +130,7 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
 
     timers.current.forEach(clearTimeout);
     timers.current = [];
-    for (const value of [glide, fall, squashX, squashY, hop, shadow, tagline]) cancelAnimation(value);
+    for (const value of [glide, fall, squashX, squashY, hop, shadow, word, tagline]) cancelAnimation(value);
 
     glide.value = 0;
     fall.value = 0;
@@ -117,6 +138,7 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
     squashY.value = 1;
     hop.value = 0;
     shadow.value = 0;
+    word.value = 1;
     tagline.value = 1;
 
     rest();
@@ -133,11 +155,16 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
       withTiming(offset, { duration: 0 }),
       withDelay(T.settle, withSpring(0, { damping: 18, stiffness: 140 })),
     );
-    // A shadow grows as he falls toward it, then gives way to the one drawn
-    // into the artwork — two shadows at once reads as a smudge.
-    shadow.value = withSequence(
-      withTiming(1, { duration: T.land, easing: Easing.in(Easing.quad) }),
-      withTiming(0, { duration: 220 }),
+    // The platform first: something has to be there to land on.
+    word.value = withDelay(T.word, withTiming(1, { duration: 260, easing: Easing.out(Easing.quad) }));
+    // A shadow grows on the letters as he falls toward them, then gives way to
+    // the one drawn into the artwork — two shadows at once reads as a smudge.
+    shadow.value = withDelay(
+      T.fall - 150,
+      withSequence(
+        withTiming(1, { duration: T.land - T.fall + 150, easing: Easing.in(Easing.quad) }),
+        withTiming(0, { duration: 220 }),
+      ),
     );
     fall.value = withDelay(
       T.fall,
@@ -150,7 +177,7 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
       T.hop,
       withSequence(
         withTiming(-18, { duration: 140, easing: Easing.out(Easing.quad) }),
-        withSpring(0, { damping: 9, stiffness: 260 }),
+        withTiming(0, { duration: T.hopLand - T.hop - 140, easing: Easing.in(Easing.quad) }),
       ),
     );
     tagline.value = withDelay(T.tagline, withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) }));
@@ -161,7 +188,7 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
     at(T.lookLeft, () => setPose('lookLeft'));
     at(T.lookRight, () => setPose('lookRight'));
     at(T.hop, () => setPose('happy'));
-    at(T.hop + 280, () => void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}));
+    at(T.hopLand, () => void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}));
     at(T.settle, revealOnce);
     at(T.idle, rest);
   }
@@ -194,13 +221,14 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
     opacity: shadow.value * 0.16,
     transform: [{ scaleX: 0.3 + 0.7 * shadow.value }],
   }));
+  const wordStyle = useAnimatedStyle(() => ({ opacity: word.value }));
   const taglineStyle = useAnimatedStyle(() => ({
     opacity: tagline.value,
     transform: [{ translateY: (1 - tagline.value) * 10 }],
   }));
 
   return (
-    <Animated.View onLayout={onLayout} style={[styles.hero, { gap: theme.space.lg }, heroStyle]}>
+    <Animated.View onLayout={onLayout} style={[styles.hero, heroStyle]}>
       <View style={styles.stage}>
         <Animated.View style={[styles.shadow, shadowStyle]} />
         {[-1, 1].flatMap((dir) =>
@@ -221,44 +249,71 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
         ) : null}
       </View>
 
-      <View style={{ alignItems: 'center', gap: theme.space.sm }}>
-        <View style={styles.word} accessible accessibilityRole="header" accessibilityLabel={WORD}>
-          {WORD.split('').map((char, index) => (
-            <DropLetter key={index} char={char} index={index} stage={stage} />
-          ))}
-        </View>
-        <Animated.View style={taglineStyle}>
-          <Text variant="body" tone="secondary" style={styles.center}>
-            Your money, and an assistant that moves it for you.
-          </Text>
-        </Animated.View>
-      </View>
+      <Animated.View
+        style={[styles.word, wordStyle]}
+        accessible
+        accessibilityRole="header"
+        accessibilityLabel={WORD}
+      >
+        {WORD.split('').map((char, index) => (
+          <PlatformLetter key={index} char={char} index={index} stage={stage} />
+        ))}
+      </Animated.View>
+
+      <Animated.View style={[{ marginTop: theme.space.md }, taglineStyle]}>
+        <Text variant="body" tone="secondary" style={styles.center}>
+          Your money, and an assistant that moves it for you.
+        </Text>
+      </Animated.View>
     </Animated.View>
   );
 });
 
-/** One letter of the wordmark, dropping in like a block and settling with a wobble. */
-function DropLetter({ char, index, stage }: { char: string; index: number; stage: Stage }) {
-  const progress = useSharedValue(stage === 'done' ? 1 : 0);
-  // Alternate the lean so the letters don't all tip the same way.
-  const tilt = index % 2 === 0 ? -14 : 12;
+/**
+ * One letter of the wordmark, giving under his weight.
+ *
+ * The middle letters take the landing and dip furthest; the push travels
+ * outward, a beat later and weaker at each step, so the word reads as one
+ * springy plank rather than six separate bounces. His hop lands again at half
+ * the force.
+ */
+function PlatformLetter({ char, index, stage }: { char: string; index: number; stage: Stage }) {
+  const press = useSharedValue(0);
+
+  // Distance from the middle of the word, in letters: 0.5 for the two centre
+  // ones, 2.5 for the ends.
+  const distance = Math.abs(index - (WORD.length - 1) / 2);
+  const weight = 1 - ((distance - 0.5) / (WORD.length / 2)) * 0.8;
+  const ripple = (distance - 0.5) * 35;
 
   useEffect(() => {
     if (stage === 'play') {
-      progress.value = withDelay(T.letters + index * T.letterGap, withSpring(1, { damping: 9, stiffness: 240 }));
+      const give = (force: number) =>
+        withSequence(
+          withTiming(force, { duration: PRESS_MS, easing: Easing.out(Easing.quad) }),
+          withTiming(0, { duration: RECOVER_MS, easing: Easing.out(Easing.back(3)) }),
+        );
+
+      press.value = withDelay(
+        T.land + ripple,
+        withSequence(give(weight), withDelay(T.hopLand - T.land - PRESS_MS - RECOVER_MS, give(weight * 0.5))),
+      );
     } else if (stage === 'done') {
-      cancelAnimation(progress);
-      progress.value = 1;
+      cancelAnimation(press);
+      press.value = 0;
     }
-  }, [stage, index, progress]);
+  }, [stage, weight, ripple, press]);
 
   const style = useAnimatedStyle(() => ({
-    opacity: Math.min(1, progress.value * 4),
-    transform: [{ translateY: (1 - progress.value) * -40 }, { rotate: `${(1 - progress.value) * tilt}deg` }],
+    transform: [
+      { translateY: press.value * 7 },
+      { scaleX: 1 + press.value * 0.07 },
+      { scaleY: 1 - press.value * 0.14 },
+    ],
   }));
 
   return (
-    <Animated.View style={style}>
+    <Animated.View style={[styles.letterBox, style]}>
       <Text variant="title" tone="brand" style={styles.letter}>
         {char}
       </Text>
@@ -317,6 +372,8 @@ const styles = StyleSheet.create({
   stage: {
     width: MASCOT,
     height: MASCOT,
+    // Drawn over the letters: his feet overlap the top of the wordmark.
+    zIndex: 1,
   },
   mascot: {
     // Pivot the squash at his feet, not the middle of the image.
@@ -341,10 +398,15 @@ const styles = StyleSheet.create({
   },
   word: {
     flexDirection: 'row',
+    marginTop: -OVERLAP,
+  },
+  letterBox: {
+    // Letters squash down onto their baseline, not toward their middle.
+    transformOrigin: ['50%', '100%', 0],
   },
   letter: {
-    fontSize: 34,
-    lineHeight: 40,
+    fontSize: LETTER_SIZE,
+    lineHeight: LETTER_LINE,
   },
   center: {
     textAlign: 'center',
