@@ -18,6 +18,17 @@ export function tokenOn(chainId: keyof typeof CHAINS): ResolvedToken {
   return { ...USDC_ARC, chainId: CHAINS[chainId].id, address: CHAINS[chainId].usdc };
 }
 
+export const ME = '0x1111111111111111111111111111111111111111' as Address;
+
+export const SELF: ResolvedRecipient = {
+  address: ME,
+  display: 'your own wallet',
+  ensName: null,
+  contactLabel: null,
+  known: false,
+  isContract: false,
+};
+
 export const KNOWN_RECIPIENT: ResolvedRecipient = {
   address: ALICE,
   display: 'alice.eth',
@@ -36,12 +47,13 @@ export const KNOWN_RECIPIENT: ResolvedRecipient = {
 export function fakeContext(overrides: Partial<PlannerContext> = {}): PlannerContext {
   return {
     resolveToken: async () => USDC_ARC,
-    resolveRecipient: async () => KNOWN_RECIPIENT,
+    resolveRecipient: async (ref) => (ref.kind === 'self' ? SELF : KNOWN_RECIPIENT),
     priceOf: async () => '1',
     // 1,000 USDC.
     balanceOf: async () => 1_000_000_000n,
     usdcBalanceUsd: async () => '1000',
-    hasNativeBalance: async () => false,
+    nativeBalanceUsd: async () => null,
+    bridgeFees: async () => ({ forwardFee: 54_565n, protocolFeeCentiBps: 0n }),
     estimateNetworkFeeUsd: async () => '0.10',
     isAddressFlagged: async () => false,
     ...overrides,
@@ -55,6 +67,17 @@ export function transferIntent(overrides: Record<string, unknown> = {}) {
     amount: { kind: 'usd' as const, value: '20' },
     recipient: { kind: 'address' as const, address: ALICE },
     rationale: 'Send $20 of USDC as asked.',
+    ...overrides,
+  };
+}
+
+export function bridgeIntent(overrides: Record<string, unknown> = {}) {
+  return {
+    type: 'bridge' as const,
+    token: { kind: 'symbol' as const, symbol: 'USDC' },
+    amount: { kind: 'usd' as const, value: '20' },
+    toChainId: CHAIN.baseSepolia,
+    rationale: 'Move $20 to Base Sepolia as asked.',
     ...overrides,
   };
 }

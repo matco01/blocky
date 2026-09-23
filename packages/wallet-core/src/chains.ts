@@ -31,15 +31,14 @@ export interface ChainConfig {
   /** Whether Circle Gateway supports a unified balance here. */
   gateway: boolean;
   /**
-   * Circle's domain id for this chain, used by the Gateway API. Null where we
-   * have not verified it — mainnet ids get checked before mainnet, not guessed.
+   * Circle's domain id for this chain — one number shared by Gateway and CCTP.
+   * Null where we have not verified it: mainnet ids get checked before
+   * mainnet, not guessed.
    */
-  gatewayDomain: number | null;
-  /** Whether Circle Paymaster can take gas in USDC here. */
-  paymaster: boolean;
+  circleDomain: number | null;
   /**
    * True when gas is paid in USDC natively (Arc). A user holding only USDC can
-   * transact here with no paymaster, no sponsorship, and no surcharge.
+   * transact here; anywhere else they need the chain's own gas token.
    */
   gasPaidInUsdc: boolean;
 }
@@ -54,8 +53,7 @@ export const CHAINS = {
     usdc: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
     explorerUrl: 'https://etherscan.io',
     gateway: true,
-    gatewayDomain: null,
-    paymaster: false,
+    circleDomain: null,
     gasPaidInUsdc: false,
   },
   [CHAIN.optimism]: {
@@ -67,8 +65,7 @@ export const CHAINS = {
     usdc: '0x0b2c639c533813f4aa9d7837caf62653d097ff85',
     explorerUrl: 'https://optimistic.etherscan.io',
     gateway: true,
-    gatewayDomain: null,
-    paymaster: false,
+    circleDomain: null,
     gasPaidInUsdc: false,
   },
   [CHAIN.unichain]: {
@@ -80,8 +77,7 @@ export const CHAINS = {
     usdc: '0x078d782b760474a361dda0af3839290b0ef57ad6',
     explorerUrl: 'https://uniscan.xyz',
     gateway: true,
-    gatewayDomain: null,
-    paymaster: false,
+    circleDomain: null,
     gasPaidInUsdc: false,
   },
   [CHAIN.polygon]: {
@@ -93,8 +89,7 @@ export const CHAINS = {
     usdc: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
     explorerUrl: 'https://polygonscan.com',
     gateway: true,
-    gatewayDomain: null,
-    paymaster: false,
+    circleDomain: null,
     gasPaidInUsdc: false,
   },
   [CHAIN.base]: {
@@ -106,8 +101,7 @@ export const CHAINS = {
     usdc: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
     explorerUrl: 'https://basescan.org',
     gateway: true,
-    gatewayDomain: null,
-    paymaster: true,
+    circleDomain: null,
     gasPaidInUsdc: false,
   },
   [CHAIN.arbitrum]: {
@@ -119,8 +113,7 @@ export const CHAINS = {
     usdc: '0xaf88d065e77c8cc2239327c5edb3a432268e5831',
     explorerUrl: 'https://arbiscan.io',
     gateway: true,
-    gatewayDomain: null,
-    paymaster: true,
+    circleDomain: null,
     gasPaidInUsdc: false,
   },
   [CHAIN.avalanche]: {
@@ -132,8 +125,7 @@ export const CHAINS = {
     usdc: '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e',
     explorerUrl: 'https://snowtrace.io',
     gateway: true,
-    gatewayDomain: null,
-    paymaster: false,
+    circleDomain: null,
     gasPaidInUsdc: false,
   },
 
@@ -156,8 +148,7 @@ export const CHAINS = {
     usdc: '0x3600000000000000000000000000000000000000',
     explorerUrl: 'https://testnet.arcscan.app',
     gateway: true,
-    gatewayDomain: 26,
-    paymaster: false,
+    circleDomain: 26,
     gasPaidInUsdc: true,
   },
   [CHAIN.baseSepolia]: {
@@ -169,8 +160,7 @@ export const CHAINS = {
     usdc: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
     explorerUrl: 'https://sepolia.basescan.org',
     gateway: true,
-    gatewayDomain: 6,
-    paymaster: true,
+    circleDomain: 6,
     gasPaidInUsdc: false,
   },
   [CHAIN.arbitrumSepolia]: {
@@ -182,8 +172,7 @@ export const CHAINS = {
     usdc: '0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d',
     explorerUrl: 'https://sepolia.arbiscan.io',
     gateway: true,
-    gatewayDomain: 3,
-    paymaster: true,
+    circleDomain: 3,
     gasPaidInUsdc: false,
   },
 } as const satisfies Record<ChainId, ChainConfig>;

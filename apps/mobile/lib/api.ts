@@ -46,9 +46,17 @@ const BalanceSchema = z.object({
       perChain: z.array(z.object({ chainId: z.number(), balanceUsd: z.string() })),
     })
     .nullable(),
-  /** Native currency on other chains — ETH sitting on Base Sepolia, say. Not spendable through a plan. */
+  /** What sits on other chains: their gas token, and USDC moved there. Not spendable through a plan. */
   otherHoldings: z.array(
-    z.object({ chainId: z.number(), symbol: z.string(), amount: z.string(), decimals: z.number(), usd: z.string().nullable() }),
+    z.object({
+      chainId: z.number(),
+      symbol: z.string(),
+      amount: z.string(),
+      decimals: z.number(),
+      usd: z.string().nullable(),
+      /** A dollar stablecoin — shown with cash, not investments. Absent from older servers. */
+      stable: z.boolean().default(false),
+    }),
   ),
 });
 
@@ -63,6 +71,8 @@ const ActivityItemSchema = z.object({
   counterparty: z.string(),
   amount: z.string(),
   status: z.enum(['pending', 'success', 'reverted']),
+  /** Set where "Sent to 0x…" would mislead, e.g. a move to another chain. Absent from older servers. */
+  title: z.string().nullable().default(null),
   summary: z.string().nullable(),
   timestamp: z.string(),
 });

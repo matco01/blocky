@@ -1,6 +1,7 @@
 import {
   formatUsd,
   shortAddress,
+  usdValueOf,
   type Address,
   type ChainId,
   type RecipientRef,
@@ -12,8 +13,11 @@ import type { PlannerContext } from '@blocky/planner';
 import {
   CHAINS,
   DEFAULT_CHAIN,
+  fetchCctpFees,
   getChain,
+  getTokenPriceUsd,
   nativeToUsdcUnits,
+  priceAsDecimal,
   type ChainReader,
 } from '@blocky/wallet-core';
 import type { Store } from './store';
@@ -29,15 +33,28 @@ import type { Store } from './store';
  */
 
 /**
- * Gas units for a transfer sent as a user operation from a 7702 Kernel account.
+ * Gas units for a user operation from a 7702 Kernel account, by how many calls
+ * it batches.
  *
- * Deliberately generous: it covers validation, the ERC-20 call, bundler
- * overhead, and the one-off 25,000-gas cost of the first 7702 authorization.
- * The bundler's own estimate is what actually gets submitted; this only sizes
- * the fee shown on the card and the reserve held back for it, and those must
- * not come in under the real cost. On Arc it is about half a cent.
+ * Deliberately generous: the first call's allowance covers validation, bundler
+ * overhead and the one-off 25,000-gas cost of the first 7702 authorization;
+ * each further call (a CCTP burn after its approval, say) adds room for a
+ * contract call of its own. The bundler's estimate is what actually gets
+ * submitted; this only sizes the fee shown on the card and the reserve held
+ * back for it, and those must not come in under the real cost. A transfer on
+ * Arc is about half a cent.
  */
-const USER_OP_TRANSFER_GAS = 250_000n;
+const USER_OP_BASE_GAS = 250_000n;
+const USER_OP_EXTRA_CALL_GAS = 200_000n;
+
+function userOpGas(callCount: number): bigint {
+  return USER_OP_BASE_GAS + USER_OP_EXTRA_CALL_GAS * BigInt(Math.max(0, callCount - 1));
+}
+
+/** A chain's gas token priced in USD, or null. Throws only if the price feed itself is down. */
+async function gasTokenPrice(chainId: ChainId): Promise<string | null> {
+  return priceAsDecimal(await getTokenPriceUsd(getChain(chainId).nativeCurrency.symbol));
+}
 
 export interface PlannerDeps {
   reader: ChainReader;
@@ -147,11 +164,18 @@ export function createPlannerContext({
       return formatUsd(await balance(chainId, getChain(chainId).usdc));
     },
 
-    async hasNativeBalance(chainId: ChainId) {
-      return (await reader.nativeBalance(chainId, account)) > 0n;
+    async nativeBalanceUsd(chainId: ChainId) {
+      // No endpoint for that chain means we cannot see what is there, which
+      // the gas rules read as "not enough" rather than assuming there is some.
+      if (!reader.supports(chainId)) return null;
+
+      const [balance, price] = await Promise.all([reader.nativeBalance(chainId, account), gasTokenPrice(chainId)]);
+      if (price === null) return null;
+
+      return formatUsd(usdValueOf(balance, CHAINS[chainId].nativeCurrency.decimals, price));
     },
 
-    async estimateNetworkFeeUsd(chainId: ChainId) {
+    async estimateNetworkFeeUsd(chainId: ChainId, calls) {
       const chain = CHAINS[chainId];
 
       /*
@@ -160,7 +184,7 @@ export function createPlannerContext({
        * for. Throwing surfaces as "temporarily unavailable" instead.
        */
       const gasPrice = await reader.gasPrice(chainId);
-      const nativeCost = gasPrice * USER_OP_TRANSFER_GAS;
+      const nativeCost = gasPrice * userOpGas(calls.length);
 
       if (chain.gasPaidInUsdc) {
         // Arc: the fee is already USDC, at 18 decimals. Cross to 6 in the one
@@ -168,12 +192,16 @@ export function createPlannerContext({
         return formatUsd(nativeToUsdcUnits(nativeCost));
       }
 
-      // Native token priced in USD is a feed we do not have yet. This path is
-      // only reached for non-Arc chains, which are optional in v1; the number
-      // becomes real when the price feed lands with M5.
-      const nativeUsdPrice = chain.nativeCurrency.symbol === 'ETH' ? 3000n : 1n;
+      // Anywhere else the fee is in the chain's gas token, priced live. No
+      // price is no estimate — never a guessed one.
+      const price = await gasTokenPrice(chainId);
+      if (price === null) throw new Error(`No price for ${chain.nativeCurrency.symbol}.`);
 
-      return formatUsd(nativeToUsdcUnits(nativeCost * nativeUsdPrice));
+      return formatUsd(usdValueOf(nativeCost, chain.nativeCurrency.decimals, price) + 1n);
+    },
+
+    async bridgeFees(from: ChainId, to: ChainId) {
+      return fetchCctpFees(from, to);
     },
 
     async isAddressFlagged() {

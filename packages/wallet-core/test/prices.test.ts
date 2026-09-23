@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getTokenPriceUsd, KNOWN_SYMBOLS } from '../src';
+import { getPriceSnapshot, getTokenPriceUsd, KNOWN_SYMBOLS, priceAsDecimal } from '../src';
 
 function fakeFetch(status: number, body: unknown) {
   const calls: string[] = [];
@@ -11,11 +11,11 @@ function fakeFetch(status: number, body: unknown) {
   return { impl, calls };
 }
 
+const ETH = { price: 2628.32, symbol: 'ETH', timestamp: 1789767100, confidence: 0.99 };
+
 describe('token prices', () => {
   it('looks up a known symbol by its DefiLlama coingecko slug', async () => {
-    const { impl, calls } = fakeFetch(200, {
-      coins: { 'coingecko:ethereum': { price: 2628.32, symbol: 'ETH', timestamp: 1789767100, confidence: 0.99 } },
-    });
+    const { impl, calls } = fakeFetch(200, { coins: { 'coingecko:ethereum': ETH } });
 
     const quote = await getTokenPriceUsd('eth', impl);
 
@@ -52,5 +52,63 @@ describe('token prices', () => {
 
   it('curates POL and MATIC to the same slug, since Polygon renamed its token', () => {
     expect(KNOWN_SYMBOLS.POL).toBe(KNOWN_SYMBOLS.MATIC);
+  });
+});
+
+/** The cost model: one upstream request serves every symbol and every caller. */
+describe('the shared snapshot', () => {
+  it('prices every curated token in a single request', async () => {
+    const { impl, calls } = fakeFetch(200, { coins: {} });
+
+    await getPriceSnapshot(impl);
+
+    expect(calls).toHaveLength(1);
+    for (const slug of new Set(Object.values(KNOWN_SYMBOLS))) {
+      expect(calls[0]).toContain(`coingecko:${slug}`);
+    }
+  });
+
+  it('answers many lookups, in parallel or in sequence, from that one request', async () => {
+    const { impl, calls } = fakeFetch(200, { coins: { 'coingecko:ethereum': ETH } });
+
+    await Promise.all([getTokenPriceUsd('ETH', impl), getTokenPriceUsd('BTC', impl), getTokenPriceUsd('ETH', impl)]);
+    await getTokenPriceUsd('SOL', impl);
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it('names a shared slug by the symbol that was asked for', async () => {
+    const { impl } = fakeFetch(200, {
+      coins: { 'coingecko:polygon-ecosystem-token': { price: 0.1, symbol: 'POL', timestamp: 1, confidence: 0.99 } },
+    });
+
+    expect((await getTokenPriceUsd('MATIC', impl))?.symbol).toBe('MATIC');
+    expect((await getTokenPriceUsd('POL', impl))?.symbol).toBe('POL');
+  });
+
+  it('does not cache a failure, so the next caller tries again', async () => {
+    let fail = true;
+    const impl = (async () =>
+      fail ? new Response('{}', { status: 503 }) : new Response(JSON.stringify({ coins: { 'coingecko:ethereum': ETH } }))) as typeof fetch;
+
+    await expect(getTokenPriceUsd('ETH', impl)).rejects.toThrow();
+    fail = false;
+    expect((await getTokenPriceUsd('ETH', impl))?.usd).toBe(2628.32);
+  });
+});
+
+describe('priceAsDecimal', () => {
+  const quote = { symbol: 'ETH', usd: 2628.3219, confidence: 0.99, asOf: '' };
+
+  it('renders a price at the six-place USD scale', () => {
+    expect(priceAsDecimal(quote)).toBe('2628.321900');
+  });
+
+  it('treats a missing, zero, negative or non-finite price as unpriced — never as free', () => {
+    expect(priceAsDecimal(null)).toBeNull();
+    expect(priceAsDecimal({ ...quote, usd: 0 })).toBeNull();
+    expect(priceAsDecimal({ ...quote, usd: -1 })).toBeNull();
+    expect(priceAsDecimal({ ...quote, usd: Number.NaN })).toBeNull();
+    expect(priceAsDecimal({ ...quote, usd: Number.POSITIVE_INFINITY })).toBeNull();
   });
 });

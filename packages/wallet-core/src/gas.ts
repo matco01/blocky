@@ -8,41 +8,46 @@ import { getChain } from './chains';
  * how that is reconciled, and it cannot be reconciled by the agent being
  * clever: a transaction nobody can pay gas for does not broadcast.
  *
- * In order of preference:
+ * There are exactly two routes, and nobody but the user pays for either:
  *
- *  1. **Native USDC gas (Arc).** Gas is paid in USDC from the same balance being
- *     spent. No paymaster, no surcharge, no third party. This is why Arc is the
- *     home chain.
- *  2. **Circle Paymaster** (Base, Arbitrum). Gas deducted in USDC from the
- *     transaction itself, plus Circle's 10% surcharge.
- *  3. **Native token**, if the account happens to hold some. A fallback that
- *     should be vanishingly rare.
+ *  1. **Arc: gas in USDC.** Arc's native currency is USDC, so gas comes out of
+ *     the same balance being spent. No paymaster, no surcharge, no third party.
+ *     This is why Arc is the home chain.
+ *  2. **Anywhere else: the chain's own gas token.** ETH on Base, POL on
+ *     Polygon. The user either holds enough of it there or they cannot act
+ *     there, and the honest thing is to say so — "get a little ETH on Base
+ *     first" is advice they can follow; a transaction that fails at broadcast
+ *     is not.
  *
- * What is deliberately *not* here, because it was wrong in an earlier version:
+ * What is deliberately *not* here:
  *
- *  - "Gateway transfers are gas-free." They are not. A Gateway transfer ends in
- *    a `gatewayMint` on the destination chain, and someone pays for it. And a
- *    same-chain send is not a Gateway operation at all — it is a plain ERC-20
- *    transfer.
- *  - "Circle Gas Station sponsors onboarding." Gas Station sponsors Circle's own
- *    wallets, not an arbitrary smart account. A `sponsored` tier comes back
- *    only when a sponsoring paymaster is actually integrated — a tier that
- *    promises $0 fees with nothing behind it produces plans that fail on-chain.
+ *  - **Sponsorship.** Blocky pays nobody's fees. A sponsored tier needs a
+ *    funded paymaster and a business model behind it; a plan that promises $0
+ *    with neither fails on-chain.
+ *  - **Circle Paymaster.** It takes gas in USDC plus a 10% surcharge, on a
+ *    handful of chains. Rather than a third fee model that only works in some
+ *    places, a user who wants to act on another chain gets that chain's gas
+ *    token when they move money there — see the destination warnings in the
+ *    planner.
+ *  - "Gateway transfers are gas-free." They are not: a Gateway transfer ends
+ *    in a `gatewayMint` on the destination chain, and someone pays for it.
  */
 
-/** Circle Paymaster's surcharge on Base and Arbitrum, in basis points. */
-export const PAYMASTER_SURCHARGE_BPS = 1000n; // 10%
-
-export type GasMode = 'sponsored' | 'usdc' | 'native';
+export type GasMode = 'usdc' | 'native';
 
 export interface GasContext {
   chainId: ChainId;
-  /** Estimated network fee in USD, before any surcharge. */
+  /** Estimated network fee in USD. */
   networkFeeUsd: string;
   /** Spendable USDC, in USD. */
   usdcBalanceUsd: string;
-  /** Whether the account holds any native token (on Arc, native *is* USDC). */
-  hasNativeBalance: boolean;
+  /**
+   * The chain's native gas token held there, valued in USD. Null when it
+   * cannot be valued — no price, or no way to read that chain — which counts
+   * as "not enough", never as "probably fine". Unused on Arc, where native is
+   * the USDC balance above.
+   */
+  nativeBalanceUsd: string | null;
 }
 
 export interface GasPlan {
@@ -50,8 +55,6 @@ export interface GasPlan {
   /** What the user is charged, all-in. The only number the UI may show. */
   totalUsd: string;
   networkUsd: string;
-  /** Surcharge, folded into `totalUsd`. Never shown as its own line. */
-  paymasterUsd: string;
 }
 
 export type GasResult =
@@ -59,91 +62,46 @@ export type GasResult =
   | { ok: false; code: 'no_gas_route'; message: string };
 
 /**
- * Work out who pays for gas and how much the user sees.
+ * Work out how gas gets paid and how much the user sees.
  *
- * Pure and synchronous — every input is resolved by the caller — so the tier
- * logic can be tested exhaustively without a chain.
+ * Pure and synchronous — every input is resolved by the caller — so the rule
+ * can be tested exhaustively without a chain.
  */
 export function selectGasStrategy(ctx: GasContext): GasResult {
   const chain = getChain(ctx.chainId);
   const network = parseUsd(ctx.networkFeeUsd);
-  const usdc = parseUsd(ctx.usdcBalanceUsd);
+  const fee = { totalUsd: formatUsd(network), networkUsd: formatUsd(network) };
 
-  // Tier 1: the chain takes gas in USDC directly.
   if (chain.gasPaidInUsdc) {
-    if (usdc >= network) {
-      return {
-        ok: true,
-        plan: {
-          mode: 'usdc',
-          totalUsd: formatUsd(network),
-          networkUsd: formatUsd(network),
-          paymasterUsd: '0',
-        },
-      };
-    }
+    if (parseUsd(ctx.usdcBalanceUsd) >= network) return { ok: true, plan: { mode: 'usdc', ...fee } };
 
-    // On a USDC-gas chain there is no other currency to fall back to.
-    return noRoute();
-  }
-
-  // Tier 2: Circle Paymaster takes gas in USDC out of the transaction.
-  if (chain.paymaster) {
-    const surcharge = (network * PAYMASTER_SURCHARGE_BPS) / 10_000n;
-    const total = network + surcharge;
-
-    if (usdc >= total) {
-      return {
-        ok: true,
-        plan: {
-          mode: 'usdc',
-          totalUsd: formatUsd(total),
-          networkUsd: formatUsd(network),
-          paymasterUsd: formatUsd(surcharge),
-        },
-      };
-    }
-  }
-
-  // Last resort: the account happens to hold native token.
-  if (ctx.hasNativeBalance) {
     return {
-      ok: true,
-      plan: {
-        mode: 'native',
-        totalUsd: formatUsd(network),
-        networkUsd: formatUsd(network),
-        paymasterUsd: '0',
-      },
+      ok: false,
+      code: 'no_gas_route',
+      message: 'Not enough USDC to cover the network fee. Add a little and try again.',
     };
   }
 
-  return noRoute();
-}
+  if (ctx.nativeBalanceUsd !== null && parseUsd(ctx.nativeBalanceUsd) >= network) {
+    return { ok: true, plan: { mode: 'native', ...fee } };
+  }
 
-/*
- * Say so plainly rather than letting a transaction fail at broadcast — "add a
- * little USDC" is a fixable instruction; "transaction underpriced" is not.
- */
-function noRoute(): GasResult {
+  const token = chain.nativeCurrency.symbol;
   return {
     ok: false,
     code: 'no_gas_route',
-    message: 'Not enough USDC to cover the network fee. Add a little and try again.',
+    message: `Fees on ${chain.name} are paid in ${token}, and there isn't enough ${token} in your wallet there. Get a little ${token} on ${chain.name} first.`,
   };
 }
 
 /**
  * Can this account do anything at all on this chain?
  *
- * Used for the destination-gas warning: USDC that lands on a chain with neither
- * USDC gas nor Circle Paymaster can be received but not spent by someone who
- * holds no native token there.
+ * Used for the destination warning: USDC that lands on a chain where the user
+ * holds no gas token can be received there but not moved again.
  *
  * Implemented by asking {@link selectGasStrategy} rather than re-listing which
- * chains have which gas route. Two copies of that rule would eventually
- * disagree, and the wrong copy would be this one, because nobody runs it in
- * production.
+ * chains take which gas. Two copies of that rule would eventually disagree.
  */
 export function canPayForGeneralAction(ctx: GasContext): boolean {
   return selectGasStrategy(ctx).ok;

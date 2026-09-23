@@ -1,4 +1,5 @@
-import { ENTRY_POINT_V07 } from '@blocky/wallet-core';
+import { CHAIN } from '@blocky/shared';
+import { ENTRY_POINT_V07, cctpContracts } from '@blocky/wallet-core';
 import type { Address } from '@blocky/shared';
 import { describe, expect, it } from 'vitest';
 import { mergeActivity, type ExplorerTransfer } from '../src/activity';
@@ -103,5 +104,24 @@ describe('ordinary sends are untouched', () => {
 
     expect(items).toHaveLength(1);
     expect(items[0]?.summary).toContain('alice.eth');
+  });
+});
+
+/**
+ * Money moved to the user's own wallet on another chain leaves through
+ * Circle's CCTP minter. "Sent to 0xb43d…f192" would read as paying a stranger.
+ */
+describe('moves between chains', () => {
+  const MINTER = cctpContracts(CHAIN.arcTestnet)!.tokenMinter;
+
+  it('says the money moved chains, rather than naming the contract it passed through', () => {
+    const [item] = mergeActivity(WALLET, [], [transfer({ to: MINTER })]);
+
+    expect(item?.title).toBe('Moved to another chain');
+    expect(item?.direction).toBe('sent');
+  });
+
+  it('leaves an ordinary send to be worded by the app', () => {
+    expect(mergeActivity(WALLET, [], [transfer()])[0]?.title).toBeNull();
   });
 });

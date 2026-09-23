@@ -15,7 +15,8 @@ export function ActivityRow({ item }: { item: ActivityItem }) {
   const sent = item.direction === 'sent';
   const failed = item.status === 'reverted';
 
-  const title = sent ? `Sent to ${shortAddress(item.counterparty)}` : `Received from ${shortAddress(item.counterparty)}`;
+  const title =
+    item.title ?? (sent ? `Sent to ${shortAddress(item.counterparty)}` : `Received from ${shortAddress(item.counterparty)}`);
   const amount = `${sent ? '−' : '+'}${displayUsd(item.amount)}`;
 
   return (

@@ -238,55 +238,33 @@ describe('warnings', () => {
   });
 });
 
-describe('chains without a gas route', () => {
+describe('where a send can come from', () => {
   /**
-   * Previously this planned for free on the belief that Gateway pays. It does
-   * not, so a USDC-only user genuinely cannot send on Polygon — and the honest
-   * outcome is a refusal they can act on, not a plan that fails at broadcast.
+   * The app signs on Arc and nowhere else. A plan for another chain would pass
+   * planning and then fail at the fingerprint, having looked fine on the card.
    */
-  it('refuses a send on Polygon for a user holding only USDC', async () => {
+  it('refuses to send from another chain, and says which one', async () => {
     const result = await buildPlan(
-      intent({ chainId: CHAIN.polygon }),
-      fakeContext({ resolveToken: async () => tokenOn(CHAIN.polygon) }),
+      intent({ chainId: CHAIN.baseSepolia }),
+      fakeContext({ resolveToken: async () => tokenOn(CHAIN.baseSepolia) }),
     );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('not_implemented');
+      expect(result.failure.message).toContain('Base Sepolia');
+    }
+  });
+
+  it('refuses when Arc USDC cannot cover the fee', async () => {
+    const result = await buildPlan(intent(), fakeContext({ usdcBalanceUsd: async () => '0.05' }));
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.failure.code).toBe('no_gas_route');
   });
 
-  it('never attaches the destination warning to a same-chain transfer', async () => {
-    // If gas can be paid to send there, the user can act there. The warning is
-    // for cross-chain moves, which land in M5.
-    const plan = await planOk(
-      { chainId: CHAIN.polygon, recipient: { kind: 'self' } },
-      fakeContext({
-        resolveToken: async () => tokenOn(CHAIN.polygon),
-        hasNativeBalance: async () => true,
-      }),
-    );
-
-    expect(codes(plan)).not.toContain('destination_no_gas_route');
-  });
-
-  it('stays quiet on Base, where Circle Paymaster is deployed', async () => {
-    const plan = await planOk(
-      { chainId: CHAIN.base, recipient: { kind: 'self' } },
-      fakeContext({ resolveToken: async () => tokenOn(CHAIN.base) }),
-    );
-
-    expect(codes(plan)).not.toContain('destination_no_gas_route');
-  });
-
-  it('stays quiet when the user holds native token there', async () => {
-    const plan = await planOk(
-      { chainId: CHAIN.polygon, recipient: { kind: 'self' } },
-      fakeContext({
-        resolveToken: async () => tokenOn(CHAIN.polygon),
-        hasNativeBalance: async () => true,
-      }),
-    );
-
-    expect(codes(plan)).not.toContain('destination_no_gas_route');
+  it('never carries the destination warning — that is for money moving between chains', async () => {
+    expect(codes(await planOk())).not.toContain('destination_no_gas_route');
   });
 });
 
@@ -306,20 +284,6 @@ describe('what is not built yet fails loudly', () => {
     if (!result.ok) expect(result.failure.code).toBe('not_implemented');
   });
 
-  it('refuses a bridge', async () => {
-    const bridge = IntentSchema.parse({
-      type: 'bridge',
-      token: { kind: 'symbol', symbol: 'USDC' },
-      amount: { kind: 'usd', value: '20' },
-      toChainId: CHAIN.base,
-      rationale: 'Move $20 to Base.',
-    });
-
-    const result = await buildPlan(bridge, fakeContext());
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.failure.code).toBe('not_implemented');
-  });
 });
 
 describe('handing off to the policy engine', () => {

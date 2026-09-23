@@ -53,7 +53,7 @@ export async function fetchGatewayBalances(
   const doFetch = options.fetch ?? fetch;
 
   const chains = Object.values(CHAINS).filter(
-    (chain) => chain.gateway && chain.testnet === options.testnet && chain.gatewayDomain !== null,
+    (chain) => chain.gateway && chain.testnet === options.testnet && chain.circleDomain !== null,
   );
 
   if (chains.length === 0) return { totalUsd: '0', perChain: [] };
@@ -63,7 +63,7 @@ export async function fetchGatewayBalances(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       token: 'USDC',
-      sources: chains.map((chain) => ({ domain: chain.gatewayDomain, depositor })),
+      sources: chains.map((chain) => ({ domain: chain.circleDomain, depositor })),
     }),
   });
 
@@ -77,7 +77,7 @@ export async function fetchGatewayBalances(
   let total = 0n;
 
   for (const entry of body.balances ?? []) {
-    const chain = chains.find((c) => c.gatewayDomain === entry.domain);
+    const chain = chains.find((c) => c.circleDomain === entry.domain);
     if (!chain) continue;
 
     // parseUsd rejects anything that is not a plain decimal, so a malformed

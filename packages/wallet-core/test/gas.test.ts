@@ -3,21 +3,21 @@ import { describe, expect, it } from 'vitest';
 import { canPayForGeneralAction, selectGasStrategy, type GasContext } from '../src';
 
 /**
- * The zero-ETH case is the default state of a real user, and the easiest thing
- * to break by accident because dev wallets usually have ETH lying around. Every
- * test here holds no native token unless it says otherwise.
+ * The no-gas-token case is the default state of a real user, and the easiest
+ * thing to break by accident because dev wallets usually have ETH lying
+ * around. Every test here holds no native token unless it says otherwise.
  */
 const arc: GasContext = {
   chainId: CHAIN.arcTestnet,
   networkFeeUsd: '0.005',
   usdcBalanceUsd: '50',
-  hasNativeBalance: false,
+  nativeBalanceUsd: null,
 };
 
 const strategy = (overrides: Partial<GasContext> = {}) => selectGasStrategy({ ...arc, ...overrides });
 
-describe('tier 1 — Arc, gas paid natively in USDC', () => {
-  it('lets a USDC-only wallet transact with no paymaster', () => {
+describe('Arc — gas paid natively in USDC', () => {
+  it('lets a USDC-only wallet transact', () => {
     const result = strategy();
 
     expect(result.ok).toBe(true);
@@ -27,10 +27,9 @@ describe('tier 1 — Arc, gas paid natively in USDC', () => {
     }
   });
 
-  it('charges no surcharge, because there is no paymaster to pay', () => {
+  it('charges exactly the network fee — no surcharge, nobody in between', () => {
     const result = strategy({ networkFeeUsd: '1' });
 
-    expect(result.ok && result.plan.paymasterUsd).toBe('0');
     expect(result.ok && result.plan.totalUsd).toBe('1');
   });
 
@@ -39,76 +38,60 @@ describe('tier 1 — Arc, gas paid natively in USDC', () => {
   });
 
   it('fails when USDC cannot cover the fee — there is nothing else to pay with', () => {
-    const result = strategy({ networkFeeUsd: '0.01', usdcBalanceUsd: '0.009' });
-
-    expect(result.ok).toBe(false);
+    expect(strategy({ networkFeeUsd: '0.01', usdcBalanceUsd: '0.009' }).ok).toBe(false);
   });
 
   /**
-   * On Arc the native balance *is* the USDC balance. "Has native token" must
-   * not open a second route that the USDC check already ruled out, or a broke
-   * wallet looks able to pay.
+   * On Arc the native balance *is* the USDC balance. A native figure must not
+   * open a second route the USDC check already ruled out, or a broke wallet
+   * looks able to pay.
    */
-  it('does not fall through to a native fallback on Arc', () => {
-    const result = strategy({ usdcBalanceUsd: '0', hasNativeBalance: true });
-
-    expect(result.ok).toBe(false);
+  it('does not fall through to a native route on Arc', () => {
+    expect(strategy({ usdcBalanceUsd: '0', nativeBalanceUsd: '100' }).ok).toBe(false);
   });
 });
 
-describe('tier 2 — Circle Paymaster, gas in USDC with a surcharge', () => {
+describe('any other chain — its own gas token, or nothing', () => {
   const base = { chainId: CHAIN.baseSepolia } as const;
 
-  it('folds the 10% surcharge into a single total', () => {
-    const result = strategy({ ...base, networkFeeUsd: '1' });
+  it('pays in the gas token when the user holds enough of it there', () => {
+    const result = strategy({ ...base, networkFeeUsd: '0.02', nativeBalanceUsd: '0.50' });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.plan.mode).toBe('usdc');
-      expect(result.plan.networkUsd).toBe('1');
-      expect(result.plan.paymasterUsd).toBe('0.1');
-      // The only number the UI is allowed to show.
-      expect(result.plan.totalUsd).toBe('1.1');
+      expect(result.plan.mode).toBe('native');
+      expect(result.plan.totalUsd).toBe('0.02');
     }
   });
 
-  it('falls through when USDC cannot cover fee plus surcharge', () => {
-    // $1.05 covers the $1 fee but not the $1.10 all-in cost.
-    expect(strategy({ ...base, networkFeeUsd: '1', usdcBalanceUsd: '1.05' }).ok).toBe(false);
-  });
-});
-
-describe('the corrections', () => {
-  /**
-   * An earlier version charged $0 for any USDC send on the belief that Gateway
-   * settles it gas-free. It does not, and a $0 fee on a transaction that costs
-   * gas is a plan that fails on-chain. No input may produce a free plan now.
-   */
-  it('never produces a sponsored, zero-fee plan', () => {
-    for (const chainId of [CHAIN.arcTestnet, CHAIN.baseSepolia, CHAIN.polygon]) {
-      const result = strategy({ chainId, hasNativeBalance: true });
-      if (result.ok) {
-        expect(result.plan.mode).not.toBe('sponsored');
-        expect(result.plan.totalUsd).not.toBe('0');
-      }
-    }
-  });
-});
-
-describe('tier 3 — native token fallback', () => {
-  it('is used on a chain with neither USDC gas nor a paymaster', () => {
-    const result = strategy({ chainId: CHAIN.polygon, hasNativeBalance: true });
-
-    expect(result.ok && result.plan.mode).toBe('native');
+  /** Blocky never pays anyone's fees, and no paymaster turns USDC into gas. */
+  it('does not use USDC to pay gas off Arc, however much of it there is', () => {
+    expect(strategy({ ...base, usdcBalanceUsd: '5000', nativeBalanceUsd: null }).ok).toBe(false);
   });
 
-  it('fails with actionable advice when nothing can pay', () => {
-    const result = strategy({ chainId: CHAIN.polygon, hasNativeBalance: false });
+  it('refuses a gas balance that exists but cannot cover the fee', () => {
+    expect(strategy({ ...base, networkFeeUsd: '0.02', nativeBalanceUsd: '0.019' }).ok).toBe(false);
+  });
+
+  it('treats a gas balance it cannot value as not enough', () => {
+    expect(strategy({ ...base, nativeBalanceUsd: null }).ok).toBe(false);
+  });
+
+  it('says which token is needed, and where', () => {
+    const result = strategy({ chainId: CHAIN.polygon });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe('no_gas_route');
-      expect(result.message).toMatch(/add a little/i);
+      expect(result.message).toContain('POL');
+      expect(result.message).toContain('Polygon');
+    }
+  });
+
+  it('never produces a free plan', () => {
+    for (const chainId of [CHAIN.arcTestnet, CHAIN.baseSepolia, CHAIN.polygon]) {
+      const result = strategy({ chainId, nativeBalanceUsd: '100' });
+      if (result.ok) expect(result.plan.totalUsd).not.toBe('0');
     }
   });
 });
@@ -118,20 +101,11 @@ describe('acting on a destination chain', () => {
     expect(canPayForGeneralAction(arc)).toBe(true);
   });
 
-  it('says yes on Base, where Circle Paymaster is deployed', () => {
-    expect(canPayForGeneralAction({ ...arc, chainId: CHAIN.base, networkFeeUsd: '0.40' })).toBe(true);
+  it('says no on Base for a user holding only USDC — plenty of money, no way to move it', () => {
+    expect(canPayForGeneralAction({ ...arc, chainId: CHAIN.base, usdcBalanceUsd: '5000' })).toBe(false);
   });
 
-  it('says no on Polygon for a user holding only USDC', () => {
-    // Plenty of money, no way to spend it.
-    expect(
-      canPayForGeneralAction({ ...arc, chainId: CHAIN.polygon, usdcBalanceUsd: '5000' }),
-    ).toBe(false);
-  });
-
-  it('says yes on Polygon once the user holds native token', () => {
-    expect(
-      canPayForGeneralAction({ ...arc, chainId: CHAIN.polygon, hasNativeBalance: true }),
-    ).toBe(true);
+  it('says yes once the user holds enough gas token there', () => {
+    expect(canPayForGeneralAction({ ...arc, chainId: CHAIN.base, nativeBalanceUsd: '1' })).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { ENTRY_POINT_V07 } from '@blocky/wallet-core';
+import { ENTRY_POINT_V07, isCctpTokenMinter } from '@blocky/wallet-core';
 import { formatUsd, type Address } from '@blocky/shared';
 import type { Execution } from './store';
 
@@ -28,6 +28,12 @@ export interface ActivityItem {
   /** USDC, as a 6-decimal decimal string. */
   amount: string;
   status: 'pending' | 'success' | 'reverted';
+  /**
+   * A headline for rows where "Sent to 0x…" would mislead — money moved to
+   * the user's own wallet on another chain goes *to* Circle's CCTP minter, a
+   * contract they have never heard of. Null means the app words it itself.
+   */
+  title: string | null;
   /** Our summary for sends we planned; null for anything we only saw on-chain. */
   summary: string | null;
   timestamp: string;
@@ -121,6 +127,7 @@ export function mergeActivity(
       counterparty: sent ? transfer.to : transfer.from,
       amount: formatUsd(transfer.value),
       status: execution?.status ?? 'success',
+      title: sent && isCctpTokenMinter(transfer.to) ? 'Moved to another chain' : null,
       summary: execution?.summary ?? null,
       timestamp: transfer.timestamp,
     });
@@ -137,6 +144,7 @@ export function mergeActivity(
       counterparty: execution.counterparty,
       amount: execution.amount,
       status: execution.status,
+      title: isCctpTokenMinter(execution.counterparty) ? 'Moving to another chain' : null,
       summary: execution.summary,
       timestamp: execution.createdAt.toISOString(),
     });

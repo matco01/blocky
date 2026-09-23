@@ -104,7 +104,8 @@ them before the implementation.
 
 Blocky runs on [Arc](https://www.arc.io), Circle's L1, where **USDC is the native
 gas token**. A user holding only USDC pays gas from that same balance — no ETH,
-no paymaster, no sponsorship. Other chains come later, through Circle Gateway.
+no paymaster, no sponsorship. USDC moves from Arc to other chains through
+Circle's CCTP (see "Moving money between chains").
 
 Everything the send path depends on was checked against the live Arc testnet,
 not just the docs: chain id 5042002, USDC `decimals()` = 6, EntryPoint v0.7 and
@@ -139,13 +140,17 @@ Gateway's balance API, and ArcScan's transfer API.
 
 ## Gas, and why it works with zero ETH
 
-In [`packages/wallet-core/src/gas.ts`](packages/wallet-core/src/gas.ts), in
-order of preference:
+In [`packages/wallet-core/src/gas.ts`](packages/wallet-core/src/gas.ts) there
+are exactly two routes, and nobody but the user pays for either:
 
-1. **Native USDC gas** on Arc. Paid from the balance being spent.
-2. **Circle Paymaster** on Base and Arbitrum: gas deducted in USDC from the
-   transaction, plus a 10% surcharge folded into the single fee number.
-3. **Native token**, only if the account happens to hold some.
+1. **Arc: gas in USDC**, paid from the balance being spent.
+2. **Anywhere else: the chain's own gas token** (ETH on Base, POL on Polygon),
+   which the user must hold there in an amount that covers the fee. If they
+   don't, they are told which token they need and where.
+
+There is no sponsorship and no Circle Paymaster. A user who wants to act on
+another chain needs that chain's gas token, and the planner says so before they
+move money there.
 
 Two claims from an earlier version were wrong and have been removed:
 *"Gateway transfers are gas-free"* (a Gateway transfer ends in a `gatewayMint`
@@ -169,7 +174,7 @@ card, in dollars. It is never a question put to the user.
 - [x] **M2** — Agent, read-only tools *(server side; the app has no chat screen yet)*
 - [ ] **M3** — Agent writes: server plans and verifies them; the app's chat screen and agent confirmation flow are not built
 - [ ] **M4** — Session keys: server-side policy, authorisation and revoke done; on-chain validator not installed, so nothing signs unattended
-- [ ] **M5** — Swaps and bridges
+- [ ] **M5** — Swaps and bridges: moving USDC from Arc to other chains is built (CCTP); swaps are not
 
 **Not yet verified on a real device.** Everything above typechecks, 240 tests
 pass, both platforms bundle, and every external API was probed live — but the
@@ -347,31 +352,56 @@ Things worth knowing before changing it:
 - **Unresolvable means ask, never guess.** An unknown token, an unresolvable
   recipient or a USD amount for an unpriced token all fail with a message the
   agent can say out loud. None of them fall back to a best match.
-- **Swaps and bridges fail loudly**, for the same reason `deriveSessionPermissions`
-  throws on swap: a half-built money-moving path is worse than an absent one,
-  because it looks finished.
+- **Swaps fail loudly**, for the same reason `deriveSessionPermissions` throws
+  on swap: a half-built money-moving path is worse than an absent one, because
+  it looks finished.
+
+### Moving money between chains
+
+A `bridge` intent moves the user's own USDC from Arc to their wallet on another
+chain through Circle's CCTP v2 with its Forwarding Service
+([`cctp.ts`](packages/wallet-core/src/cctp.ts)). Two calls, signed as one
+operation on Arc: an exact-amount `approve`, then `depositForBurnWithHook`.
+Circle mints on the destination and takes its cost out of the transfer, so the
+user pays every fee from their Arc USDC — Arc gas, plus Circle's fee, which is
+quoted as a ceiling and whatever it doesn't use arrives with the money — and
+needs nothing on the destination. The amount asked for is the amount that
+arrives.
+
+The server verifies the burn like it verifies a send: the receipt must contain
+a `DepositForBurn` from the user's account, for the exact amount, minting to
+the user's own address on the planned destination, with no higher fee ceiling
+than the card showed. Contract addresses and the event were checked against
+live Arc, Base Sepolia and Arbitrum Sepolia; mainnet addresses stay out until
+they are checked the same way.
+
+Only out of Arc, only USDC, only to yourself: the app signs on Arc alone, CCTP
+moves only USDC, and paying someone else on another chain is a different
+intent.
 
 ### The destination-gas warning
 
-Arc takes gas in USDC and Circle Paymaster covers Base and Arbitrum. On Ethereum,
-OP, Unichain, Polygon and Avalanche, *every* transaction — including sending the
-USDC back out — needs native token a Blocky user does not hold.
+Arc takes gas in USDC. Everywhere else, *every* transaction — including
+sending the USDC back out — needs that chain's gas token, which a Blocky user
+moving money there for the first time does not hold.
 
-`destination_no_gas_route` says so before the fact. It is `warn`, not `danger`:
-the money is not lost, and paying someone on Polygon is a perfectly good reason
-to send it there. Making it `danger` would force confirmation on ordinary sends
-and train people to tap through warnings, which costs more safety than it buys.
-It stays silent for outbound transfers — whether the recipient can act on that
-chain is their business.
-
-A same-chain transfer can never trigger it: if the user can pay gas to send on a
-chain, they can act on it, and a USDC-only user who cannot is refused outright
-with `no_gas_route`. The warning earns its keep once cross-chain moves land in M5.
+`destination_no_gas_route` says so on the card of a move between chains, naming
+the token and the chain, and the agent recommends getting a little of it. It is
+`warn`, not `danger`: the money is not lost, and making it `danger` would force
+confirmation on ordinary moves and train people to tap through warnings.
 
 `canPayForGeneralAction` in [`gas.ts`](packages/wallet-core/src/gas.ts) answers
 the underlying question by asking `selectGasStrategy`, rather than keeping a
-second list of which chains have a paymaster. Two copies of that rule would
-eventually disagree.
+second copy of the rule. Two copies would eventually disagree.
+
+### Prices
+
+One request to DefiLlama prices every token the app knows, and one cached
+snapshot serves every user for 30 seconds
+([`prices.ts`](packages/wallet-core/src/prices.ts)): live enough for a
+portfolio, and a flat cost however many people are looking. Prices value
+holdings and size fees paid in a gas token; they never decide how much of
+something is sent.
 
 ### A note on severity
 

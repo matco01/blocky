@@ -85,7 +85,7 @@ export function feeWarnings(feeUsd: string, outflowUsd: string | null): Warning[
     {
       code: 'fee_heavy',
       severity: 'warn',
-      message: 'The network fee is a large share of this transfer. Sending more at once is cheaper.',
+      message: 'The fees are a large share of this amount. Moving more at once is cheaper.',
     },
   ];
 }
@@ -116,36 +116,27 @@ export function simulationWarnings(simulation: Simulation | null): Warning[] {
 }
 
 /**
- * The foresight warning: value landing where the user cannot act on it.
+ * The foresight warning: money landing where the user cannot move it again.
  *
- * Arc takes gas in USDC, and Circle Paymaster covers Base and Arbitrum. On
- * Ethereum, OP, Unichain, Polygon and Avalanche every transaction — including
- * sending the USDC back out — needs native token a Blocky user does not hold.
- *
- * A same-chain transfer can never trigger this: if the user can pay gas to send
- * on a chain, they can act on it. It earns its keep once value moves *between*
- * chains, where the destination's gas route is a different question from the
- * source's.
+ * Off Arc, every transaction — including sending the USDC back — is paid in
+ * that chain's own gas token, and nobody pays it for them. So USDC moved to
+ * Base arrives fine but sits there until the user holds a little ETH on Base.
+ * Saying so before they approve is cheap; discovering it afterwards is a
+ * support ticket.
  *
  * `warn`, not `danger`: the money is not lost and the move may be exactly what
- * the user wants — paying someone on Polygon is a perfectly good reason. Making
- * this `danger` would force confirmation on ordinary sends and train people to
- * tap through warnings, which costs more safety than it buys.
+ * the user wants. Making this `danger` would force confirmation on ordinary
+ * moves and train people to tap through warnings, which costs more safety than
+ * it buys.
  */
-export function destinationWarnings(args: {
-  chainName: string;
-  canActThere: boolean;
-  /** True when the user is only passing value through, e.g. a plain transfer out. */
-  isOutboundTransfer: boolean;
-}): Warning[] {
-  // Sending to someone else means it is their problem to spend, not ours.
-  if (args.canActThere || args.isOutboundTransfer) return [];
+export function destinationWarnings(args: { chainName: string; gasToken: string; canActThere: boolean }): Warning[] {
+  if (args.canActThere) return [];
 
   return [
     {
       code: 'destination_no_gas_route',
       severity: 'warn',
-      message: `Once this is on ${args.chainName} you won't be able to move or spend it without holding ${args.chainName} gas.`,
+      message: `Fees on ${args.chainName} are paid in ${args.gasToken}, and you don't have enough there. This will arrive, but you won't be able to move it again until you get a little ${args.gasToken} on ${args.chainName}.`,
     },
   ];
 }

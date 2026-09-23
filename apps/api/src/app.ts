@@ -2,6 +2,7 @@ import { buildPlan } from '@blocky/planner';
 import {
   AddressSchema,
   AmountSpecSchema,
+  BridgeIntentSchema,
   PolicySchema,
   RecipientRefSchema,
   TransferIntentSchema,
@@ -10,11 +11,14 @@ import {
   parseUsd,
   planOutflowUsd,
   type Address,
+  type ChainId,
   type Plan,
 } from '@blocky/shared';
 import {
   CHAINS,
   DEFAULT_CHAIN,
+  cctpContracts,
+  containsCctpBurn,
   containsTransfer,
   deriveSessionPermissions,
   getChain,
@@ -47,7 +51,7 @@ export interface AppDeps {
       ) => Promise<AgentResponse>)
     | null;
   gatewayBalances: (address: Address) => Promise<GatewayBalances>;
-  /** Native-currency holdings on other chains — never throws; a dead chain reports nothing found. */
+  /** Holdings on other chains: gas tokens, and USDC moved there — never throws; a dead chain reports nothing found. */
   walletHoldings: (address: Address) => Promise<TokenHolding[]>;
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>;
   /** How long to wait for a just-submitted transaction to become visible. */
@@ -155,9 +159,11 @@ export function createApp(deps: AppDeps) {
    * failed wallet read is a 503 — never a zero, which would read as "your
    * money is gone".
    *
-   * `otherHoldings` is native currency on other chains — ETH sitting on Base
-   * Sepolia, say. Not spendable through a plan either, and never on the
-   * critical path: a failed read degrades to an empty list, same as Gateway.
+   * `otherHoldings` is what sits on other chains: their gas token, and USDC
+   * that was moved there. Not spendable through a plan either, and never on
+   * the critical path: a failed read degrades to an empty list, same as
+   * Gateway. Stablecoins among them count as cash in the history, the rest as
+   * investments.
    */
   app.get('/v1/balance', async (c) => {
     const wallet = walletOf(c);
@@ -181,8 +187,10 @@ export function createApp(deps: AppDeps) {
 
     // Best-effort history: a throttled snapshot off a real read, never a
     // reason for the balance response itself to fail.
-    const spendableUsd = amount + parseUsd(gatewayValue?.totalUsd ?? '0');
-    const investmentsUsd = holdings.reduce((sum, h) => sum + (h.usd ? parseUsd(h.usd) : 0n), 0n);
+    const valueOf = (stable: boolean) =>
+      holdings.reduce((sum, h) => sum + (h.stable === stable && h.usd ? parseUsd(h.usd) : 0n), 0n);
+    const spendableUsd = amount + parseUsd(gatewayValue?.totalUsd ?? '0') + valueOf(true);
+    const investmentsUsd = valueOf(false);
     void store
       .recordBalanceSnapshot(c.get('user').id, {
         spendableUsd: formatUsd(spendableUsd),
@@ -299,30 +307,44 @@ export function createApp(deps: AppDeps) {
     if (!stored) return c.json({ error: 'No such plan' }, 404);
 
     const { plan, origin } = stored;
-    const transfer = singleTransfer(plan);
+    const shape = planShape(plan);
 
-    if (!transfer) {
-      return c.json({ error: 'unsupported_plan', message: 'Only single transfers can be re-quoted.' }, 422);
+    if (!shape) {
+      return c.json({ error: 'unsupported_plan', message: 'That plan cannot be re-quoted.' }, 422);
     }
 
-    const { call, outflow, recipient } = transfer;
+    const rationale = plan.modelRationale || 'Re-quoted.';
+    // The same amount the user already saw, in exact token units — never
+    // re-derived from dollars at a new price.
+    const amount = { kind: 'token' as const, value: shape.outflow.displayAmount };
 
-    const intent = TransferIntentSchema.parse({
-      type: 'transfer',
-      // A verified token is re-resolved by symbol; an address would come back
-      // "unverified" and pick up a danger warning it never had.
-      token: outflow.token.verified
-        ? { kind: 'symbol', symbol: outflow.token.symbol }
-        : { kind: 'address', address: outflow.token.address, chainId: outflow.token.chainId },
-      amount: { kind: 'token', value: outflow.displayAmount },
-      // A contact keeps its label on the card. Anything else is pinned to the
-      // exact address the user already saw, never re-resolved from a name.
-      recipient: recipient.contactLabel
-        ? { kind: 'contact', label: recipient.contactLabel }
-        : { kind: 'address', address: recipient.address },
-      chainId: call.chainId,
-      rationale: plan.modelRationale || 'Re-quoted.',
-    });
+    const intent =
+      shape.kind === 'bridge'
+        ? BridgeIntentSchema.parse({
+            type: 'bridge',
+            token: { kind: 'symbol', symbol: 'USDC' },
+            amount,
+            fromChainId: shape.chainId,
+            toChainId: shape.destination,
+            rationale,
+          })
+        : TransferIntentSchema.parse({
+            type: 'transfer',
+            // A verified token is re-resolved by symbol; an address would come
+            // back "unverified" and pick up a danger warning it never had.
+            token: shape.outflow.token.verified
+              ? { kind: 'symbol', symbol: shape.outflow.token.symbol }
+              : { kind: 'address', address: shape.outflow.token.address, chainId: shape.outflow.token.chainId },
+            amount,
+            // A contact keeps its label on the card. Anything else is pinned to
+            // the exact address the user already saw, never re-resolved from a
+            // name.
+            recipient: shape.recipient.contactLabel
+              ? { kind: 'contact', label: shape.recipient.contactLabel }
+              : { kind: 'address', address: shape.recipient.address },
+            chainId: shape.call.chainId,
+            rationale,
+          });
 
     const outcome = await buildPlan(intent, createPlannerContext({ reader, store, userId, account: wallet }));
     if (!outcome.ok) {
@@ -350,10 +372,12 @@ export function createApp(deps: AppDeps) {
   /**
    * "I signed and submitted plan X; here is the transaction."
    *
-   * Not taken on trust. The receipt must contain exactly the transfer the plan
-   * describes — token contract, sender, recipient, amount — or it is not an
-   * execution of this plan and nothing is recorded. Otherwise any hash could be
-   * attached to any plan.
+   * Not taken on trust. The receipt must contain exactly what the plan
+   * describes — for a send, the token contract, sender, recipient and amount;
+   * for a move between chains, the burn's amount, fee ceiling, destination and
+   * that it mints to the user's own address — or it is not an execution of
+   * this plan and nothing is recorded. Otherwise any hash could be attached to
+   * any plan.
    */
   app.post('/v1/plans/:id/executions', async (c) => {
     const wallet = walletOf(c);
@@ -369,16 +393,15 @@ export function createApp(deps: AppDeps) {
     if (!stored) return c.json({ error: 'No such plan' }, 404);
 
     const { plan, origin } = stored;
-    const transfer = singleTransfer(plan);
+    const shape = planShape(plan);
 
-    if (!transfer) {
-      return c.json({ error: 'unsupported_plan', message: 'Only single transfers can be verified.' }, 422);
+    if (!shape) {
+      return c.json({ error: 'unsupported_plan', message: 'That plan cannot be verified.' }, 422);
     }
 
-    const { call, outflow, recipient } = transfer;
-
+    const chainId = shape.kind === 'transfer' ? shape.call.chainId : shape.chainId;
     const txHash = parsed.data.txHash.toLowerCase() as `0x${string}`;
-    const receipt = await pollReceipt(() => reader.transactionReceipt(call.chainId, txHash), polling);
+    const receipt = await pollReceipt(() => reader.transactionReceipt(chainId, txHash), polling);
 
     if (!receipt) {
       return c.json(
@@ -387,12 +410,25 @@ export function createApp(deps: AppDeps) {
       );
     }
 
-    const matches = containsTransfer(receipt, {
-      token: call.to,
-      from: wallet,
-      to: recipient.address,
-      amount: BigInt(outflow.amount),
-    });
+    const matches =
+      shape.kind === 'transfer'
+        ? containsTransfer(receipt, {
+            token: shape.call.to,
+            from: wallet,
+            to: shape.recipient.address,
+            amount: BigInt(shape.outflow.amount),
+          })
+        : containsCctpBurn(receipt, {
+            messenger: shape.messenger,
+            burnToken: shape.token,
+            depositor: wallet,
+            amount: shape.burn,
+            // Only ever the user's own wallet: a burn minting to anyone else
+            // is not the move they approved.
+            mintRecipient: wallet,
+            destinationDomain: shape.destinationDomain,
+            maxFee: shape.maxFee,
+          });
 
     if (!matches) {
       return c.json(
@@ -411,10 +447,12 @@ export function createApp(deps: AppDeps) {
       const execution = await store.recordExecution(userId, {
         planId: plan.id,
         origin,
-        chainId: call.chainId,
+        chainId,
         txHash,
-        counterparty: recipient.address,
-        amount: outflow.displayAmount,
+        // For a move between chains, the contract the USDC went to on-chain —
+        // the same counterparty the explorer reports for it.
+        counterparty: shape.kind === 'transfer' ? shape.recipient.address : shape.minter,
+        amount: shape.outflow.displayAmount,
         /*
          * USDC is always priced. An unpriced plan cannot auto-execute (the
          * policy engine requires a human for it), and falling back to the fee
@@ -434,9 +472,11 @@ export function createApp(deps: AppDeps) {
        * Best effort — the transfer happened either way, and failing the
        * request now would have the app retry into a 409.
        */
-      await store.addKnownRecipient(userId, recipient.address).catch((error: unknown) => {
-        console.error('addKnownRecipient failed', error);
-      });
+      if (shape.kind === 'transfer') {
+        await store.addKnownRecipient(userId, shape.recipient.address).catch((error: unknown) => {
+          console.error('addKnownRecipient failed', error);
+        });
+      }
 
       return c.json({ execution: { ...execution, status: 'success' } }, 201);
     } catch (error) {
@@ -620,13 +660,67 @@ async function pollReceipt<T>(
 }
 
 /**
- * The only plan shape the planner builds today: one transfer, one call, one
- * recipient. Every route that has to take a stored plan apart asks here, so
- * they can't drift into accepting different shapes.
+ * The plan shapes the planner builds, taken apart. Every route that has to
+ * read a stored plan asks here, so they can't drift into accepting different
+ * shapes — and anything that isn't exactly one of these is refused.
  */
-function singleTransfer(plan: Plan) {
-  const [call] = plan.calls;
+type PlanShape =
+  | {
+      kind: 'transfer';
+      call: Plan['calls'][number];
+      outflow: Plan['outflow'][number];
+      recipient: NonNullable<Plan['recipient']>;
+    }
+  | {
+      kind: 'bridge';
+      chainId: ChainId;
+      outflow: Plan['outflow'][number];
+      destination: ChainId;
+      destinationDomain: number;
+      token: Address;
+      /** What leaves: the amount plus the fee ceiling, exactly as approved. */
+      burn: bigint;
+      maxFee: bigint;
+      messenger: Address;
+      minter: Address;
+    };
+
+function planShape(plan: Plan): PlanShape | null {
   const [outflow] = plan.outflow;
-  if (plan.intentType !== 'transfer' || plan.calls.length !== 1 || !call || !outflow || !plan.recipient) return null;
-  return { call, outflow, recipient: plan.recipient };
+  if (!outflow) return null;
+
+  if (plan.intentType === 'transfer') {
+    const [call] = plan.calls;
+    if (plan.calls.length !== 1 || !call || !plan.recipient) return null;
+    return { kind: 'transfer', call, outflow, recipient: plan.recipient };
+  }
+
+  if (plan.intentType === 'bridge') {
+    const [approve, burn] = plan.calls;
+    const [inflow] = plan.inflow;
+    if (plan.calls.length !== 2 || !approve || !burn || !inflow || plan.recipient !== null) return null;
+
+    const contracts = cctpContracts(burn.chainId);
+    const destinationDomain = getChain(inflow.token.chainId).circleDomain;
+    if (!contracts || burn.to !== contracts.tokenMessenger || destinationDomain === null) return null;
+
+    // USDC's six decimals are the dollar scale, so the fee ceiling in dollars
+    // is also its amount in base units.
+    const maxFee = parseUsd(plan.fee.breakdown.serviceUsd);
+
+    return {
+      kind: 'bridge',
+      chainId: burn.chainId,
+      outflow,
+      destination: inflow.token.chainId,
+      destinationDomain,
+      token: approve.to,
+      burn: BigInt(outflow.amount) + maxFee,
+      maxFee,
+      messenger: contracts.tokenMessenger,
+      minter: contracts.tokenMinter,
+    };
+  }
+
+  return null;
 }

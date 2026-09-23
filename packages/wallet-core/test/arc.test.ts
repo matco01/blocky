@@ -13,11 +13,10 @@ describe('Arc is the home chain', () => {
     expect(DEFAULT_CHAIN).toBe(CHAIN.arcTestnet);
   });
 
-  it('pays gas in USDC, with no paymaster involved', () => {
+  it('pays gas in USDC', () => {
     const arc = CHAINS[CHAIN.arcTestnet];
 
     expect(arc.gasPaidInUsdc).toBe(true);
-    expect(arc.paymaster).toBe(false);
     expect(arc.nativeCurrency).toEqual({ symbol: 'USDC', decimals: 18 });
   });
 

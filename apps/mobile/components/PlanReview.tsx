@@ -1,6 +1,7 @@
 import { shortAddress, type Plan } from '@blocky/shared';
+import { getChain } from '@blocky/wallet-core';
 import { StyleSheet, View } from 'react-native';
-import { planAmountLabel, planFeeLabel } from '../lib/planLabels';
+import { planAmountLabel, planDestinationLabel, planFeeLabel, planFeeName, planVerb } from '../lib/planLabels';
 import { useTheme } from '../theme';
 import { Icon } from './Icon';
 import { Text } from './Text';
@@ -18,25 +19,29 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
   const theme = useTheme();
 
   const outflow = plan.outflow[0];
+  const landing = plan.intentType === 'bridge' ? plan.inflow[0] : undefined;
   const fee = planFeeLabel(plan);
 
   return (
     <View style={{ gap: theme.space.xl }}>
       <View style={styles.hero}>
         <Text variant="label" tone="secondary">
-          You're sending
+          {planVerb(plan) === 'Move' ? "You're moving" : "You're sending"}
         </Text>
         <Text variant="balance">
           {planAmountLabel(plan)}
         </Text>
         <Text variant="body" tone="secondary">
-          to {plan.recipient?.display ?? 'yourself'}
+          to {planDestinationLabel(plan)}
         </Text>
       </View>
 
       <Tile style={{ padding: theme.space.lg, gap: 14 }}>
         <Row label="Amount" value={`${outflow?.displayAmount ?? '0'} ${outflow?.token.symbol ?? ''}`} />
-        <Row label="Network fee" value={fee} />
+        <Row label={planFeeName(plan)} value={fee} />
+        {landing ? (
+          <Row label="Arrives on" value={`${getChain(landing.token.chainId).name}, in about a minute`} />
+        ) : null}
         {plan.recipient && plan.recipient.display !== plan.recipient.address ? (
           <Row label="Address" value={shortAddress(plan.recipient.address, 10, 8)} />
         ) : null}

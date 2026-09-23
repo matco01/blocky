@@ -46,14 +46,12 @@ export const WarningCodeSchema = z.enum([
   /** Fee is a large fraction of the amount being moved. */
   'fee_heavy',
   /**
-   * Value is landing somewhere the user will not be able to act on it.
+   * Value is landing somewhere the user will not be able to move it again.
    *
-   * Circle Paymaster is deployed on Base and Arbitrum but not on Ethereum, OP,
-   * Unichain, Polygon or Avalanche. On those chains anything beyond a plain
-   * Gateway USDC transfer needs native token the user does not hold, so USDC
-   * bridged there can be received and forwarded but not swapped or spent on a
-   * contract call. Saying so before the fact is cheap; discovering it after is
-   * a support ticket.
+   * Off Arc, every transaction is paid in that chain's own gas token, and
+   * nobody pays it for the user. USDC moved to Base arrives, but stays put
+   * until they hold a little ETH there. Saying so before the fact is cheap;
+   * discovering it after is a support ticket.
    */
   'destination_no_gas_route',
 ]);
@@ -89,8 +87,7 @@ export type AssetDelta = z.infer<typeof AssetDeltaSchema>;
  * Fees, itemised.
  *
  * The UI shows `totalUsd` and nothing else — gas is never a decision put to the
- * user, and the Circle Paymaster surcharge in particular must never appear as
- * its own line. The breakdown exists for debugging and support.
+ * user. The breakdown exists for debugging and support.
  */
 export const FeeSchema = z.object({
   totalUsd: DecimalSchema,
@@ -101,16 +98,16 @@ export const FeeSchema = z.object({
      * paymaster, and so plans stored before then still parse.
      */
     'sponsored',
-    /** Gas in USDC: natively on Arc, or through Circle Paymaster elsewhere. */
+    /** Gas in USDC, natively on Arc. */
     'usdc',
-    /** Fallback only; means the user needed a native balance. Should be rare. */
+    /** Gas in the chain's own token, which the user holds there. */
     'native',
   ]),
   breakdown: z.object({
     networkUsd: DecimalSchema,
-    /** Paymaster surcharge, where applicable. Folded into `totalUsd`. */
+    /** Always '0' now that no paymaster is used; kept so stored plans still parse. */
     paymasterUsd: DecimalSchema,
-    /** Aggregator or bridge fee. */
+    /** Aggregator or bridge fee — for a CCTP move, the most Circle may take. */
     serviceUsd: DecimalSchema,
   }),
 });

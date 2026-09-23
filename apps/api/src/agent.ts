@@ -11,6 +11,7 @@ import {
 import {
   CHAINS,
   DEFAULT_CHAIN,
+  canMoveUsdcBetween,
   getArcProtocols,
   getTokenPriceUsd,
   readUsdcBalance,
@@ -84,10 +85,18 @@ export function agentToolsFor(
       return store.getPolicy(userId);
     },
 
+    /**
+     * Every chain, with the three facts the agent needs to propose a move:
+     * the id to put in the intent, whether USDC can go there from the user's
+     * Arc balance, and which token pays gas there once it lands.
+     */
     async getSupportedChains() {
       return Object.values(CHAINS).map((chain) => ({
+        chainId: chain.id,
         name: chain.name,
         testnet: chain.testnet,
+        canMoveUsdcHere: canMoveUsdcBetween(DEFAULT_CHAIN, chain.id),
+        gasToken: chain.nativeCurrency.symbol,
       }));
     },
 

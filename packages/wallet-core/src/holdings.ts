@@ -1,16 +1,18 @@
-import { formatUnits, formatUsd, type Address, type ChainId } from '@blocky/shared';
+import { formatUsd, usdValueOf, type Address, type ChainId } from '@blocky/shared';
 import { CHAINS } from './chains';
-import { getTokenPriceUsd } from './prices';
+import { getPriceSnapshot, priceAsDecimal, type PriceSnapshot } from './prices';
 import type { ChainReader } from './rpc';
 
 /**
- * What else is in the wallet, beyond the spendable USDC balance and the
- * Gateway deposits the planner already reports.
+ * What else is in the wallet, beyond the spendable USDC balance on the home
+ * chain and the Gateway deposits reported beside it.
  *
- * Native currency only, on chains we have an RPC endpoint for — never a
- * curated ERC-20 address list. A wrong token address here is a wrong balance
- * shown with total confidence; a wrong RPC endpoint just means a chain we
- * skip. Real arbitrary-token discovery needs an indexer, not a guess.
+ * Two things per chain, on chains we have an RPC endpoint for: the native gas
+ * token, and USDC — never a wider ERC-20 list. USDC is here because moving
+ * money between chains puts it there, and a transfer that lands somewhere the
+ * portfolio does not look reads as money that vanished. Its address comes from
+ * the chain registry, which is already load-bearing for every send; anything
+ * beyond that needs an indexer, not a guessed address.
  */
 export interface TokenHolding {
   chainId: ChainId;
@@ -20,15 +22,18 @@ export interface TokenHolding {
   decimals: number;
   /** USD decimal string, display precision — null when we have no price for it. */
   usd: string | null;
+  /** A dollar stablecoin: counted with the user's cash, not their investments. */
+  stable: boolean;
 }
 
 /**
- * Scan every chain the reader supports for a native-currency balance worth
- * reporting. Arc is skipped: its native currency is the same USDC the
- * spendable balance already counts, and adding it again would double it.
+ * Scan every chain the reader supports. Arc is skipped: its native currency is
+ * the same USDC the spendable balance already counts, and adding it again
+ * would double it.
  *
  * One chain failing to answer never fails the rest — a dead RPC endpoint
- * degrades to "nothing found there", not a broken portfolio.
+ * degrades to "nothing found there", not a broken portfolio. Prices come from
+ * the shared snapshot, so a full scan costs no price requests of its own.
  */
 export async function fetchWalletHoldings(
   reader: ChainReader,
@@ -39,19 +44,38 @@ export async function fetchWalletHoldings(
     (chain) => chain.testnet && !chain.gasPaidInUsdc && reader.supports(chain.id),
   );
 
-  const results = await Promise.all(
-    chains.map(async (chain): Promise<TokenHolding | null> => {
-      const amount = await reader.nativeBalance(chain.id, owner).catch(() => 0n);
-      if (amount <= 0n) return null;
+  const prices: PriceSnapshot | null = await getPriceSnapshot(fetchImpl).catch(() => null);
 
-      const price = await getTokenPriceUsd(chain.nativeCurrency.symbol, fetchImpl).catch(() => null);
-      const usd = price
-        ? formatUsd(BigInt(Math.round(Number(formatUnits(amount, chain.nativeCurrency.decimals)) * price.usd * 1e6)))
-        : null;
+  const perChain = await Promise.all(
+    chains.map(async (chain): Promise<TokenHolding[]> => {
+      const [native, usdc] = await Promise.all([
+        reader.nativeBalance(chain.id, owner).catch(() => 0n),
+        reader.erc20Balance(chain.id, chain.usdc, owner).catch(() => 0n),
+      ]);
 
-      return { chainId: chain.id, symbol: chain.nativeCurrency.symbol, amount: amount.toString(), decimals: chain.nativeCurrency.decimals, usd };
+      const holdings: TokenHolding[] = [];
+
+      if (native > 0n) {
+        const { symbol, decimals } = chain.nativeCurrency;
+        const price = priceAsDecimal(prices?.get(symbol) ?? null);
+        holdings.push({
+          chainId: chain.id,
+          symbol,
+          amount: native.toString(),
+          decimals,
+          usd: price === null ? null : formatUsd(usdValueOf(native, decimals, price)),
+          stable: false,
+        });
+      }
+
+      if (usdc > 0n) {
+        // USDC's six decimals are the dollar scale: the amount is its own value.
+        holdings.push({ chainId: chain.id, symbol: 'USDC', amount: usdc.toString(), decimals: 6, usd: formatUsd(usdc), stable: true });
+      }
+
+      return holdings;
     }),
   );
 
-  return results.filter((holding): holding is TokenHolding => holding !== null);
+  return perChain.flat();
 }

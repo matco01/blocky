@@ -1,5 +1,13 @@
-import { planOutflowUsd, type Plan } from '@blocky/shared';
-import { TRANSFER_TOPIC, type ChainReader, type Receipt } from '@blocky/wallet-core';
+import { buildPlan } from '@blocky/planner';
+import { CHAIN, IntentSchema, planOutflowUsd, type Address, type Plan } from '@blocky/shared';
+import {
+  CCTP_FORWARD_HOOK_DATA,
+  DEPOSIT_FOR_BURN_TOPIC,
+  TRANSFER_TOPIC,
+  cctpContracts,
+  type ChainReader,
+  type Receipt,
+} from '@blocky/wallet-core';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp, type AppDeps } from '../src/app';
@@ -237,6 +245,115 @@ describe('manual send planning', () => {
 
     expect(status).toBe(422);
     expect(body.error).toBe('insufficient_balance');
+  });
+});
+
+/**
+ * A move to Base Sepolia, planned by the real planner. Only the outside world
+ * is faked: Circle's fee quote and the balances.
+ */
+async function planBridge(userId = 'did:privy:alice', wallet: Address = ALICE_WALLET): Promise<Plan> {
+  const intent = IntentSchema.parse({
+    type: 'bridge',
+    token: { kind: 'symbol', symbol: 'USDC' },
+    amount: { kind: 'token', value: '20' },
+    toChainId: CHAIN.baseSepolia,
+    rationale: 'Move $20 to Base Sepolia.',
+  });
+
+  const outcome = await buildPlan(intent, {
+    resolveToken: async () => ({ chainId: CHAIN.arcTestnet, address: USDC, symbol: 'USDC', name: 'USD Coin', decimals: 6, logoUrl: null, verified: true }),
+    resolveRecipient: async () => ({ address: wallet, display: 'your own wallet', ensName: null, contactLabel: null, known: false, isContract: false }),
+    priceOf: async () => '1',
+    balanceOf: async () => 100_000_000n,
+    usdcBalanceUsd: async () => '100',
+    nativeBalanceUsd: async () => null,
+    estimateNetworkFeeUsd: async () => '0.01',
+    isAddressFlagged: async () => false,
+    bridgeFees: async () => ({ forwardFee: 54_565n, protocolFeeCentiBps: 0n }),
+  });
+  if (!outcome.ok) throw new Error(outcome.failure.message);
+
+  await store.upsertUser({ id: userId, walletAddress: wallet });
+  await store.putPlan(userId, outcome.plan, 'agent');
+  return outcome.plan;
+}
+
+/** The burn CCTP emits, word by word. The decoder is checked against viem's encoder in wallet-core. */
+function burnReceipt(args: { depositor: string; mintRecipient: string; amount: bigint; domain: number; maxFee: bigint }): Receipt {
+  const messenger = cctpContracts(CHAIN.arcTestnet)!.tokenMessenger;
+  const word = (value: bigint) => value.toString(16).padStart(64, '0');
+  const addr = (a: string) => a.slice(2).toLowerCase().padStart(64, '0');
+  const hook = CCTP_FORWARD_HOOK_DATA.slice(2);
+
+  return {
+    status: 'success',
+    logs: [
+      {
+        address: messenger,
+        topics: [DEPOSIT_FOR_BURN_TOPIC, `0x${addr(USDC)}`, `0x${addr(args.depositor)}`, `0x${word(1000n)}`],
+        data: `0x${[
+          word(args.amount),
+          addr(args.mintRecipient),
+          word(BigInt(args.domain)),
+          addr(messenger),
+          word(0n),
+          word(args.maxFee),
+          word(7n * 32n),
+          word(BigInt(hook.length / 2)),
+          hook,
+        ].join('')}`,
+      },
+    ],
+  };
+}
+
+describe('recording a move between chains', () => {
+  const burn = { depositor: ALICE_WALLET, mintRecipient: ALICE_WALLET, amount: 20_054_565n, domain: 6, maxFee: 54_565n };
+
+  it('records the exact burn the plan describes', async () => {
+    const plan = await planBridge();
+    chain.receipts.set(hash('b'), burnReceipt(burn));
+
+    const { status, body } = await call(`/v1/plans/${plan.id}/executions`, {
+      token: 'alice-token',
+      method: 'POST',
+      body: { txHash: hash('b') },
+    });
+
+    expect(status).toBe(201);
+    expect(body.execution.status).toBe('success');
+
+    // Counted against the agent's limits: the amount and every fee.
+    expect(await store.spentTodayUsd('did:privy:alice')).toBe(planOutflowUsd(plan));
+  });
+
+  it.each([
+    ['mints to someone else', { mintRecipient: SAM }],
+    ['goes to a different chain', { domain: 3 }],
+    ['burns a different amount', { amount: 1n }],
+    ['allows Circle a higher fee than the user saw', { maxFee: 54_566n }],
+    ['was made from someone else’s wallet', { depositor: MALLORY_WALLET }],
+  ])('refuses a burn that %s, and records nothing', async (_, override) => {
+    const plan = await planBridge();
+    chain.receipts.set(hash('c'), burnReceipt({ ...burn, ...override }));
+
+    const { status } = await call(`/v1/plans/${plan.id}/executions`, {
+      token: 'alice-token',
+      method: 'POST',
+      body: { txHash: hash('c') },
+    });
+
+    expect(status).toBe(422);
+    expect(await store.listExecutions('did:privy:alice')).toEqual([]);
+  });
+
+  it('does not add anyone to the one-tap list — there is no one else involved', async () => {
+    const plan = await planBridge();
+    chain.receipts.set(hash('d'), burnReceipt(burn));
+    await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('d') } });
+
+    expect((await store.getPolicy('did:privy:alice')).recipientAllowlist).toEqual([]);
   });
 });
 

@@ -43,6 +43,9 @@ const MAX_SLICES = 4;
 /** Matches `styles.tabs.padding` — the inset the sliding pill sits inside. */
 const TAB_PAD = 3;
 
+/** Matches the server's price snapshot TTL — polling faster would only re-read the same prices. */
+const PRICE_REFRESH_MS = 30_000;
+
 type Tab = 'spendable' | 'investments';
 
 function chainName(id: number): string {
@@ -117,15 +120,27 @@ export default function PortfolioScreen() {
         if (cents > 0n) spendableHoldings.push({ key: `chain-${entry.chainId}`, label: chainName(entry.chainId), usdCents: cents });
       }
 
-      const investmentHoldings: Holding[] = balance.otherHoldings.map((holding) => {
-        const key = `token-${holding.chainId}-${holding.symbol}`;
-        const label = `${holding.symbol} · ${chainName(holding.chainId)}`;
-        return holding.usd
-          ? { key, label, usdCents: parseUsd(holding.usd) }
-          : { key, label, usdCents: null, amountText: formatTokenAmount(holding.amount, holding.decimals) };
-      });
+      // USDC moved to another chain is still cash; it sits with the rest of
+      // the dollars, labelled by where it is.
+      for (const holding of balance.otherHoldings.filter((h) => h.stable && h.usd)) {
+        spendableHoldings.push({
+          key: `token-${holding.chainId}-${holding.symbol}`,
+          label: `${holding.symbol} · ${chainName(holding.chainId)}`,
+          usdCents: parseUsd(holding.usd!),
+        });
+      }
 
-      const spendableTotal = parseUsd(balance.totalUsd) + parseUsd(balance.gateway?.totalUsd ?? '0');
+      const investmentHoldings: Holding[] = balance.otherHoldings
+        .filter((holding) => !(holding.stable && holding.usd))
+        .map((holding) => {
+          const key = `token-${holding.chainId}-${holding.symbol}`;
+          const label = `${holding.symbol} · ${chainName(holding.chainId)}`;
+          return holding.usd
+            ? { key, label, usdCents: parseUsd(holding.usd) }
+            : { key, label, usdCents: null, amountText: formatTokenAmount(holding.amount, holding.decimals) };
+        });
+
+      const spendableTotal = spendableHoldings.reduce((sum, h) => sum + (h.usdCents ?? 0n), 0n);
       const investmentsTotal = investmentHoldings.reduce((sum, h) => sum + (h.usdCents ?? 0n), 0n);
 
       setLoad({
@@ -146,9 +161,13 @@ export default function PortfolioScreen() {
     }
   }, []);
 
+  // Live while on screen: prices move, so re-read on the same beat the
+  // server refreshes its shared price snapshot. Nothing polls once it closes.
   useFocusEffect(
     useCallback(() => {
       void fetchPortfolio();
+      const timer = setInterval(() => void fetchPortfolio(), PRICE_REFRESH_MS);
+      return () => clearInterval(timer);
     }, [fetchPortfolio]),
   );
 

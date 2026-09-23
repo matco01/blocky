@@ -1,6 +1,6 @@
 import type { Plan, PolicyDecision } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
-import { planAmountLabel, planFeeLabel } from '../../lib/planLabels';
+import { planAmountLabel, planDestinationLabel, planFeeLabel, planFeeName, planVerb } from '../../lib/planLabels';
 import { useTheme } from '../../theme';
 import { Button } from '../Button';
 import { Icon } from '../Icon';
@@ -37,6 +37,7 @@ export function ChatPlanCard({
 
   const amount = planAmountLabel(plan);
   const fee = planFeeLabel(plan);
+  const verb = planVerb(plan);
   const denied = decision?.outcome === 'deny';
   const withinLimits = decision?.outcome === 'auto_execute';
 
@@ -47,7 +48,7 @@ export function ChatPlanCard({
   const status = denied
     ? { label: 'Blocked', tone: 'warning' as const }
     : sent
-      ? { label: 'Sent', tone: 'positive' as const }
+      ? { label: verb === 'Move' ? 'On its way' : 'Sent', tone: 'positive' as const }
       : withinLimits
         ? { label: 'Within your limits', tone: 'secondary' as const }
         : { label: 'Needs approval', tone: 'tertiary' as const };
@@ -56,7 +57,7 @@ export function ChatPlanCard({
     <Tile style={{ padding: theme.space.lg }}>
       <View style={styles.header}>
         <Text variant="label" tone="secondary">
-          Send
+          {verb}
         </Text>
         <View style={styles.status}>
           {sent ? <Icon name="checkmark" size={14} tone="positive" /> : null}
@@ -71,7 +72,7 @@ export function ChatPlanCard({
           {amount}
         </Text>
         <Text variant="body" tone="secondary">
-          to {plan.recipient?.display ?? 'yourself'}
+          to {planDestinationLabel(plan)}
         </Text>
       </View>
 
@@ -79,7 +80,7 @@ export function ChatPlanCard({
 
       <View style={styles.row}>
         <Text variant="caption" tone="tertiary">
-          Network fee
+          {planFeeName(plan)}
         </Text>
         <Text variant="caption" tabular>
           {fee}
@@ -109,7 +110,7 @@ export function ChatPlanCard({
       {!denied && !sent ? (
         <View style={{ marginTop: theme.space.lg }}>
           <Button
-            label={withinLimits ? `Send ${amount}` : 'Review & send'}
+            label={withinLimits ? `${verb} ${amount}` : `Review & ${verb.toLowerCase()}`}
             size="compact"
             haptic={withinLimits ? 'heavy' : 'medium'}
             onPress={() => onApprove(withinLimits)}

@@ -64,7 +64,9 @@ export const DEFAULT_POLICY: Policy = {
   perTxCapUsd: '100',
   dailyCapUsd: '250',
   autoExecuteThresholdUsd: '25',
-  allowedActions: ['transfer'],
+  // Moving money to your own wallet on another chain sits beside sending: the
+  // same limits apply to it, and it has no third party to vet.
+  allowedActions: ['transfer', 'bridge'],
   tokenAllowlist: ['USDC'],
   recipientAllowlist: [],
 };

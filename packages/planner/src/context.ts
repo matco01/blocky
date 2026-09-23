@@ -1,3 +1,4 @@
+import type { CctpFees } from '@blocky/wallet-core';
 import type {
   Address,
   ChainId,
@@ -50,11 +51,22 @@ export interface PlannerContext {
    */
   usdcBalanceUsd(chainId: ChainId): Promise<string>;
 
-  /** Whether the account holds any native token on a chain. */
-  hasNativeBalance(chainId: ChainId): Promise<boolean>;
+  /**
+   * The chain's own gas token held there, valued in USD. Null when it cannot
+   * be valued — no price, or no way to read that chain — which the gas rules
+   * treat as "not enough", never as "probably fine".
+   */
+  nativeBalanceUsd(chainId: ChainId): Promise<string | null>;
 
-  /** Estimated network fee in USD, before any paymaster surcharge. */
+  /** Estimated network fee in USD. Throws rather than guessing when it cannot be priced. */
   estimateNetworkFeeUsd(chainId: ChainId, calls: readonly PreparedCall[]): Promise<string>;
+
+  /**
+   * What Circle charges to move USDC between two chains and deliver it there.
+   * Throws when the fee cannot be read, which the planner reports as "not
+   * available right now" rather than planning a transfer it cannot price.
+   */
+  bridgeFees(from: ChainId, to: ChainId): Promise<CctpFees>;
 
   /** Sanctions and known-scam screening. True means flagged. */
   isAddressFlagged(address: Address): Promise<boolean>;
@@ -87,6 +99,7 @@ export type PlanFailureCode =
   | 'unpriced_amount'
   | 'insufficient_balance'
   | 'no_gas_route'
+  | 'no_bridge_route'
   | 'not_implemented';
 
 export interface PlanFailure {

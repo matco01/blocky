@@ -15,7 +15,7 @@ import { TextField } from '../components/TextField';
 import { api } from '../lib/api';
 import { confirmWithBiometrics } from '../lib/biometrics';
 import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
-import { planAmountLabel } from '../lib/planLabels';
+import { planAmountLabel, planDestinationLabel, planVerb } from '../lib/planLabels';
 import { SubmittedButUnconfirmedError, useSmartAccount, type SendStage } from '../lib/smart-account';
 import { font, useTheme } from '../theme';
 
@@ -120,7 +120,7 @@ export default function SendScreen() {
     }
 
     setApprovalError(null);
-    const approval = await confirmWithBiometrics(`Send ${planAmountLabel(plan)}`);
+    const approval = await confirmWithBiometrics(`${planVerb(plan)} ${planAmountLabel(plan)}`);
     if (!approval.ok) {
       setApprovalError(approval.message);
       return;
@@ -205,7 +205,7 @@ export default function SendScreen() {
           <View style={styles.status}>
             <Text variant="heading">{STAGE_COPY[step.stage]}</Text>
             <Text variant="body" tone="secondary">
-              {planAmountLabel(step.plan)} to {step.plan.recipient?.display}
+              {planAmountLabel(step.plan)} to {planDestinationLabel(step.plan)}
             </Text>
           </View>
         ) : null}
@@ -215,10 +215,15 @@ export default function SendScreen() {
             <View style={[styles.check, { backgroundColor: theme.colors.accentTint, borderRadius: theme.radius.xl }]}>
               <Icon name="checkmark" size={36} tone="accent" />
             </View>
-            <Text variant="title">Sent</Text>
+            <Text variant="title">{planVerb(step.plan) === 'Move' ? 'On its way' : 'Sent'}</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
-              {planAmountLabel(step.plan)} to {step.plan.recipient?.display}
+              {planAmountLabel(step.plan)} to {planDestinationLabel(step.plan)}
             </Text>
+            {planVerb(step.plan) === 'Move' ? (
+              <Text variant="caption" tone="tertiary" style={styles.center}>
+                It usually lands within a minute.
+              </Text>
+            ) : null}
             {!step.recorded ? (
               <Text variant="caption" tone="tertiary" style={styles.center}>
                 It may take a moment to appear in your activity.
@@ -265,7 +270,7 @@ export default function SendScreen() {
           {step.name === 'review' ? (
             <>
               <Button
-                label={secondsLeft === 0 ? 'Get a new quote' : `Send ${planAmountLabel(step.plan)}`}
+                label={secondsLeft === 0 ? 'Get a new quote' : `${planVerb(step.plan)} ${planAmountLabel(step.plan)}`}
                 haptic={secondsLeft === 0 ? 'light' : 'heavy'}
                 loading={planning}
                 onPress={() => void send(step.plan)}

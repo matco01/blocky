@@ -13,6 +13,7 @@ export * from './gas';
 export * from './rpc';
 export * from './receipts';
 export * from './gateway';
+export * from './cctp';
 export * from './prices';
 export * from './ecosystem';
 export * from './holdings';

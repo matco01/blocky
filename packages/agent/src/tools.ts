@@ -152,7 +152,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_supported_chains',
     description:
-      'The chains Blocky supports, with names and whether each is a testnet. Use this only when the user asks about networks directly; routing is the planner\'s job and not something to raise unprompted.',
+      'The chains Blocky knows: chainId, name, whether it is a testnet, whether USDC can be moved there from the user\'s Arc balance (canMoveUsdcHere), and which token pays fees there (gasToken). Use it before proposing a move to another chain — the chainId for the intent comes from here, never from memory — and when the user asks about networks.',
     input_schema: NO_INPUT,
   },
   {
@@ -216,7 +216,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: PROPOSE_INTENT,
     description:
-      'Propose that money move. This does NOT execute — it hands a structured intent to the planner, which builds the real transaction, prices it, and checks it against the user\'s limits. The user then approves it on their phone. Call this once you know exactly what the user wants; ask a clarifying question instead if any of the token, the amount, or the recipient is ambiguous. Only transfers of USDC work today — do not propose swaps or bridges.',
+      'Propose that money move. This does NOT execute — it hands a structured intent to the planner, which builds the real transaction, prices it, and checks it against the user\'s limits. The user then approves it on their phone. Call this once you know exactly what the user wants; ask a clarifying question instead if any of the token, the amount, or the recipient is ambiguous. Two things work today: a USDC transfer on Arc (type "transfer"), and moving the user\'s own USDC from Arc to another chain (type "bridge", toChainId from get_supported_chains). Do not propose swaps.',
     input_schema: intentJsonSchema() as Anthropic.Tool['input_schema'],
   },
 ];

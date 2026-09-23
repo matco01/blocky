@@ -175,7 +175,20 @@ export function createStore(db: Db): Store {
     // parses — an old shape, a hand edit — falls back to the conservative
     // default rather than being trusted.
     const parsed = PolicySchema.safeParse(row.policy);
-    return parsed.success ? parsed.data : DEFAULT_POLICY;
+    if (!parsed.success) return DEFAULT_POLICY;
+
+    /*
+     * `allowedActions` has never been something the user can edit — no screen
+     * sets it — so a stored `['transfer']` is the old default, saved alongside
+     * limits the user did choose. Read it as today's default. A list anyone
+     * actually narrowed would not look like this one.
+     */
+    const actions = parsed.data.allowedActions;
+    if (actions.length === 1 && actions[0] === 'transfer') {
+      return { ...parsed.data, allowedActions: DEFAULT_POLICY.allowedActions };
+    }
+
+    return parsed.data;
   }
 
   async function writePolicy(userId: string, policy: Policy): Promise<void> {
