@@ -19,16 +19,16 @@ import {
   CCTP_FAST_FINALITY,
   CCTP_FORWARD_HOOK_DATA,
   DEFAULT_CHAIN,
+  acrossSpokePool,
   canMoveUsdcBetween,
   canPayForGeneralAction,
   cctpArrivalForBurn,
-  cctpBurnForArrival,
   cctpContracts,
   getChain,
   selectGasStrategy,
 } from '@blocky/wallet-core';
 import { assetDelta, resolveAmount } from './amount';
-import { cctpBurnCalls, erc20TransferCall } from './calls';
+import { acrossDepositCalls, cctpBurnCalls, erc20TransferCall } from './calls';
 import { fail, type PlanFailure, type PlannerContext } from './context';
 import { destinationWarnings, feeWarnings, recipientWarnings, tokenWarnings } from './warnings';
 
@@ -198,8 +198,24 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Bridge: USDC from Arc to another chain, through CCTP                        */
+/*  Bridge: USDC from Arc to another chain, by the best route there is          */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * One way of getting the money there, fully priced: exactly what it delivers,
+ * how long it takes, and the calls that do it.
+ */
+interface Route {
+  provider: 'cctp' | 'across';
+  /** What lands on the destination — the floor, for a route whose fee is a ceiling. */
+  arrive: bigint;
+  etaSeconds: number;
+  feeIsCeiling: boolean;
+  calls: PreparedCall[];
+}
+
+/** Slower routes only win by more than this: a few cents is not worth minutes of waiting. */
+const SPEED_TIEBREAK_UNITS = 1_000n; // $0.001
 
 async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<PlanOutcome> {
   const from: ChainId = intent.fromChainId ?? DEFAULT_CHAIN;
@@ -214,8 +230,10 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     return fail('no_bridge_route', `That money is already on ${source.name}.`);
   }
 
-  const contracts = cctpContracts(from);
-  if (!contracts || !canMoveUsdcBetween(from, to) || destination.circleDomain === null) {
+  const cctp = canMoveUsdcBetween(from, to) ? cctpContracts(from) : null;
+  const acrossPool = source.testnet === destination.testnet ? acrossSpokePool(from) : null;
+
+  if (!cctp && !acrossPool) {
     return fail('no_bridge_route', `Blocky can't move money to ${destination.name} yet.`);
   }
 
@@ -228,7 +246,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     return fail('unknown_token', describeUnknownToken(intent.token));
   }
 
-  // CCTP moves USDC and nothing else: it burns and re-mints Circle's own token.
+  // Every route moves USDC and nothing else — swaps are a different intent.
   if (token.address !== source.usdc) {
     return fail('not_implemented', `Only USDC can move between chains right now, not ${token.symbol}.`);
   }
@@ -237,88 +255,121 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     return fail('unknown_recipient', "Your wallet isn't ready yet. Try again in a moment.");
   }
 
-  /* --- Read everything at once ------------------------------------------- */
+  // Always the user's own address: moving money between chains is moving it
+  // to yourself. Paying someone else on another chain is a different intent.
+  const wallet = self.address;
 
-  const destinationDomain = destination.circleDomain;
-  const burnCalls = (burn: bigint, maxFee: bigint) =>
-    cctpBurnCalls({
-      chainId: from,
-      token,
-      messenger: contracts.tokenMessenger,
-      burn,
-      maxFee,
-      destinationDomain,
-      // Always the user's own address: moving money between chains is moving
-      // it to yourself. Paying someone else on another chain is a different
-      // intent.
-      recipient: self.address,
-      hookData: CCTP_FORWARD_HOOK_DATA,
-      minFinalityThreshold: CCTP_FAST_FINALITY,
-      displayAmount: formatUnits(burn, token.decimals),
-      destinationName: destination.name,
-    });
+  /* --- How much leaves ---------------------------------------------------- */
 
-  const [balance, usdcBalanceUsd, networkFeeUsd, fees, destinationGasUsd, destinationFeeUsd] = await Promise.all([
+  // Every route is an approve plus one deposit, so one estimate sizes the gas
+  // for all of them.
+  const [balance, usdcBalanceUsd, networkFeeUsd, destinationGasUsd, destinationFeeUsd] = await Promise.all([
     ctx.balanceOf(token),
     ctx.usdcBalanceUsd(from),
-    // Sized on the real pair of calls; the amounts don't change their cost.
-    ctx.estimateNetworkFeeUsd(from, burnCalls(1n, 0n)),
-    ctx.bridgeFees(from, to).catch(() => null),
+    ctx.estimateNetworkFeeUsd(from, [probeCall(from, token), probeCall(from, token)]),
     // Only for the warning below — never a reason to refuse the move itself.
     ctx.nativeBalanceUsd(to).catch(() => null),
     ctx.estimateNetworkFeeUsd(to, []).catch(() => null),
   ]);
-
-  if (!fees) {
-    return fail('no_bridge_route', `Moving money to ${destination.name} isn't available right now. Try again in a minute.`);
-  }
 
   const gas = selectGasStrategy({ chainId: from, networkFeeUsd, usdcBalanceUsd, nativeBalanceUsd: null });
   if (!gas.ok) {
     return fail('no_gas_route', gas.message);
   }
 
-  /* --- Work out how much ------------------------------------------------- */
-
   // Arc gas comes out of the same USDC, so it stays behind whatever moves.
+  // "Move $20" sends $20 and shows what arrives; "move everything" sends all
+  // of it but the gas.
   const gasReserve = feeInTokenUnits(gas.plan.totalUsd, token, '1');
-  const base = resolveAmount({ spec: intent.amount, token, unitPrice: '1', balance, reserve: gasReserve });
+  const amount = resolveAmount({ spec: intent.amount, token, unitPrice: '1', balance, reserve: gasReserve });
 
-  if (!base.ok) {
-    return fail(...amountFailure(base.reason, token));
+  if (!amount.ok) {
+    return fail(...amountFailure(amount.reason, token));
   }
 
-  let arrive: bigint;
-  let burn: bigint;
-  let maxFee: bigint;
+  const input = amount.amount;
+  const displayAmount = formatUnits(input, token.decimals);
 
-  if (intent.amount.kind === 'max') {
-    // "Move everything": the whole spendable balance is burned, and what
-    // arrives is what is left after the transfer fee.
-    const result = cctpArrivalForBurn(base.amount, fees);
-    if (!result) return fail('insufficient_balance', "That's not enough to cover the transfer fee.");
-    ({ arrive, maxFee } = result);
-    burn = base.amount;
-  } else {
-    // "Move $20": $20 arrives, and the fee goes on top.
-    arrive = base.amount;
-    ({ burn, maxFee } = cctpBurnForArrival(arrive, fees));
-    if (burn > balance - gasReserve) {
-      return fail('insufficient_balance', "You don't have enough USDC to cover that plus the transfer fee.");
+  /* --- Price every route, keep the best ---------------------------------- */
+
+  const [cctpFees, acrossQuote] = await Promise.all([
+    cctp ? ctx.bridgeFees(from, to).catch(() => null) : null,
+    acrossPool ? ctx.acrossQuote(from, to, input, wallet).catch(() => null) : null,
+  ]);
+
+  const routes: Route[] = [];
+
+  if (cctp && cctpFees && destination.circleDomain !== null) {
+    const priced = cctpArrivalForBurn(input, cctpFees);
+    if (priced) {
+      routes.push({
+        provider: 'cctp',
+        arrive: priced.arrive,
+        etaSeconds: CCTP_ETA_SECONDS,
+        feeIsCeiling: true,
+        calls: cctpBurnCalls({
+          chainId: from,
+          token,
+          messenger: cctp.tokenMessenger,
+          burn: input,
+          maxFee: priced.maxFee,
+          destinationDomain: destination.circleDomain,
+          recipient: wallet,
+          hookData: CCTP_FORWARD_HOOK_DATA,
+          minFinalityThreshold: CCTP_FAST_FINALITY,
+          displayAmount,
+          destinationName: destination.name,
+        }),
+      });
     }
   }
 
-  /* --- Build the transaction --------------------------------------------- */
+  if (acrossQuote && acrossQuote.inputAmount === input) {
+    routes.push({
+      provider: 'across',
+      arrive: acrossQuote.outputAmount,
+      etaSeconds: acrossQuote.etaSeconds,
+      feeIsCeiling: false,
+      calls: acrossDepositCalls({
+        chainId: from,
+        token,
+        spokePool: acrossQuote.spokePool,
+        depositor: wallet,
+        outputToken: acrossQuote.outputToken,
+        inputAmount: input,
+        outputAmount: acrossQuote.outputAmount,
+        destinationChainId: to,
+        exclusiveRelayer: acrossQuote.exclusiveRelayer,
+        quoteTimestamp: acrossQuote.quoteTimestamp,
+        fillDeadline: acrossQuote.fillDeadline,
+        exclusivityDeadline: acrossQuote.exclusivityDeadline,
+        displayAmount,
+        destinationName: destination.name,
+      }),
+    });
+  }
 
-  const moved = assetDelta(token, arrive, '1');
-  const landed = assetDelta({ ...token, chainId: to, address: destination.usdc }, arrive, '1');
+  const route = bestRoute(routes);
 
-  const calls = burnCalls(burn, maxFee);
+  if (!route) {
+    return fail(
+      'no_bridge_route',
+      input < 1_000_000n
+        ? `That's too little to move to ${destination.name} — the transfer fee would take all of it.`
+        : `Moving money to ${destination.name} isn't available right now. Try again in a minute.`,
+    );
+  }
+
+  /* --- Build the plan ----------------------------------------------------- */
+
+  const moved = assetDelta(token, input, '1');
+  const landed = assetDelta({ ...token, chainId: to, address: destination.usdc }, route.arrive, '1');
+  const transferFee = input - route.arrive;
 
   const fee: Fee = {
-    totalUsd: formatUsd(parseUsd(gas.plan.totalUsd) + maxFee),
+    totalUsd: formatUsd(parseUsd(gas.plan.totalUsd) + transferFee),
     paidIn: 'usdc',
-    breakdown: { networkUsd: gas.plan.networkUsd, paymasterUsd: '0', serviceUsd: formatUsd(maxFee) },
+    breakdown: { networkUsd: gas.plan.networkUsd, paymasterUsd: '0', serviceUsd: formatUsd(transferFee) },
   };
 
   const canActThere =
@@ -326,7 +377,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     canPayForGeneralAction({
       chainId: to,
       networkFeeUsd: destinationFeeUsd,
-      usdcBalanceUsd: formatUsd(arrive),
+      usdcBalanceUsd: formatUsd(route.arrive),
       nativeBalanceUsd: destinationGasUsd,
     });
 
@@ -343,7 +394,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     ok: true,
     plan: stamp({
       intentType: 'bridge',
-      summary: summariseBridge(moved, destination.name, fee),
+      summary: summariseBridge(moved, landed, destination.name, route),
       modelRationale: intent.rationale,
       outflow: [moved],
       inflow: [landed],
@@ -351,9 +402,41 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
       recipient: null,
       fee,
       warnings,
-      calls,
+      calls: route.calls,
+      route: { provider: route.provider, etaSeconds: route.etaSeconds, feeIsCeiling: route.feeIsCeiling },
     }),
   };
+}
+
+/** CCTP Fast Transfers with forwarding land in well under a minute. */
+const CCTP_ETA_SECONDS = 30;
+
+/**
+ * The route that delivers the most. A slower route has to deliver more than
+ * a rounding error extra to win; between two that deliver the same, the
+ * faster one does.
+ */
+export function bestRoute<T extends { arrive: bigint; etaSeconds: number }>(routes: readonly T[]): T | null {
+  let best: T | null = null;
+
+  for (const route of routes) {
+    if (route.arrive <= 0n) continue;
+    if (!best) {
+      best = route;
+      continue;
+    }
+
+    const faster = route.etaSeconds < best.etaSeconds;
+    const margin = faster ? -SPEED_TIEBREAK_UNITS : SPEED_TIEBREAK_UNITS;
+    if (route.arrive > best.arrive + margin) best = route;
+  }
+
+  return best;
+}
+
+/** A stand-in call, for sizing gas before the amounts are known. */
+function probeCall(chainId: ChainId, token: ResolvedToken): PreparedCall {
+  return { chainId, to: token.address, data: '0x', value: '0', description: 'Gas estimate' };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -403,9 +486,20 @@ function summariseTransfer(outflow: AssetDelta, recipient: ResolvedRecipient, fe
   return `Send ${outflow.displayAmount} ${outflow.token.symbol}${value} to ${recipient.display}. ${cost}.`;
 }
 
-/** "Up to", because the transfer fee is a ceiling — whatever it doesn't use arrives with the money. */
-function summariseBridge(moved: AssetDelta, destinationName: string, fee: Fee): string {
-  return `Move ${displayUsd(moved.usdValue ?? '0')} to your wallet on ${destinationName}. Up to ${displayUsd(fee.totalUsd)} in fees.`;
+/**
+ * "Move $20.00 to your wallet on Base. $19.99 arrives in about 2 seconds." A
+ * route whose fee is a ceiling says "at least": whatever it doesn't use
+ * arrives too.
+ */
+function summariseBridge(moved: AssetDelta, landed: AssetDelta, destinationName: string, route: Route): string {
+  const arrives = `${route.feeIsCeiling ? 'At least ' : ''}${displayUsd(landed.usdValue ?? '0')} arrives`;
+  return `Move ${displayUsd(moved.usdValue ?? '0')} to your wallet on ${destinationName}. ${arrives} in ${describeEta(route.etaSeconds)}.`;
+}
+
+function describeEta(seconds: number): string {
+  if (seconds < 60) return `about ${Math.max(1, Math.round(seconds))} seconds`;
+  const minutes = Math.round(seconds / 60);
+  return minutes === 1 ? 'about a minute' : `about ${minutes} minutes`;
 }
 
 function describeUnknownToken(token: TransferIntent['token']): string {

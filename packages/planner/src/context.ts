@@ -1,4 +1,4 @@
-import type { CctpFees } from '@blocky/wallet-core';
+import type { AcrossQuote, CctpFees } from '@blocky/wallet-core';
 import type {
   Address,
   ChainId,
@@ -67,6 +67,13 @@ export interface PlannerContext {
    * available right now" rather than planning a transfer it cannot price.
    */
   bridgeFees(from: ChainId, to: ChainId): Promise<CctpFees>;
+
+  /**
+   * An Across quote for moving exactly `inputAmount` of USDC to `recipient`
+   * on another chain. Null when Across has no route for it. Throws when the
+   * quote cannot be read; the planner then simply leaves Across out.
+   */
+  acrossQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address): Promise<AcrossQuote | null>;
 
   /** Sanctions and known-scam screening. True means flagged. */
   isAddressFlagged(address: Address): Promise<boolean>;

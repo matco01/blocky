@@ -16,7 +16,9 @@ import {
 } from '@blocky/shared';
 import {
   DEFAULT_CHAIN,
+  acrossSpokePool,
   cctpContracts,
+  containsAcrossDeposit,
   chainsOnNetwork,
   containsCctpBurn,
   containsTransfer,
@@ -319,7 +321,7 @@ export function createApp(deps: AppDeps) {
     const amount = { kind: 'token' as const, value: shape.outflow.displayAmount };
 
     const intent =
-      shape.kind === 'bridge'
+      shape.kind !== 'transfer'
         ? BridgeIntentSchema.parse({
             type: 'bridge',
             token: { kind: 'symbol', symbol: 'USDC' },
@@ -418,17 +420,29 @@ export function createApp(deps: AppDeps) {
             to: shape.recipient.address,
             amount: BigInt(shape.outflow.amount),
           })
-        : containsCctpBurn(receipt, {
-            messenger: shape.messenger,
-            burnToken: shape.token,
-            depositor: wallet,
-            amount: shape.burn,
-            // Only ever the user's own wallet: a burn minting to anyone else
-            // is not the move they approved.
-            mintRecipient: wallet,
-            destinationDomain: shape.destinationDomain,
-            maxFee: shape.maxFee,
-          });
+        : shape.kind === 'cctp'
+          ? containsCctpBurn(receipt, {
+              messenger: shape.messenger,
+              burnToken: shape.token,
+              depositor: wallet,
+              amount: shape.input,
+              // Only ever the user's own wallet: a burn minting to anyone else
+              // is not the move they approved.
+              mintRecipient: wallet,
+              destinationDomain: shape.destinationDomain,
+              maxFee: shape.maxFee,
+            })
+          : containsAcrossDeposit(receipt, {
+              spokePool: shape.spokePool,
+              inputToken: shape.token,
+              outputToken: shape.outputToken,
+              inputAmount: shape.input,
+              outputAmount: shape.output,
+              destinationChainId: shape.destination,
+              depositor: wallet,
+              // The same rule: paying out to anyone but the user is not this plan.
+              recipient: wallet,
+            });
 
     if (!matches) {
       return c.json(
@@ -451,7 +465,8 @@ export function createApp(deps: AppDeps) {
         txHash,
         // For a move between chains, the contract the USDC went to on-chain —
         // the same counterparty the explorer reports for it.
-        counterparty: shape.kind === 'transfer' ? shape.recipient.address : shape.minter,
+        counterparty:
+          shape.kind === 'transfer' ? shape.recipient.address : shape.kind === 'cctp' ? shape.minter : shape.spokePool,
         amount: shape.outflow.displayAmount,
         /*
          * USDC is always priced. An unpriced plan cannot auto-execute (the
@@ -672,17 +687,29 @@ type PlanShape =
       recipient: NonNullable<Plan['recipient']>;
     }
   | {
-      kind: 'bridge';
+      kind: 'cctp';
       chainId: ChainId;
       outflow: Plan['outflow'][number];
       destination: ChainId;
       destinationDomain: number;
       token: Address;
-      /** What leaves: the amount plus the fee ceiling, exactly as approved. */
-      burn: bigint;
+      /** What leaves, exactly as approved and burned. */
+      input: bigint;
       maxFee: bigint;
       messenger: Address;
       minter: Address;
+    }
+  | {
+      kind: 'across';
+      chainId: ChainId;
+      outflow: Plan['outflow'][number];
+      destination: ChainId;
+      token: Address;
+      outputToken: Address;
+      input: bigint;
+      /** Exactly what the relayer pays out, as quoted and deposited. */
+      output: bigint;
+      spokePool: Address;
     };
 
 function planShape(plan: Plan): PlanShape | null {
@@ -696,30 +723,51 @@ function planShape(plan: Plan): PlanShape | null {
   }
 
   if (plan.intentType === 'bridge') {
-    const [approve, burn] = plan.calls;
+    const [approve, deposit] = plan.calls;
     const [inflow] = plan.inflow;
-    if (plan.calls.length !== 2 || !approve || !burn || !inflow || plan.recipient !== null) return null;
+    if (plan.calls.length !== 2 || !approve || !deposit || !inflow || plan.recipient !== null) return null;
 
-    const contracts = cctpContracts(burn.chainId);
-    const destinationDomain = getChain(inflow.token.chainId).circleDomain;
-    if (!contracts || burn.to !== contracts.tokenMessenger || destinationDomain === null) return null;
+    const chainId = deposit.chainId;
+    const destination = inflow.token.chainId;
+    const input = BigInt(outflow.amount);
 
-    // USDC's six decimals are the dollar scale, so the fee ceiling in dollars
-    // is also its amount in base units.
-    const maxFee = parseUsd(plan.fee.breakdown.serviceUsd);
+    // Which road it takes is read off the contract it calls — and only a
+    // contract we pinned ourselves counts.
+    const cctp = cctpContracts(chainId);
+    if (cctp && deposit.to === cctp.tokenMessenger) {
+      const destinationDomain = getChain(destination).circleDomain;
+      if (destinationDomain === null) return null;
 
-    return {
-      kind: 'bridge',
-      chainId: burn.chainId,
-      outflow,
-      destination: inflow.token.chainId,
-      destinationDomain,
-      token: approve.to,
-      burn: BigInt(outflow.amount) + maxFee,
-      maxFee,
-      messenger: contracts.tokenMessenger,
-      minter: contracts.tokenMinter,
-    };
+      return {
+        kind: 'cctp',
+        chainId,
+        outflow,
+        destination,
+        destinationDomain,
+        token: approve.to,
+        input,
+        // USDC's six decimals are the dollar scale, so the fee ceiling in
+        // dollars is also its amount in base units.
+        maxFee: parseUsd(plan.fee.breakdown.serviceUsd),
+        messenger: cctp.tokenMessenger,
+        minter: cctp.tokenMinter,
+      };
+    }
+
+    const spokePool = acrossSpokePool(chainId);
+    if (spokePool && deposit.to === spokePool) {
+      return {
+        kind: 'across',
+        chainId,
+        outflow,
+        destination,
+        token: approve.to,
+        outputToken: inflow.token.address,
+        input,
+        output: BigInt(inflow.amount),
+        spokePool,
+      };
+    }
   }
 
   return null;

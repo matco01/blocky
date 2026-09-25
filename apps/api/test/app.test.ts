@@ -271,6 +271,7 @@ async function planBridge(userId = 'did:privy:alice', wallet: Address = ALICE_WA
     estimateNetworkFeeUsd: async () => '0.01',
     isAddressFlagged: async () => false,
     bridgeFees: async () => ({ forwardFee: 54_565n, protocolFeeCentiBps: 0n }),
+    acrossQuote: async () => null,
   });
   if (!outcome.ok) throw new Error(outcome.failure.message);
 
@@ -309,7 +310,8 @@ function burnReceipt(args: { depositor: string; mintRecipient: string; amount: b
 }
 
 describe('recording a move between chains', () => {
-  const burn = { depositor: ALICE_WALLET, mintRecipient: ALICE_WALLET, amount: 20_054_565n, domain: 6, maxFee: 54_565n };
+  // $20 leaves; up to $0.054565 of it is Circle's fee.
+  const burn = { depositor: ALICE_WALLET, mintRecipient: ALICE_WALLET, amount: 20_000_000n, domain: 6, maxFee: 54_565n };
 
   it('records the exact burn the plan describes', async () => {
     const plan = await planBridge();

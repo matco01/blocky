@@ -67,25 +67,26 @@ describe('the happy path', () => {
     expect(PlanSchema.safeParse(await planOk()).success).toBe(true);
   });
 
-  it('delivers the amount asked for, with the transfer fee on top', async () => {
+  it('sends the amount asked for, and shows what arrives after the transfer fee', async () => {
     const plan = await planOk();
 
     expect(plan.intentType).toBe('bridge');
     expect(plan.outflow[0]?.amount).toBe('20000000');
-    expect(plan.inflow[0]?.amount).toBe('20000000');
+    // $20 less the $0.054565 forwarding fee ceiling — the floor of what lands.
+    expect(plan.inflow[0]?.amount).toBe('19945435');
     expect(plan.inflow[0]?.token.chainId).toBe(CHAIN.baseSepolia);
     expect(plan.inflow[0]?.token.address).toBe(tokenOn(CHAIN.baseSepolia).address);
+    expect(plan.route).toEqual({ provider: 'cctp', etaSeconds: 30, feeIsCeiling: true });
   });
 
   it('approves exactly what it burns, then burns it to the user on the destination', async () => {
     const plan = await planOk();
 
-    // $20 arriving + the $0.054565 forwarding fee ceiling.
     expect(plan.calls.map((call) => call.to)).toEqual([tokenOn(CHAIN.arcTestnet).address, MESSENGER]);
-    expect(plan.calls[0]?.data).toBe(encodeErc20Approve(MESSENGER, 20_054_565n));
+    expect(plan.calls[0]?.data).toBe(encodeErc20Approve(MESSENGER, 20_000_000n));
     expect(plan.calls[1]?.data).toBe(
       encodeDepositForBurnWithHook({
-        amount: 20_054_565n,
+        amount: 20_000_000n,
         destinationDomain: 6,
         mintRecipient: ME,
         burnToken: tokenOn(CHAIN.arcTestnet).address,
@@ -102,7 +103,7 @@ describe('the happy path', () => {
 
     expect(plan.fee.totalUsd).toBe('0.154565');
     expect(plan.fee.breakdown).toEqual({ networkUsd: '0.1', paymasterUsd: '0', serviceUsd: '0.054565' });
-    expect(plan.summary).toBe('Move $20.00 to your wallet on Base Sepolia. Up to $0.15 in fees.');
+    expect(plan.summary).toBe('Move $20.00 to your wallet on Base Sepolia. At least $19.95 arrives in about 30 seconds.');
   });
 
   it('has no third-party recipient to vet: it is the user moving their own money', async () => {
@@ -119,19 +120,20 @@ describe('how much', () => {
     expect(plan.inflow[0]?.amount).toBe(String(999_900_000n - 54_565n));
   });
 
-  it('refuses when the amount plus the transfer fee does not fit', async () => {
-    const result = await failure({ amount: { kind: 'usd', value: '999.89' } });
+  it('refuses when the amount plus the Arc fee does not fit', async () => {
+    const result = await failure({ amount: { kind: 'usd', value: '999.95' } });
 
     expect(result.code).toBe('insufficient_balance');
   });
 
-  it('refuses "everything" when the fees would take all of it', async () => {
+  it('refuses "everything" when the fees would take all of it, and says why', async () => {
     const result = await failure(
       { amount: { kind: 'max' } },
       fakeContext({ balanceOf: async () => 150_000n, usdcBalanceUsd: async () => '0.15' }),
     );
 
-    expect(result.code).toBe('insufficient_balance');
+    expect(result.code).toBe('no_bridge_route');
+    expect(result.message).toMatch(/too little/);
   });
 });
 

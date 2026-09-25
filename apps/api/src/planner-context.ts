@@ -13,6 +13,7 @@ import type { PlannerContext } from '@blocky/planner';
 import {
   CHAINS,
   DEFAULT_CHAIN,
+  fetchAcrossQuote,
   fetchCctpFees,
   getChain,
   getTokenPriceUsd,
@@ -200,6 +201,10 @@ export function createPlannerContext({
 
     async bridgeFees(from: ChainId, to: ChainId) {
       return fetchCctpFees(from, to);
+    },
+
+    async acrossQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address) {
+      return fetchAcrossQuote({ from, to, inputAmount, recipient });
     },
 
     async isAddressFlagged() {

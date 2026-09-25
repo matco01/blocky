@@ -1,6 +1,6 @@
 import type { Plan, PolicyDecision } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
-import { planAmountLabel, planDestinationLabel, planFeeLabel, planFeeName, planVerb } from '../../lib/planLabels';
+import { planAmountLabel, planArrivalLabel, planDestinationLabel, planFeeLabel, planFeeName, planVerb } from '../../lib/planLabels';
 import { useTheme } from '../../theme';
 import { Button } from '../Button';
 import { Icon } from '../Icon';
@@ -74,6 +74,11 @@ export function ChatPlanCard({
         <Text variant="body" tone="secondary">
           to {planDestinationLabel(plan)}
         </Text>
+        {planArrivalLabel(plan) ? (
+          <Text variant="caption" tone="tertiary">
+            {planArrivalLabel(plan)}
+          </Text>
+        ) : null}
       </View>
 
       <View style={[styles.divider, { backgroundColor: theme.colors.border, marginVertical: theme.space.md }]} />

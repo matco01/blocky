@@ -21,6 +21,9 @@ const ERC20_APPROVE_SELECTOR = '095ea7b3';
 /** `depositForBurnWithHook(uint256,uint32,bytes32,address,bytes32,uint256,uint32,bytes)` — CCTP v2 TokenMessenger. */
 const DEPOSIT_FOR_BURN_WITH_HOOK_SELECTOR = '779b432d';
 
+/** `depositV3(address,address,address,address,uint256,uint256,uint256,address,uint32,uint32,uint32,bytes)` — Across SpokePool. */
+const ACROSS_DEPOSIT_V3_SELECTOR = '7b939232';
+
 /** The largest value a uint256 can hold. */
 const UINT256_MAX = (1n << 256n) - 1n;
 
@@ -161,6 +164,93 @@ export function cctpBurnCalls(args: {
       }),
       value: '0',
       description: `Move ${args.displayAmount} ${args.token.symbol} to ${args.destinationName}`,
+    },
+  ];
+}
+
+/**
+ * Encode Across's `depositV3` with an empty message: twelve arguments, the
+ * last an empty `bytes` — eleven head words, its offset (twelve words in,
+ * 0x180), and a zero length. Checked byte-for-byte against viem's encoder in
+ * the tests.
+ */
+export function encodeAcrossDepositV3(args: {
+  depositor: Address;
+  recipient: Address;
+  inputToken: Address;
+  outputToken: Address;
+  inputAmount: bigint;
+  outputAmount: bigint;
+  destinationChainId: number;
+  exclusiveRelayer: Address;
+  quoteTimestamp: number;
+  fillDeadline: number;
+  exclusivityDeadline: number;
+}): Hex {
+  return `0x${ACROSS_DEPOSIT_V3_SELECTOR}${[
+    addressWord(args.depositor),
+    addressWord(args.recipient),
+    addressWord(args.inputToken),
+    addressWord(args.outputToken),
+    word(args.inputAmount),
+    word(args.outputAmount),
+    word(BigInt(args.destinationChainId)),
+    addressWord(args.exclusiveRelayer),
+    word(BigInt(args.quoteTimestamp)),
+    word(BigInt(args.fillDeadline)),
+    word(BigInt(args.exclusivityDeadline)),
+    word(12n * 32n),
+    word(0n),
+  ].join('')}`;
+}
+
+/**
+ * The two calls behind an Across move, signed together as one transaction:
+ * allow the SpokePool exactly the amount deposited, then deposit it, paying
+ * out to the user's own wallet on the destination.
+ */
+export function acrossDepositCalls(args: {
+  chainId: ChainId;
+  token: ResolvedToken;
+  spokePool: Address;
+  depositor: Address;
+  outputToken: Address;
+  inputAmount: bigint;
+  outputAmount: bigint;
+  destinationChainId: number;
+  exclusiveRelayer: Address;
+  quoteTimestamp: number;
+  fillDeadline: number;
+  exclusivityDeadline: number;
+  displayAmount: string;
+  destinationName: string;
+}): PreparedCall[] {
+  return [
+    {
+      chainId: args.chainId,
+      to: args.token.address,
+      data: encodeErc20Approve(args.spokePool, args.inputAmount),
+      value: '0',
+      description: `Allow Across to move ${args.displayAmount} ${args.token.symbol}`,
+    },
+    {
+      chainId: args.chainId,
+      to: args.spokePool,
+      data: encodeAcrossDepositV3({
+        depositor: args.depositor,
+        recipient: args.depositor,
+        inputToken: args.token.address,
+        outputToken: args.outputToken,
+        inputAmount: args.inputAmount,
+        outputAmount: args.outputAmount,
+        destinationChainId: args.destinationChainId,
+        exclusiveRelayer: args.exclusiveRelayer,
+        quoteTimestamp: args.quoteTimestamp,
+        fillDeadline: args.fillDeadline,
+        exclusivityDeadline: args.exclusivityDeadline,
+      }),
+      value: '0',
+      description: `Move ${args.displayAmount} ${args.token.symbol} to ${args.destinationName} through Across`,
     },
   ];
 }

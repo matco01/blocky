@@ -174,6 +174,22 @@ export const PlanSchema = z.object({
   calls: z.array(PreparedCallSchema).min(1),
   simulation: SimulationSchema.nullable(),
 
+  /**
+   * For value moving between chains: who carries it, and how long it should
+   * take to land. The planner quotes every provider and keeps the one that
+   * delivers the most. Absent on plans that stay on one chain, and on plans
+   * stored before routes existed.
+   */
+  route: z
+    .object({
+      /** `cctp` (Circle burns and re-mints) or `across` (a relayer pays out from its own funds). */
+      provider: z.string().min(1).max(32),
+      etaSeconds: z.number().int().nonnegative(),
+      /** True when the fee shown is a ceiling and whatever it doesn't use arrives too. */
+      feeIsCeiling: z.boolean(),
+    })
+    .optional(),
+
   createdAt: z.string().datetime(),
   /**
    * Quotes go stale. Past this point the plan must be rebuilt rather than

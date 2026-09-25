@@ -14,11 +14,33 @@ export function planFeeLabel(plan: Plan): string {
 }
 
 /**
- * What the fee line is called. A move between chains quotes a ceiling —
- * whatever Circle doesn't use arrives with the money — so it says so.
+ * What the fee line is called. Some routes between chains quote a ceiling —
+ * whatever they don't use arrives with the money — and those say so.
  */
 export function planFeeName(plan: Plan): string {
-  return plan.intentType === 'bridge' ? 'Fees, at most' : 'Network fee';
+  if (plan.intentType !== 'bridge') return 'Network fee';
+  return plan.route?.feeIsCeiling ? 'Fees, at most' : 'Fees';
+}
+
+/**
+ * For a move between chains: what lands and how soon — "$19.99 on Base, in
+ * about 2 seconds". "At least" where the fee is a ceiling. Null otherwise.
+ */
+export function planArrivalLabel(plan: Plan): string | null {
+  const landing = plan.inflow[0];
+  if (plan.intentType !== 'bridge' || !landing) return null;
+
+  const amount = landing.usdValue ? displayUsd(landing.usdValue) : `${landing.displayAmount} ${landing.token.symbol}`;
+  const where = getChain(landing.token.chainId).name;
+  const when = plan.route ? `, in ${describeEta(plan.route.etaSeconds)}` : '';
+
+  return `${plan.route?.feeIsCeiling ? 'At least ' : ''}${amount} on ${where}${when}`;
+}
+
+function describeEta(seconds: number): string {
+  if (seconds < 60) return `about ${Math.max(1, Math.round(seconds))} seconds`;
+  const minutes = Math.round(seconds / 60);
+  return minutes === 1 ? 'about a minute' : `about ${minutes} minutes`;
 }
 
 /** "Send" pays someone; "Move" is the user's own money changing chains. */

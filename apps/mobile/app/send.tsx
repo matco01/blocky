@@ -16,7 +16,7 @@ import { api } from '../lib/api';
 import { useModalTopPadding } from '../lib/screenInsets';
 import { confirmWithBiometrics } from '../lib/biometrics';
 import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
-import { planAmountLabel, planDestinationLabel, planVerb } from '../lib/planLabels';
+import { planAmountLabel, planArrivalLabel, planDestinationLabel, planVerb } from '../lib/planLabels';
 import { SubmittedButUnconfirmedError, useWallet, type SendStage } from '../lib/wallet';
 import { font, useTheme } from '../theme';
 
@@ -220,9 +220,9 @@ export default function SendScreen() {
             <Text variant="body" tone="secondary" style={styles.center}>
               {planAmountLabel(step.plan)} to {planDestinationLabel(step.plan)}
             </Text>
-            {planVerb(step.plan) === 'Move' ? (
+            {planArrivalLabel(step.plan) ? (
               <Text variant="caption" tone="tertiary" style={styles.center}>
-                It usually lands within a minute.
+                {planArrivalLabel(step.plan)}.
               </Text>
             ) : null}
             {!step.recorded ? (
