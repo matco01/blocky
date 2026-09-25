@@ -463,3 +463,18 @@ describe('bringing USDC home', () => {
     expect(plan.outflow[0]?.amount).toBe('50000000');
   });
 });
+
+describe('when the money there is not USDC', () => {
+  it('says what is there instead, rather than just "not enough"', async () => {
+    const intent = IntentSchema.parse(bridgeIntent(home({ amount: { kind: 'max' } })));
+    const result = await buildPlan(intent, onArbitrum({ balanceOf: async (token) => (token.address === NATIVE_TOKEN ? 10n ** 16n : 0n) }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('insufficient_balance');
+      expect(result.failure.message).toBe(
+        "You don't have any USDC on Arbitrum One. You do have ETH there ($26.00) — that can come home as USDC too.",
+      );
+    }
+  });
+});

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AppState,
   KeyboardAvoidingView,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   View,
@@ -69,6 +70,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const { messages, busy, send, retry, showCapabilities, reset, sayLocally } = useChat();
   const isSent = useSentPlans();
   const scrollRef = useRef<ScrollView>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const [draft, setDraft] = useState('');
   const typing = useKeyboardVisible();
@@ -170,6 +172,14 @@ export function HomePage({ page, onPageChange }: PageProps) {
     return () => clearInterval(timer);
   }, [focused, appActive, page, balance.state, fetchBalance]);
 
+  // Pull down on the conversation to re-read the balance now, rather than
+  // waiting for the next poll — the same gesture as Portfolio.
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchBalance();
+    setRefreshing(false);
+  }, [fetchBalance]);
+
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     atBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 40;
@@ -245,6 +255,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
         // Wider gaps between turns than within them, so each exchange reads as a unit.
         contentContainerStyle={[styles.chatContent, { gap: theme.space.xl }]}
         keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.textTertiary} />}
         onScroll={onScroll}
         scrollEventThrottle={64}
         onContentSizeChange={() => {

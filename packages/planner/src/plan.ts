@@ -377,7 +377,19 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   const amount = resolveAmount({ spec: intent.amount, token, unitPrice, balance, reserve: gasReserve + topUp });
 
   if (!amount.ok) {
-    return fail(...amountFailure(amount.reason, token));
+    if (amount.reason !== 'insufficient') return fail(...amountFailure(amount.reason, token));
+
+    // Name the chain, and say what *is* there: money swapped out to another
+    // chain is usually its gas token, not USDC, and "not that much USDC" alone
+    // reads as if it vanished.
+    const where = source.id === DEFAULT_CHAIN ? '' : ` on ${source.name}`;
+    const otherToken = !sendsNative && !source.gasPaidInUsdc && sourceGasUsd !== null && parseUsd(sourceGasUsd) > 0n;
+    return fail(
+      'insufficient_balance',
+      balance === 0n
+        ? `You don't have any ${token.symbol}${where}.${otherToken ? ` You do have ${source.nativeCurrency.symbol} there (${displayUsd(sourceGasUsd!)}) — that can come home as USDC too.` : ''}`
+        : `You don't have that much ${token.symbol}${where}.`,
+    );
   }
 
   const input = amount.amount;

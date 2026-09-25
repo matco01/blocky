@@ -4,6 +4,9 @@ import { buildPlan } from '@blocky/planner';
 import {
   AddressSchema,
   evaluatePolicy,
+  formatUnits,
+  formatUsd,
+  parseUsd,
   type Address,
   type Plan,
   type PolicyDecision,
@@ -12,7 +15,9 @@ import {
   DEFAULT_CHAIN,
   canMoveUsdcBetween,
   chainsOnNetwork,
+  fetchWalletHoldings,
   getArcProtocols,
+  getChain,
   getTokenPriceUsd,
   readUsdcBalance,
   type ChainReader,
@@ -66,13 +71,34 @@ export function agentToolsFor(
      * number the Home screen shows — not Gateway deposits, which no plan can
      * spend yet.
      */
+    /**
+     * Everything the wallet holds: the USDC on Arc a send can spend, and what
+     * sits on other chains — USDC moved there and gas tokens swapped into. The
+     * agent has to see all of it, or it offers to move USDC that is really
+     * ETH, and the user gets a refusal instead of an answer.
+     */
     async getBalance() {
       try {
-        const { amount, usd } = await readUsdcBalance(reader, DEFAULT_CHAIN, account);
+        const [{ amount, usd }, holdings] = await Promise.all([
+          readUsdcBalance(reader, DEFAULT_CHAIN, account),
+          fetchWalletHoldings(reader, account).catch(() => null),
+        ]);
+
+        const elsewhere = (holdings ?? []).map((holding) => ({
+          chain: getChain(holding.chainId).name,
+          chainId: holding.chainId,
+          token: holding.symbol,
+          amount: formatUnits(BigInt(holding.amount), holding.decimals),
+          usdValue: holding.usd,
+        }));
+        const elsewhereUsd = elsewhere.reduce((sum, h) => sum + (h.usdValue ? parseUsd(h.usdValue) : 0n), 0n);
 
         return {
-          totalUsd: usd,
-          usdc: { amount: amount.toString(), displayAmount: usd, usdValue: usd },
+          totalUsd: formatUsd(amount + elsewhereUsd),
+          onArc: { usdc: usd, spendable: true },
+          otherChains: elsewhere,
+          // Said, not implied: a read that failed is not an empty list.
+          ...(holdings === null ? { otherChainsUnavailable: true } : {}),
         };
       } catch {
         // Say we could not read it. A zero here reads as "you have no money",

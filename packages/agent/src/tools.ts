@@ -162,7 +162,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_balance',
     description:
-      "The user's spendable balance, in USDC and in dollars. One figure — the USDC in their wallet on Arc. There is no per-chain balance to explain and no bridging step to mention.",
+      "Everything the user holds: USDC on Arc (what a send spends), and each holding on another chain — USDC moved there, or a gas token like ETH swapped into — with its amount and dollar value, plus the total. Check this before proposing to move money off another chain, so you move the token that is actually there.",
     input_schema: NO_INPUT,
   },
   {
