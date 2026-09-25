@@ -1,4 +1,4 @@
-import type { AcrossQuote, AcrossSwapQuote, CctpFees, GasZipQuote } from '@blocky/wallet-core';
+import type { AcrossNativeSwapQuote, AcrossQuote, AcrossSwapQuote, CctpFees, GasZipQuote } from '@blocky/wallet-core';
 import type {
   Address,
   ChainId,
@@ -95,6 +95,19 @@ export interface PlannerContext {
    * the amount is over its limit.
    */
   gasZipQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address): Promise<GasZipQuote | null>;
+
+  /**
+   * An Across quote for selling exactly `inputAmount` of the origin chain's
+   * gas token for USDC delivered on another chain — how money swapped out to
+   * another chain comes home. Already checked field by field (see
+   * `fetchAcrossNativeSwapQuote`). Null when there is no route.
+   */
+  acrossNativeSwapQuote(
+    from: ChainId,
+    to: ChainId,
+    inputAmount: bigint,
+    recipient: Address,
+  ): Promise<AcrossNativeSwapQuote | null>;
 
   /** Sanctions and known-scam screening. True means flagged. */
   isAddressFlagged(address: Address): Promise<boolean>;

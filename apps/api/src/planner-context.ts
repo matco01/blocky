@@ -14,6 +14,7 @@ import {
   CHAINS,
   DEFAULT_CHAIN,
   NATIVE_TOKEN,
+  fetchAcrossNativeSwapQuote,
   fetchAcrossQuote,
   fetchAcrossSwapQuote,
   fetchCctpFees,
@@ -93,10 +94,27 @@ export function createPlannerContext({
       const chain = getChain(chainId);
 
       if (ref.kind === 'symbol') {
-        // The curated list is exactly one token today. That is honest: USDC is
-        // the product, and a symbol we cannot vouch for should come back as a
-        // clarifying question rather than a lookup against arbitrary chain data.
-        if (ref.symbol.toUpperCase() !== 'USDC') return null;
+        const symbol = ref.symbol.trim().toUpperCase();
+
+        // A chain's own gas token (ETH on Arbitrum, HYPE on HyperEVM) — named
+        // by the zero address, as swap routes name it. Never on Arc, where the
+        // native token *is* the USDC below.
+        if (!chain.gasPaidInUsdc && symbol === chain.nativeCurrency.symbol.toUpperCase()) {
+          return {
+            chainId,
+            address: NATIVE_TOKEN,
+            symbol: chain.nativeCurrency.symbol,
+            name: chain.nativeCurrency.symbol,
+            decimals: chain.nativeCurrency.decimals,
+            logoUrl: null,
+            verified: true,
+          };
+        }
+
+        // Otherwise the curated list is USDC alone. That is honest: a symbol we
+        // cannot vouch for should come back as a clarifying question rather
+        // than a lookup against arbitrary chain data.
+        if (symbol !== 'USDC') return null;
 
         return {
           chainId,
@@ -162,6 +180,7 @@ export function createPlannerContext({
     },
 
     async balanceOf(token: ResolvedToken) {
+      if (token.address === NATIVE_TOKEN) return reader.nativeBalance(token.chainId, account);
       return balance(token.chainId, token.address);
     },
 
@@ -219,6 +238,10 @@ export function createPlannerContext({
 
     async gasZipQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address) {
       return fetchGasZipQuote({ from, to, inputAmount, recipient });
+    },
+
+    async acrossNativeSwapQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address) {
+      return fetchAcrossNativeSwapQuote({ from, to, inputAmount, recipient });
     },
 
     async isAddressFlagged() {

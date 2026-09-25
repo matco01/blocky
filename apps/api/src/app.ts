@@ -10,7 +10,6 @@ import {
   formatUsd,
   parseUsd,
   planOutflowUsd,
-  transactionsOf,
   type Address,
   type ChainId,
   type Plan,
@@ -18,11 +17,14 @@ import {
 import {
   DEFAULT_CHAIN,
   NATIVE_TOKEN,
+  acrossPeriphery,
   acrossSpokePool,
   cctpContracts,
   containsAcrossDeposit,
   gasZipDepositContract,
+  groupCalls,
   isExactTransaction,
+  supportsBatching,
   chainsOnNetwork,
   containsCctpBurn,
   containsTransfer,
@@ -336,7 +338,8 @@ export function createApp(deps: AppDeps) {
       shape.kind !== 'transfer'
         ? BridgeIntentSchema.parse({
             type: 'bridge',
-            token: { kind: 'symbol', symbol: 'USDC' },
+            // USDC, or the gas token being sold to come home.
+            token: { kind: 'symbol', symbol: shape.outflow.token.address === NATIVE_TOKEN ? shape.outflow.token.symbol : 'USDC' },
             amount,
             fromChainId: shape.chainId,
             toChainId: shape.destination,
@@ -389,7 +392,8 @@ export function createApp(deps: AppDeps) {
 
   /**
    * One hash per transaction the plan goes out as, in order (see
-   * `transactionsOf`) — usually one; two when a gas top-up rides along.
+   * `groupCalls`) — usually one; more when a gas top-up rides along, or on a
+   * chain where approve and deposit can't be batched.
    * `txHash` alone is the older, single-transaction form.
    */
   const ExecutionBodySchema = z
@@ -428,17 +432,23 @@ export function createApp(deps: AppDeps) {
 
     const chainId = shape.kind === 'transfer' ? shape.call.chainId : shape.chainId;
     const hashes = (parsed.data.txHashes ?? [parsed.data.txHash!]).map((hash) => hash.toLowerCase() as `0x${string}`);
-    const groups = transactionsOf(plan.calls);
+    const groups = groupCalls(plan.calls);
+
+    // Every transaction that moves the money is required; only a trailing gas
+    // top-up may be missing, and is then recorded as not sent.
+    const required = groups.length - (plan.route?.gasTopUp ? 1 : 0);
 
     if (hashes.length > groups.length) {
       return c.json({ error: 'mismatch', message: 'More transactions than that plan makes.' }, 422);
     }
+    if (hashes.length < required) {
+      return c.json({ error: 'incomplete', message: 'Not every transaction of that plan was sent.' }, 422);
+    }
 
-    // Every transaction reported must be exactly its part of the plan. The
-    // first carries the money; later ones (a gas top-up) are extras, and a
-    // missing extra is recorded as not sent rather than failing the move.
+    // Every transaction reported must be exactly its part of the plan.
     for (const [index, hash] of hashes.entries()) {
-      const receipt = await pollReceipt(() => reader.transactionReceipt(chainId, hash), polling);
+      const group = groups[index]!;
+      const receipt = await pollReceipt(() => reader.transactionReceipt(group[0]!.chainId, hash), polling);
 
       if (!receipt) {
         return c.json(
@@ -447,7 +457,6 @@ export function createApp(deps: AppDeps) {
         );
       }
 
-      const group = groups[index]!;
       const matches =
         index > 0 || shape.kind === 'exact'
           ? isExactTransaction(receipt.transaction, receipt.status, { from: wallet, calls: group })
@@ -496,7 +505,8 @@ export function createApp(deps: AppDeps) {
       }
     }
 
-    const txHash = hashes[0]!;
+    // The transaction that actually moves the money: the last required one.
+    const txHash = hashes[required - 1]!;
     const incomplete = hashes.length < groups.length;
 
     try {
@@ -776,12 +786,32 @@ function planShape(plan: Plan): PlanShape | null {
   if (plan.intentType !== 'bridge' || plan.recipient !== null) return null;
 
   const [inflow] = plan.inflow;
-  const groups = transactionsOf(plan.calls);
+  const groups = groupCalls(plan.calls);
   const main = groups[0];
   if (!inflow || !main || main.length === 0) return null;
 
-  // Anything after the main transaction may only be a Gas.zip top-up.
   const chainId = main[0]!.chainId;
+
+  // From another chain there is no batching: every call is its own
+  // transaction, each verified byte for byte — and each may only touch a
+  // contract we pinned, or approve the source chain's USDC to one.
+  if (!supportsBatching(chainId)) {
+    const pinned = new Set(
+      [acrossSpokePool(chainId), acrossPeriphery(chainId), cctpContracts(chainId)?.tokenMessenger].filter(
+        (address): address is Address => Boolean(address),
+      ),
+    );
+    const usdc = getChain(chainId).usdc;
+    const last = plan.calls[plan.calls.length - 1]!;
+    const allowed = plan.calls.every(
+      (call) => call.chainId === chainId && (pinned.has(call.to) || (call.to === usdc && call !== last)),
+    );
+    if (!allowed || !pinned.has(last.to)) return null;
+
+    return { chainId, outflow, destination: inflow.token.chainId, kind: 'exact', counterparty: last.to };
+  }
+
+  // Anything after the main transaction may only be a Gas.zip top-up.
   const gasZip = gasZipDepositContract(chainId);
   if (groups.slice(1).some((group) => group.length !== 1 || group[0]!.to !== gasZip)) return null;
 

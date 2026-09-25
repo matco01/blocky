@@ -1,5 +1,6 @@
-import type { Address, Hex, PreparedCall } from '@blocky/shared';
+import { transactionsOf, type Address, type ChainId, type Hex, type PreparedCall } from '@blocky/shared';
 import { encodeFunctionData, parseAbi } from 'viem';
+import { getChain } from './chains';
 
 /**
  * How planned calls become transactions — written once, so the app that sends
@@ -18,6 +19,16 @@ export const MULTICALL_FROM: Address = '0x522faf9a91c41c443c66765030741e4aace147
 const MULTICALL_FROM_ABI = parseAbi([
   'function aggregate((address target, bytes callData)[] calls) returns (uint256 blockNumber, bytes[] returnData)',
 ]);
+
+/** Only Arc has Multicall3From. Everywhere else, every call is its own transaction. */
+export function supportsBatching(chainId: number): boolean {
+  return getChain(chainId as ChainId)?.gasPaidInUsdc === true;
+}
+
+/** A plan's calls as the transactions they go out as, in order — what the app sends and the server verifies. */
+export function groupCalls(calls: readonly PreparedCall[]): PreparedCall[][] {
+  return transactionsOf(calls, supportsBatching);
+}
 
 export interface OutgoingTransaction {
   to: Address;

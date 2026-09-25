@@ -67,7 +67,9 @@ export const DEFAULT_POLICY: Policy = {
   // Moving money to your own wallet on another chain sits beside sending: the
   // same limits apply to it, and it has no third party to vet.
   allowedActions: ['transfer', 'bridge'],
-  tokenAllowlist: ['USDC'],
+  // USDC, and the gas tokens of the chains Blocky reaches — money swapped out
+  // to another chain has to be able to come home.
+  tokenAllowlist: ['USDC', 'ETH', 'HYPE', 'POL', 'AVAX'],
   recipientAllowlist: [],
 };
 

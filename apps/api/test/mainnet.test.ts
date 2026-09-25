@@ -7,11 +7,12 @@ vi.hoisted(() => {
 });
 
 import { buildPlan, type PlannerContext } from '@blocky/planner';
-import { CHAIN, IntentSchema, transactionsOf, type Address, type Plan } from '@blocky/shared';
+import { CHAIN, IntentSchema, type Address, type Plan } from '@blocky/shared';
 import {
   NATIVE_TOKEN,
   acrossSpokePool,
   gasZipDepositContract,
+  groupCalls,
   transactionFor,
   type ChainReader,
   type Receipt,
@@ -97,6 +98,7 @@ function context(over: Partial<PlannerContext> = {}): PlannerContext {
     acrossQuote: async () => null,
     acrossSwapQuote: async () => null,
     gasZipQuote: async () => null,
+    acrossNativeSwapQuote: async () => null,
     ...over,
   };
 }
@@ -208,12 +210,12 @@ describe('a move with a gas top-up: two transactions', () => {
   it('goes out as the move, then the top-up on its own', async () => {
     const p = await plan();
 
-    expect(transactionsOf(p.calls).map((group) => group.length)).toEqual([2, 1]);
+    expect(groupCalls(p.calls).map((group) => group.length)).toEqual([2, 1]);
   });
 
   it('records both when both are exactly their part of the plan', async () => {
     const p = await plan();
-    const [move, topUp] = transactionsOf(p.calls);
+    const [move, topUp] = groupCalls(p.calls);
     // The move is a CCTP burn, verified on its event; build that receipt from the plan.
     receipts.set(hash('e'), burnReceipt(p));
     receipts.set(hash('f'), sent(topUp!));
@@ -235,7 +237,7 @@ describe('a move with a gas top-up: two transactions', () => {
 
   it('refuses a top-up that is not the planned one', async () => {
     const p = await plan();
-    const [, topUp] = transactionsOf(p.calls);
+    const [, topUp] = groupCalls(p.calls);
     receipts.set(hash('e'), burnReceipt(p));
     receipts.set(hash('f'), sent([{ ...topUp![0]!, value: '1' }]));
 
@@ -275,3 +277,69 @@ function burnReceipt(plan: Plan): Receipt {
     ],
   };
 }
+
+describe('coming home from another chain', () => {
+  const ETH_ON_ARBITRUM = { chainId: CHAIN.arbitrum, address: NATIVE_TOKEN, symbol: 'ETH', name: 'ETH', decimals: 18, logoUrl: null, verified: true } as const;
+  const ARB_USDC = '0xaf88d065e77c8cc2239327c5edb3a432268e5831' as Address;
+
+  const onArbitrum = (over: Partial<PlannerContext> = {}) =>
+    context({
+      resolveToken: async (ref, chainId) =>
+        ref.kind === 'symbol' && ref.symbol === 'ETH'
+          ? ETH_ON_ARBITRUM
+          : { chainId, address: chainId === CHAIN.arbitrum ? ARB_USDC : USDC, symbol: 'USDC', name: 'USD Coin', decimals: 6, logoUrl: null, verified: true },
+      balanceOf: async (token) => (token.address === NATIVE_TOKEN ? 10_000_000_000_000_000n : 50_000_000n),
+      nativeBalanceUsd: async () => '26',
+      ...over,
+    });
+
+  it('records selling ETH on Arbitrum for Arc USDC — one exact transaction on Arbitrum', async () => {
+    const p = await stored(
+      { fromChainId: CHAIN.arbitrum, toChainId: CHAIN.arc, token: { kind: 'symbol', symbol: 'ETH' }, amount: { kind: 'token', value: '0.005' } },
+      onArbitrum({
+        acrossNativeSwapQuote: async (_f, _t, input) => ({
+          periphery: '0x97ccdbea4632140639ad5ea9b944aa034eb15fd4',
+          inputAmount: input,
+          data: '0x110560addeadbeef',
+          outputToken: USDC,
+          expectedOut: 13_460_000n,
+          minOut: 13_360_000n,
+          etaSeconds: 1,
+        }),
+      }),
+    );
+    receipts.set(hash('a'), sent(p.calls));
+
+    expect((await report(p.id, [hash('a')])).status).toBe(201);
+    expect((await store.listExecutions('did:privy:alice'))[0]?.chainId).toBe(CHAIN.arbitrum);
+  });
+
+  it('needs both transactions of a USDC move from Arbitrum — approve alone moved nothing', async () => {
+    const p = await stored(
+      { fromChainId: CHAIN.arbitrum, toChainId: CHAIN.arc },
+      onArbitrum({
+        acrossQuote: async (_f, _t, input) => ({
+          spokePool: acrossSpokePool(CHAIN.arbitrum)!,
+          inputToken: ARB_USDC,
+          outputToken: USDC,
+          inputAmount: input,
+          outputAmount: input - 5_000n,
+          destinationChainId: CHAIN.arc,
+          exclusiveRelayer: '0x0000000000000000000000000000000000000000',
+          quoteTimestamp: 1,
+          fillDeadline: 2,
+          exclusivityDeadline: 0,
+          etaSeconds: 0,
+        }),
+      }),
+    );
+    const [approve, deposit] = groupCalls(p.calls);
+    expect(groupCalls(p.calls)).toHaveLength(2);
+
+    receipts.set(hash('b'), sent(approve!));
+    expect((await report(p.id, [hash('b')])).status).toBe(422);
+
+    receipts.set(hash('c'), sent(deposit!));
+    expect((await report(p.id, [hash('b'), hash('c')])).status).toBe(201);
+  });
+});

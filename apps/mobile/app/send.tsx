@@ -131,7 +131,11 @@ export default function SendScreen() {
 
     let result: SendResult;
     try {
-      result = await sendCalls(plan.calls, (stage) => setStep({ name: 'sending', plan, stage }));
+      result = await sendCalls(plan.calls, {
+        // Only a gas top-up may fail on its own; everything else moves the money.
+        optionalLast: Boolean(plan.route?.gasTopUp),
+        onStage: (stage) => setStep({ name: 'sending', plan, stage }),
+      });
     } catch (error) {
       if (error instanceof SubmittedButUnconfirmedError) {
         setStep({ name: 'unconfirmed', plan });

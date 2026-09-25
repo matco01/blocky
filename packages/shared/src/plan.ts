@@ -220,19 +220,29 @@ export function isPlanExpired(plan: Plan, now: Date = new Date()): boolean {
 /**
  * How a plan's calls go out as transactions, in order.
  *
- * Consecutive calls that carry no value share one transaction — on Arc, one
- * all-or-nothing Multicall3From batch. A call that carries native value (a
- * Gas.zip deposit pays in native USDC) goes alone, because the batching
- * contract cannot forward value. The app sends by this and the server verifies
- * by this, so both must agree — which is why it lives here, once.
+ * Consecutive calls that carry no value, on a chain that can batch, share one
+ * transaction — on Arc, one all-or-nothing Multicall3From batch. Everything
+ * else goes alone: a call carrying native value (the batching contract cannot
+ * forward it), and every call on a chain with no batching contract. The app
+ * sends by this and the server verifies by this, so both must agree — use
+ * `groupCalls` from wallet-core, which knows which chains can batch.
  */
-export function transactionsOf<T extends { value: string }>(calls: readonly T[]): T[][] {
+export function transactionsOf<T extends { value: string; chainId: number }>(
+  calls: readonly T[],
+  canBatch: (chainId: number) => boolean,
+): T[][] {
   const groups: T[][] = [];
   let batch: T[] = [];
 
   for (const call of calls) {
-    if (BigInt(call.value) === 0n) {
+    const batchable = BigInt(call.value) === 0n && canBatch(call.chainId);
+    if (batchable && (batch.length === 0 || batch[0]!.chainId === call.chainId)) {
       batch.push(call);
+      continue;
+    }
+    if (batchable) {
+      groups.push(batch);
+      batch = [call];
       continue;
     }
     if (batch.length > 0) groups.push(batch);

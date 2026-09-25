@@ -274,6 +274,7 @@ async function planBridge(userId = 'did:privy:alice', wallet: Address = ALICE_WA
     acrossQuote: async () => null,
     acrossSwapQuote: async () => null,
     gasZipQuote: async () => null,
+    acrossNativeSwapQuote: async () => null,
   });
   if (!outcome.ok) throw new Error(outcome.failure.message);
 

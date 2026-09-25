@@ -349,3 +349,117 @@ describe('a gas top-up alongside a move', () => {
     expect(asked).toBe(5_000_000n);
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/*  Coming home: moving money from another chain back to Arc                   */
+/* -------------------------------------------------------------------------- */
+
+import { acrossPeriphery, type AcrossNativeSwapQuote } from '@blocky/wallet-core';
+
+const ETH_ON_ARBITRUM = {
+  chainId: CHAIN.arbitrum,
+  address: NATIVE_TOKEN,
+  symbol: 'ETH',
+  name: 'ETH',
+  decimals: 18,
+  logoUrl: null,
+  verified: true,
+} as const;
+
+const PERIPHERY = acrossPeriphery(CHAIN.arbitrum)!;
+
+function nativeSwapQuote(inputAmount: bigint): AcrossNativeSwapQuote {
+  return {
+    periphery: PERIPHERY,
+    inputAmount,
+    data: '0x110560addeadbeef',
+    outputToken: USDC_ARC.address,
+    expectedOut: 13_460_000n,
+    minOut: 13_360_000n,
+    etaSeconds: 1,
+  };
+}
+
+/** A wallet holding 0.01 ETH on Arbitrum, with Arbitrum gas at $0.10 and ETH at $2,600. */
+const onArbitrum = (over: Parameters<typeof fakeContext>[0] = {}) =>
+  priced({
+    resolveToken: async (ref, chainId) =>
+      ref.kind === 'symbol' && ref.symbol === 'ETH' ? ETH_ON_ARBITRUM : tokenOn(chainId as keyof typeof import('@blocky/wallet-core').CHAINS),
+    balanceOf: async (token) => (token.address === NATIVE_TOKEN ? 10_000_000_000_000_000n : 50_000_000n),
+    nativeBalanceUsd: async (chainId) => (chainId === CHAIN.arbitrum ? '26' : null),
+    ...over,
+  });
+
+const home = (over: Record<string, unknown>) => ({ fromChainId: CHAIN.arbitrum, toChainId: CHAIN.arc, ...over });
+
+describe('bringing ETH home as USDC', () => {
+  const sellEth = home({ token: { kind: 'symbol', symbol: 'ETH' }, amount: { kind: 'token', value: '0.005' } });
+
+  it('sells it through Across in one call carrying the ETH as value', async () => {
+    const plan = await planFor(sellEth, onArbitrum({ acrossNativeSwapQuote: async (_f, _t, input) => nativeSwapQuote(input) }));
+
+    expect(plan.calls).toEqual([
+      expect.objectContaining({ chainId: CHAIN.arbitrum, to: PERIPHERY, value: '5000000000000000', data: '0x110560addeadbeef' }),
+    ]);
+    expect(plan.inflow[0]).toMatchObject({ amount: '13460000', token: { address: USDC_ARC.address, chainId: CHAIN.arc } });
+    expect(plan.route).toMatchObject({ provider: 'across-swap', minimumReceived: '13360000' });
+    expect(plan.fee.paidIn).toBe('native');
+    expect(plan.summary).toBe('Swap 0.005 ETH ($13.00) on Arbitrum One into USDC on Arc. About $13.46 arrives in about a second.');
+    expect(PlanSchema.safeParse(plan).success).toBe(true);
+  });
+
+  it('for "all of it", keeps back the ETH that pays the gas', async () => {
+    let sold = 0n;
+    await planFor(
+      home({ token: { kind: 'symbol', symbol: 'ETH' }, amount: { kind: 'max' } }),
+      onArbitrum({ acrossNativeSwapQuote: async (_f, _t, input) => ((sold = input), nativeSwapQuote(input)) }),
+    );
+
+    // 0.01 ETH, less the $0.10 fee at $2,600 — about 0.0000385 ETH.
+    expect(sold).toBeLessThan(10_000_000_000_000_000n);
+    expect(10_000_000_000_000_000n - sold).toBe(38_461_538_461_539n);
+  });
+
+  it('refuses to turn ETH into another gas token — only USDC comes home', async () => {
+    const intent = IntentSchema.parse(bridgeIntent(home({ token: { kind: 'symbol', symbol: 'ETH' }, toChainId: CHAIN.base, receive: { kind: 'symbol', symbol: 'ETH' } })));
+    const result = await buildPlan(intent, onArbitrum());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe('not_implemented');
+  });
+});
+
+describe('bringing USDC home', () => {
+  const moveUsdc = home({ amount: { kind: 'token', value: '20' } });
+
+  it('prices CCTP and Across from the other chain, as separate approve and deposit transactions', async () => {
+    const plan = await planFor(
+      moveUsdc,
+      onArbitrum({ acrossQuote: async () => acrossQuote(19_994_989n, { spokePool: acrossSpokePool(CHAIN.arbitrum)! }) }),
+    );
+
+    expect(plan.route?.provider).toBe('across');
+    expect(plan.calls.every((call) => call.chainId === CHAIN.arbitrum)).toBe(true);
+    expect(plan.summary).toMatch(/^Move \$20\.00 from Arbitrum One to your wallet on Arc\./);
+  });
+
+  it('pays gas in ETH there, so it needs ETH there', async () => {
+    const intent = IntentSchema.parse(bridgeIntent(moveUsdc));
+    const result = await buildPlan(intent, onArbitrum({ nativeBalanceUsd: async () => null }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('no_gas_route');
+      expect(result.failure.message).toContain('ETH');
+    }
+  });
+
+  it('leaves the USDC whole — Arbitrum gas comes from the ETH, not the amount', async () => {
+    const plan = await planFor(
+      home({ amount: { kind: 'max' } }),
+      onArbitrum({ acrossQuote: async (_f, _t, input) => acrossQuote(input - 5_000n, { inputAmount: input, spokePool: acrossSpokePool(CHAIN.arbitrum)! }) }),
+    );
+
+    expect(plan.outflow[0]?.amount).toBe('50000000');
+  });
+});

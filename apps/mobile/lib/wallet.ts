@@ -1,5 +1,5 @@
-import { transactionsOf, type Address, type PreparedCall } from '@blocky/shared';
-import { transactionFor } from '@blocky/wallet-core';
+import type { Address, PreparedCall } from '@blocky/shared';
+import { groupCalls, transactionFor } from '@blocky/wallet-core';
 import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { useCallback } from 'react';
 import {
@@ -10,35 +10,47 @@ import {
   createWalletClient,
   custom,
   http,
+  numberToHex,
+  type Chain,
+  type EIP1193Provider,
   type Hex,
+  type PublicClient,
 } from 'viem';
-import { homeChain, homeChainName } from './chain';
+import { homeChainName, signingChain } from './chain';
 
 /**
  * The user's wallet: their Privy embedded wallet, sending ordinary
- * transactions on Arc.
+ * transactions — on Arc, and on the other chains of this network when money
+ * moved there has to come back.
  *
  * No smart account, no bundler, no paymaster. On Arc the gas token *is* USDC,
- * so a plain transaction pays its own fee out of the balance being spent — the
- * planner has already reserved room for it. That makes the plainest path also
- * the cheapest: a USDC send costs ~75k gas here, against ~125k for the same
- * send as an ERC-4337 user operation, and nothing sits between the phone and
- * the chain.
+ * so a plain transaction pays its own fee out of the balance being spent. On
+ * another chain it pays in that chain's gas token, which the planner has
+ * already checked the user holds.
  *
  * How a plan's calls become transactions is shared with the server, which
- * verifies each one byte for byte: consecutive calls without value go as one
- * all-or-nothing Multicall3From batch; a call carrying value (a Gas.zip
- * deposit) goes on its own. See `transactionsOf` and `transactionFor`.
+ * verifies each one byte for byte: on Arc, consecutive calls without value go
+ * as one all-or-nothing Multicall3From batch; everywhere else, and for any
+ * call carrying value, each call is its own transaction. See `groupCalls`.
  */
 
-const publicClient = createPublicClient({ chain: homeChain, transport: http() });
+const publicClients = new Map<number, PublicClient>();
+
+function publicClientFor(chain: Chain): PublicClient {
+  let client = publicClients.get(chain.id);
+  if (!client) {
+    client = createPublicClient({ chain, transport: http() }) as PublicClient;
+    publicClients.set(chain.id, client);
+  }
+  return client;
+}
 
 export type SendStage = 'preparing' | 'submitting' | 'confirming';
 
 export interface SendResult {
-  /** One per transaction that landed, in plan order. The first always carries the money. */
+  /** One per transaction that landed, in plan order. */
   hashes: Hex[];
-  /** A later, extra transaction (a gas top-up) did not go through, or its outcome is unknown. */
+  /** The optional last transaction (a gas top-up) did not go through, or its outcome is unknown. */
   extrasFailed: boolean;
 }
 
@@ -65,43 +77,41 @@ export function useWallet() {
   const wallet = wallets[0];
 
   /**
-   * Sign and send a plan's calls, transaction by transaction, in order.
-   * Resolves once each is included — on Arc, that is final.
+   * Sign and send a plan's calls, transaction by transaction, in order, each
+   * on its own chain. Resolves once each is included.
    *
-   * The first transaction carries the money, and fails the whole send if it
-   * fails. Anything after it (a gas top-up) is extra: if one does not go
-   * through, the money has still moved, and saying "failed" would invite the
-   * user to send it again — so it is reported, not thrown.
+   * Every transaction that moves the money must land, or the send fails. Only
+   * a trailing extra (`optionalLast` — a gas top-up) may fail on its own: the
+   * money has already moved by then, and saying "failed" would invite the
+   * user to send it again — so that is reported, not thrown.
    */
   const sendCalls = useCallback(
-    async (calls: readonly PreparedCall[], onStage?: (stage: SendStage) => void): Promise<SendResult> => {
+    async (
+      calls: readonly PreparedCall[],
+      options: { optionalLast?: boolean; onStage?: (stage: SendStage) => void } = {},
+    ): Promise<SendResult> => {
       if (!wallet) throw new Error('Your wallet is still being set up.');
 
-      // The planner only builds calls on the home chain. Refuse anything else
-      // outright rather than signing a call against a chain this client isn't
-      // pointed at — including the same app talking to a server that is on the
-      // other network.
-      if (calls.length === 0 || calls.some((call) => call.chainId !== homeChain.id)) {
-        throw new Error(`That transaction is not for ${homeChainName}. Nothing was signed.`);
+      // Only chains this build signs on. A call for any other — including one
+      // from a server on the other network — is refused before anything is signed.
+      if (calls.length === 0 || calls.some((call) => !signingChain(call.chainId))) {
+        throw new Error(`That transaction isn't for ${homeChainName} or a chain Blocky signs on. Nothing was signed.`);
       }
 
-      onStage?.('preparing');
+      options.onStage?.('preparing');
 
       const address = wallet.address.toLowerCase() as Address;
-      const transactions = transactionsOf(calls).map(transactionFor);
-      const walletClient = createWalletClient({
-        account: address,
-        chain: homeChain,
-        transport: custom(await wallet.getProvider()),
-      });
-
+      const provider = (await wallet.getProvider()) as EIP1193Provider;
+      const groups = groupCalls(calls);
+      const required = groups.length - (options.optionalLast && groups.length > 1 ? 1 : 0);
       const hashes: Hex[] = [];
 
-      for (const [index, transaction] of transactions.entries()) {
+      for (const [index, group] of groups.entries()) {
+        const chain = signingChain(group[0]!.chainId)!;
         try {
-          hashes.push(await sendOne(walletClient, transaction, index === 0 ? onStage : undefined));
+          hashes.push(await sendOne(provider, address, chain, transactionFor(group), options.onStage));
         } catch (error) {
-          if (index === 0) throw error;
+          if (index < required) throw error;
           return { hashes, extrasFailed: true };
         }
       }
@@ -118,17 +128,25 @@ export function useWallet() {
   };
 }
 
-/** Send one transaction and wait for it to land. */
+/** Send one transaction on `chain` and wait for it to land there. */
 async function sendOne(
-  walletClient: ReturnType<typeof createWalletClient>,
+  provider: EIP1193Provider,
+  address: Address,
+  chain: Chain,
   transaction: ReturnType<typeof transactionFor>,
   onStage?: (stage: SendStage) => void,
 ): Promise<Hex> {
+  // Point the embedded wallet at the chain this transaction belongs to. A
+  // wallet left on the wrong chain would sign for the wrong network.
+  await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: numberToHex(chain.id) }] });
+
+  const walletClient = createWalletClient({ account: address, chain, transport: custom(provider) });
+
   onStage?.('submitting');
 
   let hash: Hex;
   try {
-    hash = await walletClient.sendTransaction({ ...transaction, account: walletClient.account!, chain: homeChain });
+    hash = await walletClient.sendTransaction({ ...transaction, account: address, chain });
   } catch (error) {
     // A rejection means nothing was submitted. A timeout or dropped
     // connection means we cannot know — it may have gone through.
@@ -143,9 +161,9 @@ async function sendOne(
    * not a failure of the send, and must never be reported as one: the user
    * would tap "try again" and pay twice.
    */
-  let receipt: Awaited<ReturnType<typeof publicClient.waitForTransactionReceipt>>;
+  let receipt: Awaited<ReturnType<PublicClient['waitForTransactionReceipt']>>;
   try {
-    receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
+    receipt = await publicClientFor(chain).waitForTransactionReceipt({ hash, timeout: 90_000 });
   } catch {
     throw new SubmittedButUnconfirmedError(hash);
   }

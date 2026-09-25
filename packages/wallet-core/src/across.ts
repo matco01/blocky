@@ -24,10 +24,32 @@ import type { Receipt } from './receipts';
 
 const API = 'https://app.across.to/api';
 
-/** The SpokePool on each origin chain we deposit from. */
+/**
+ * The SpokePool on each origin chain we deposit from. Collected from Across's
+ * own API and checked to have code on each chain; a quote naming any other
+ * address is refused.
+ */
 const SPOKE_POOLS: Partial<Record<ChainId, Address>> = {
   [CHAIN.arc]: '0x9b4a302a548c7e313c2b74c461db7b84d3074a84',
+  [CHAIN.ethereum]: '0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5',
+  [CHAIN.optimism]: '0x6f26bf09b1c792e3228e5467807a900a503c0281',
+  [CHAIN.unichain]: '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64',
+  [CHAIN.polygon]: '0x9295ee1d8c5b022be115a2ad3c30c72e34e7f096',
+  [CHAIN.base]: '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64',
+  [CHAIN.arbitrum]: '0xe35e9842fceaca96570b734083f4a58e8f7c5f2a',
+  [CHAIN.avalanche]: '0xfe9d541c92e4e90437c7152a00244886de37a658',
+  [CHAIN.hyperevm]: '0x35e63ea3eb0fb7a3bc543c71fb66412e1f6b0e04',
 };
+
+/**
+ * Across's SpokePoolPeriphery — swaps on the origin chain, then deposits.
+ * The same address on every chain it serves, checked to have code on each.
+ */
+const PERIPHERY: Address = '0x97ccdbea4632140639ad5ea9b944aa034eb15fd4';
+
+export function acrossPeriphery(chainId: ChainId): Address | null {
+  return SPOKE_POOLS[chainId] && !getChain(chainId).gasPaidInUsdc ? PERIPHERY : null;
+}
 
 export function acrossSpokePool(chainId: ChainId): Address | null {
   return SPOKE_POOLS[chainId] ?? null;
@@ -209,6 +231,7 @@ const SWAP_HANDLERS: Partial<Record<ChainId, Address>> = {
   [CHAIN.arbitrum]: '0x0f7ae28de1c8532170ad4ee566b5801485c13a0e',
   [CHAIN.avalanche]: '0x9610954acdca5ff7905f051a040ce33fe613c60e',
   [CHAIN.hyperevm]: '0x5e7840e06faccb6d1c3b5f5e0d1d3d07f2829bba',
+  [CHAIN.arc]: '0xa07480456c4ebad7626e4fdf4a180709e238547b',
 };
 
 export function acrossSwapHandler(chainId: ChainId): Address | null {
@@ -330,26 +353,7 @@ export async function fetchAcrossSwapQuote(
   if (destinationChainId !== BigInt(args.to)) return refuse('wrong destination');
   if (bytes32Address(recipient) !== handler) return refuse('not the pinned handler');
 
-  let instructions;
-  try {
-    [instructions] = decodeAbiParameters(INSTRUCTIONS, message);
-  } catch {
-    return refuse('unreadable instructions');
-  }
-
-  if (instructions.fallbackRecipient.toLowerCase() !== wallet) return refuse('refunds would go to someone else');
-
-  let paysOutWanted = false;
-  for (const call of instructions.calls) {
-    if (call.callData.slice(0, 10).toLowerCase() !== DRAIN_SELECTOR) continue;
-    if (call.target.toLowerCase() !== handler) return refuse('pays out through another contract');
-
-    const { args: drain } = decodeFunctionData({ abi: HANDLER_ABI, data: call.callData });
-    if (drain[1].toLowerCase() !== wallet) return refuse('pays out to someone else');
-    if (drain[0].toLowerCase() === args.outputToken.toLowerCase()) paysOutWanted = true;
-  }
-
-  if (!paysOutWanted) return refuse('never pays out the token asked for');
+  checkInstructions(message, { handler, wallet, payoutToken: args.outputToken, swapsOnArrival: true });
 
   const expectedOut = BigInt(body.expectedOutputAmount ?? '0');
   const minOut = BigInt(body.minOutputAmount ?? '0');
@@ -372,4 +376,173 @@ function refuse(why: string): never {
 
 function bytes32Address(word: Hex): string | null {
   return /^0x0{24}[0-9a-fA-F]{40}$/.test(word) ? `0x${word.slice(26)}`.toLowerCase() : null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Selling a chain's gas token for USDC on another chain                      */
+/* -------------------------------------------------------------------------- */
+
+const SWAP_AND_BRIDGE_ABI = parseAbi([
+  'function swapAndBridge(((uint256 amount, address recipient) submissionFees, (address inputToken, bytes32 outputToken, uint256 outputAmount, address depositor, bytes32 recipient, uint256 destinationChainId, bytes32 exclusiveRelayer, uint32 quoteTimestamp, uint32 fillDeadline, uint32 exclusivityParameter, bytes message) depositData, address swapToken, address exchange, uint8 transferType, uint256 swapTokenAmount, uint256 minExpectedInputTokenAmount, bytes routerCalldata, bool enableProportionalAdjustment, address spokePool, uint256 nonce) swapAndDepositData) payable',
+]);
+
+export interface AcrossNativeSwapQuote {
+  periphery: Address;
+  /** The gas token sold, in its base units — also the value the transaction carries. */
+  inputAmount: bigint;
+  /** The call exactly as Across built it, after every check below. */
+  data: Hex;
+  /** USDC on the destination. */
+  outputToken: Address;
+  expectedOut: bigint;
+  minOut: bigint;
+  etaSeconds: number;
+}
+
+/**
+ * Quote selling `inputAmount` of the origin chain's gas token (ETH on
+ * Arbitrum, say) for USDC delivered to the user on another chain — how money
+ * that was swapped out to another chain comes home.
+ *
+ * Across swaps on the origin chain through a DEX, then bridges the USDC. The
+ * transaction is Across's, so it is taken apart before it is offered, and
+ * refused unless:
+ *
+ *  - it calls the pinned Periphery, with exactly `inputAmount` as value and
+ *    as the amount swapped;
+ *  - it deposits through the pinned SpokePool on the origin chain;
+ *  - it is from this wallet, to this wallet, on the chosen chain, arriving
+ *    as that chain's USDC, with no destination instructions;
+ *  - it pays nobody a submission fee.
+ *
+ * The DEX calldata in the middle is the one opaque part; the minimum it must
+ * produce is fixed in the call, so a worse swap reverts instead of landing.
+ */
+export async function fetchAcrossNativeSwapQuote(
+  args: { from: ChainId; to: ChainId; inputAmount: bigint; recipient: Address },
+  fetchImpl: typeof fetch = fetch,
+): Promise<AcrossNativeSwapQuote | null> {
+  const periphery = acrossPeriphery(args.from);
+  const spokePool = acrossSpokePool(args.from);
+  if (!periphery || !spokePool || args.from === args.to || args.inputAmount <= 0n) return null;
+
+  const outputToken = getChain(args.to).usdc;
+  const wallet = args.recipient.toLowerCase();
+
+  const params = new URLSearchParams({
+    tradeType: 'exactInput',
+    amount: args.inputAmount.toString(),
+    inputToken: NATIVE_TOKEN,
+    originChainId: String(args.from),
+    outputToken,
+    destinationChainId: String(args.to),
+    depositor: args.recipient,
+    recipient: args.recipient,
+  });
+
+  const response = await fetchImpl(`${API}/swap/approval?${params}`);
+  if (response.status >= 400 && response.status < 500) return null;
+  if (!response.ok) throw new Error(`Across swap quote failed with ${response.status}`);
+
+  const body = (await response.json()) as {
+    swapTx?: { to?: string; data?: string; chainId?: number; value?: string };
+    expectedOutputAmount?: string;
+    minOutputAmount?: string;
+    expectedFillTime?: number;
+  };
+
+  const tx = body.swapTx;
+  if (!tx?.data || tx.to?.toLowerCase() !== periphery) return refuse('not the pinned Periphery');
+  if (tx.chainId !== undefined && tx.chainId !== args.from) return refuse('wrong chain');
+  if (!tx.value || BigInt(tx.value) !== args.inputAmount) return refuse('carries the wrong value');
+
+  let decoded;
+  try {
+    decoded = decodeFunctionData({ abi: SWAP_AND_BRIDGE_ABI, data: tx.data as Hex });
+  } catch {
+    return refuse('not a swap-and-bridge');
+  }
+
+  const [data] = decoded.args;
+  const deposit = data.depositData;
+
+  if (data.spokePool.toLowerCase() !== spokePool) return refuse('not the pinned SpokePool');
+  if (data.swapTokenAmount !== args.inputAmount) return refuse('swaps a different amount');
+  if (data.submissionFees.amount !== 0n) return refuse('pays a submission fee');
+  if (deposit.depositor.toLowerCase() !== wallet) return refuse('deposits for someone else');
+  if (bytes32Address(deposit.outputToken) !== outputToken) return refuse('arrives as the wrong token');
+  if (deposit.destinationChainId !== BigInt(args.to)) return refuse('wrong destination');
+
+  // Straight to the user, or through Across's pinned handler there — which
+  // may do nothing but pay the user out.
+  const recipient = bytes32Address(deposit.recipient);
+  if (recipient === wallet) {
+    if (deposit.message !== '0x') return refuse('carries instructions it does not need');
+  } else if (recipient !== null && recipient === acrossSwapHandler(args.to)) {
+    checkInstructions(deposit.message, { handler: recipient as Address, wallet, payoutToken: outputToken, swapsOnArrival: false });
+  } else {
+    return refuse('pays out to someone else');
+  }
+
+  const expectedOut = BigInt(body.expectedOutputAmount ?? '0');
+  const minOut = BigInt(body.minOutputAmount ?? '0');
+  if (expectedOut <= 0n || minOut <= 0n || minOut > expectedOut) return refuse('unusable amounts');
+
+  return {
+    periphery,
+    inputAmount: args.inputAmount,
+    data: tx.data as Hex,
+    outputToken,
+    expectedOut,
+    minOut,
+    etaSeconds: body.expectedFillTime ?? 60,
+  };
+}
+
+/** ERC-20 calls that move or grant tokens: never allowed in instructions that don't swap. */
+const MOVES_TOKENS = new Set(['0x095ea7b3', '0xa9059cbb', '0x23b872dd']);
+
+/**
+ * The rules for the instructions Across's handler runs on arrival:
+ *
+ *  - a refund goes to the user, or nowhere (with no fallback, a failed
+ *    payout makes the fill fail, and the deposit is refunded on the origin);
+ *  - every payout goes through the pinned handler, to the user;
+ *  - one payout is the token asked for;
+ *  - where nothing is swapped on arrival, no other call may carry value,
+ *    approve, or transfer anything — it can only be a call that cannot touch
+ *    the money. Where a swap happens, the DEX's own calls are the trusted part.
+ */
+function checkInstructions(
+  message: Hex,
+  rules: { handler: Address; wallet: string; payoutToken: Address; swapsOnArrival: boolean },
+): void {
+  let instructions;
+  try {
+    [instructions] = decodeAbiParameters(INSTRUCTIONS, message);
+  } catch {
+    refuse('unreadable instructions');
+  }
+
+  const fallback = instructions.fallbackRecipient.toLowerCase();
+  if (fallback !== rules.wallet && fallback !== NATIVE_TOKEN) refuse('refunds would go to someone else');
+
+  let paysOutWanted = false;
+  for (const call of instructions.calls) {
+    const selector = call.callData.slice(0, 10).toLowerCase();
+
+    if (selector === DRAIN_SELECTOR) {
+      if (call.target.toLowerCase() !== rules.handler) refuse('pays out through another contract');
+      const { args: drain } = decodeFunctionData({ abi: HANDLER_ABI, data: call.callData });
+      if (drain[1].toLowerCase() !== rules.wallet) refuse('pays out to someone else');
+      if (drain[0].toLowerCase() === rules.payoutToken.toLowerCase()) paysOutWanted = true;
+      continue;
+    }
+
+    if (!rules.swapsOnArrival && (call.value !== 0n || MOVES_TOKENS.has(selector))) {
+      refuse('moves money it has no reason to');
+    }
+  }
+
+  if (!paysOutWanted) refuse('never pays out the token asked for');
 }

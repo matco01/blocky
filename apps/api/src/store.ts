@@ -183,12 +183,15 @@ export function createStore(db: Db): Store {
      * limits the user did choose. Read it as today's default. A list anyone
      * actually narrowed would not look like this one.
      */
+    // The same for `tokenAllowlist`: no screen edits it, so a stored
+    // `['USDC']` is the old default rather than a choice.
     const actions = parsed.data.allowedActions;
-    if (actions.length === 1 && actions[0] === 'transfer') {
-      return { ...parsed.data, allowedActions: DEFAULT_POLICY.allowedActions };
-    }
-
-    return parsed.data;
+    const tokens = parsed.data.tokenAllowlist;
+    return {
+      ...parsed.data,
+      ...(actions.length === 1 && actions[0] === 'transfer' ? { allowedActions: DEFAULT_POLICY.allowedActions } : {}),
+      ...(tokens?.length === 1 && tokens[0] === 'USDC' ? { tokenAllowlist: DEFAULT_POLICY.tokenAllowlist } : {}),
+    };
   }
 
   async function writePolicy(userId: string, policy: Policy): Promise<void> {

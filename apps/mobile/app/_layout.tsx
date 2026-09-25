@@ -15,7 +15,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { setTokenGetter } from '../lib/api';
-import { homeChain } from '../lib/chain';
+import { signingChains } from '../lib/chain';
 import { config } from '../lib/config';
 import { ThemeProvider, useTheme } from '../theme';
 
@@ -32,9 +32,9 @@ export default function RootLayout() {
         <PrivyProvider
           appId={config.privyAppId}
           {...(config.privyClientId ? { clientId: config.privyClientId } : {})}
-          // Arc is the home chain, and the embedded wallet defaults to the first
-          // chain listed here — so every transaction it sends is on Arc.
-          supportedChains={[homeChain]}
+          // Arc first: the embedded wallet defaults to the first chain listed.
+          // The rest are the chains money can be brought home from.
+          supportedChains={signingChains}
           config={{
             // Every user gets an embedded wallet at first login — there is no
             // separate "create wallet" step to explain.

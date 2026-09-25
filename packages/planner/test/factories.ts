@@ -57,6 +57,7 @@ export function fakeContext(overrides: Partial<PlannerContext> = {}): PlannerCon
     acrossQuote: async () => null,
     acrossSwapQuote: async () => null,
     gasZipQuote: async () => null,
+    acrossNativeSwapQuote: async () => null,
     estimateNetworkFeeUsd: async () => '0.10',
     isAddressFlagged: async () => false,
     ...overrides,
