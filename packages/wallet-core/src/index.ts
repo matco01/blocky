@@ -7,6 +7,7 @@
  * key is — so that file talks to Privy, ZeroDev and viem directly.
  */
 
+export * from './network';
 export * from './chains';
 export * from './session';
 export * from './gas';

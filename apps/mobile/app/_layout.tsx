@@ -14,8 +14,8 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { arcTestnet } from 'viem/chains';
 import { setTokenGetter } from '../lib/api';
+import { homeChain } from '../lib/chain';
 import { config } from '../lib/config';
 import { ThemeProvider, useTheme } from '../theme';
 
@@ -34,7 +34,7 @@ export default function RootLayout() {
           {...(config.privyClientId ? { clientId: config.privyClientId } : {})}
           // Arc is the home chain. Privy needs it listed to fetch the nonce when
           // signing the EIP-7702 authorization.
-          supportedChains={[arcTestnet]}
+          supportedChains={[homeChain]}
           config={{
             // Every user gets an embedded wallet at first login — there is no
             // separate "create wallet" step to explain.

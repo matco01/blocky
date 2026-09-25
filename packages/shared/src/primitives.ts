@@ -18,13 +18,14 @@ export const CHAIN = {
   base: 8453,
   arbitrum: 42161,
   avalanche: 43114,
-
-  // Testnets. v1 runs on Arc.
   /**
-   * Arc testnet — Circle's L1, where USDC is the native gas token. The home
-   * chain: a user holding only USDC can pay gas here without a paymaster.
-   * Arc mainnet (5042) is added once its contract addresses are published.
+   * Arc — Circle's L1, where USDC is the native gas token. The home chain: a
+   * user holding only USDC can pay gas here and needs nothing else.
    */
+  arc: 5042,
+
+  // Testnets.
+  /** Arc testnet: the same chain, for development. */
   arcTestnet: 5042002,
   baseSepolia: 84532,
   arbitrumSepolia: 421614,

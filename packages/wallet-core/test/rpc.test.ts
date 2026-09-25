@@ -55,3 +55,32 @@ describe('rpcConfigFromEnv', () => {
     expect(config.urls[1]).toBeUndefined();
   });
 });
+
+describe('rpcConfigFromEnv on mainnet', () => {
+  it('wires Arc mainnet to its public endpoint when none is set', () => {
+    expect(rpcConfigFromEnv({}, 'mainnet').urls[5042]).toBe('https://rpc.mainnet.arc.io');
+  });
+
+  it('prefers a configured endpoint over the public one', () => {
+    expect(rpcConfigFromEnv({ ARC_RPC_URL: 'https://arc.example' }, 'mainnet').urls[5042]).toBe('https://arc.example');
+  });
+
+  it('never wires a chain from the other network', () => {
+    const urls = rpcConfigFromEnv(
+      { ARC_TESTNET_RPC_URL: 'https://arc-test.example', BASE_SEPOLIA_RPC_URL: 'https://base-test.example' },
+      'mainnet',
+    ).urls;
+
+    expect(urls[5042002]).toBeUndefined();
+    expect(urls[84532]).toBeUndefined();
+    expect(rpcConfigFromEnv({ ARC_RPC_URL: 'https://arc.example' }, 'testnet').urls[5042]).toBeUndefined();
+  });
+
+  it('has an endpoint for every mainnet destination, so holdings and gas checks can read them', () => {
+    const urls = rpcConfigFromEnv({}, 'mainnet').urls;
+
+    for (const id of [1, 10, 130, 137, 8453, 42161, 43114]) {
+      expect(urls[id as keyof typeof urls]).toMatch(/^https:\/\//);
+    }
+  });
+});

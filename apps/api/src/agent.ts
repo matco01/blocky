@@ -9,9 +9,9 @@ import {
   type PolicyDecision,
 } from '@blocky/shared';
 import {
-  CHAINS,
   DEFAULT_CHAIN,
   canMoveUsdcBetween,
+  chainsOnNetwork,
   getArcProtocols,
   getTokenPriceUsd,
   readUsdcBalance,
@@ -91,7 +91,7 @@ export function agentToolsFor(
      * Arc balance, and which token pays gas there once it lands.
      */
     async getSupportedChains() {
-      return Object.values(CHAINS).map((chain) => ({
+      return chainsOnNetwork().map((chain) => ({
         chainId: chain.id,
         name: chain.name,
         testnet: chain.testnet,

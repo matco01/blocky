@@ -20,10 +20,16 @@ describe('Arc is the home chain', () => {
     expect(arc.nativeCurrency).toEqual({ symbol: 'USDC', decimals: 18 });
   });
 
-  it('is the only chain that pays gas in USDC', () => {
+  it('is the only chain that pays gas in USDC, on either network', () => {
     const usdcGas = Object.values(CHAINS).filter((chain) => chain.gasPaidInUsdc);
 
-    expect(usdcGas.map((chain) => chain.id)).toEqual([CHAIN.arcTestnet]);
+    expect(usdcGas.map((chain) => chain.id).sort()).toEqual([CHAIN.arc, CHAIN.arcTestnet].sort());
+  });
+
+  it('uses the same USDC contract on mainnet as on testnet', () => {
+    expect(CHAINS[CHAIN.arc].usdc).toBe(CHAINS[CHAIN.arcTestnet].usdc);
+    expect(CHAINS[CHAIN.arc].testnet).toBe(false);
+    expect(CHAINS[CHAIN.arc].circleDomain).toBe(26);
   });
 });
 

@@ -28,8 +28,16 @@ describe('which chains CCTP connects', () => {
     expect(canMoveUsdcBetween(CHAIN.arcTestnet, CHAIN.base)).toBe(false);
   });
 
-  it('has no mainnet contracts until they are verified', () => {
-    expect(cctpContracts(CHAIN.base)).toBeNull();
+  it('connects Arc mainnet to the mainnet chains Circle serves', () => {
+    for (const to of [CHAIN.base, CHAIN.arbitrum, CHAIN.optimism, CHAIN.polygon, CHAIN.unichain, CHAIN.avalanche, CHAIN.ethereum]) {
+      expect(canMoveUsdcBetween(CHAIN.arc, to)).toBe(true);
+    }
+    expect(cctpContracts(CHAIN.arc)?.tokenMessenger).toBe('0x28b5a0e9c621a5badaa536219b3a228c8168cf5d');
+  });
+
+  it('never connects mainnet to testnet, in either direction', () => {
+    expect(canMoveUsdcBetween(CHAIN.arc, CHAIN.baseSepolia)).toBe(false);
+    expect(canMoveUsdcBetween(CHAIN.arcTestnet, CHAIN.arc)).toBe(false);
   });
 
   it('does not move money to where it already is', () => {

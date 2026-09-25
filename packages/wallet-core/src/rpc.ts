@@ -9,6 +9,7 @@ import {
 import {
   arbitrum,
   arbitrumSepolia,
+  arc,
   arcTestnet,
   avalanche,
   base,
@@ -20,6 +21,7 @@ import {
 } from 'viem/chains';
 import { normalize } from 'viem/ens';
 import { CHAINS } from './chains';
+import { NETWORK, type Network } from './network';
 import type { Receipt } from './receipts';
 
 /**
@@ -38,6 +40,7 @@ const VIEM_CHAINS: Record<ChainId, Chain> = {
   [CHAIN.base]: base,
   [CHAIN.arbitrum]: arbitrum,
   [CHAIN.avalanche]: avalanche,
+  [CHAIN.arc]: arc,
   [CHAIN.arcTestnet]: arcTestnet,
   [CHAIN.baseSepolia]: baseSepolia,
   [CHAIN.arbitrumSepolia]: arbitrumSepolia,
@@ -267,44 +270,71 @@ export function createChainReader(config: RpcConfig): ChainReader {
   };
 }
 
-/**
- * Read RPC endpoints out of the environment.
- *
- * Arc testnet is the home chain. Base Sepolia is optional and exists for the
- * multichain work. Adding a chain here is deliberate: an endpoint that exists
- * is a chain the planner will happily quote against.
- */
-export function rpcConfigFromEnv(env: {
+/** Every endpoint the server can be given. Each network reads only its own. */
+export interface RpcEnv {
+  // Testnet
   ARC_TESTNET_RPC_URL?: string | undefined;
   BASE_SEPOLIA_RPC_URL?: string | undefined;
   ARBITRUM_SEPOLIA_RPC_URL?: string | undefined;
+  // Mainnet
+  ARC_RPC_URL?: string | undefined;
+  BASE_RPC_URL?: string | undefined;
+  ARBITRUM_RPC_URL?: string | undefined;
+  OPTIMISM_RPC_URL?: string | undefined;
+  POLYGON_RPC_URL?: string | undefined;
+  UNICHAIN_RPC_URL?: string | undefined;
+  AVALANCHE_RPC_URL?: string | undefined;
+  /** Both networks: ENS always resolves on Ethereum mainnet. */
   ETHEREUM_RPC_URL?: string | undefined;
-}): RpcConfig {
+}
+
+/**
+ * Read RPC endpoints out of the environment, for this build's network only.
+ *
+ * Testnet reads exactly what is set. Mainnet fills any chain left unset with
+ * its public endpoint — viem's default, or Arc's own — so holdings and the
+ * destination-gas check work out of the box. Public endpoints are
+ * rate-limited: fine to start on, and each can be overridden with a provider
+ * URL as traffic grows. An endpoint that exists is a chain the planner will
+ * quote against, so nothing from the other network is ever wired in.
+ */
+export function rpcConfigFromEnv(env: RpcEnv, network: Network = NETWORK): RpcConfig {
   const urls: Partial<Record<ChainId, string>> = {};
 
-  if (env.ARC_TESTNET_RPC_URL) {
-    urls[CHAIN.arcTestnet] = env.ARC_TESTNET_RPC_URL;
+  if (network === 'testnet') {
+    if (env.ARC_TESTNET_RPC_URL) urls[CHAIN.arcTestnet] = env.ARC_TESTNET_RPC_URL;
+    if (env.BASE_SEPOLIA_RPC_URL) urls[CHAIN.baseSepolia] = env.BASE_SEPOLIA_RPC_URL;
+    if (env.ARBITRUM_SEPOLIA_RPC_URL) urls[CHAIN.arbitrumSepolia] = env.ARBITRUM_SEPOLIA_RPC_URL;
+
+    /*
+     * Ethereum is configured for ENS lookups alone on testnet, not because we
+     * transact there. Optional: without it, ENS names come back unresolved and
+     * the agent asks for an address instead of guessing at one.
+     */
+    if (env.ETHEREUM_RPC_URL) urls[CHAIN.ethereum] = env.ETHEREUM_RPC_URL;
+
+    return { urls };
   }
 
-  if (env.BASE_SEPOLIA_RPC_URL) {
-    urls[CHAIN.baseSepolia] = env.BASE_SEPOLIA_RPC_URL;
-  }
+  const wire = (chainId: ChainId, configured: string | undefined) => {
+    const url = configured ?? VIEM_CHAINS[chainId].rpcUrls.default.http[0];
+    if (url) urls[chainId] = url;
+  };
 
-  if (env.ARBITRUM_SEPOLIA_RPC_URL) {
-    urls[CHAIN.arbitrumSepolia] = env.ARBITRUM_SEPOLIA_RPC_URL;
-  }
-
-  /*
-   * Ethereum is configured for ENS lookups alone, not because we transact
-   * there. Optional: without it, ENS names come back unresolved and the agent
-   * asks for an address instead of guessing at one.
-   */
-  if (env.ETHEREUM_RPC_URL) {
-    urls[CHAIN.ethereum] = env.ETHEREUM_RPC_URL;
-  }
+  wire(CHAIN.arc, env.ARC_RPC_URL ?? ARC_PUBLIC_RPC);
+  wire(CHAIN.ethereum, env.ETHEREUM_RPC_URL);
+  wire(CHAIN.base, env.BASE_RPC_URL);
+  wire(CHAIN.arbitrum, env.ARBITRUM_RPC_URL);
+  wire(CHAIN.optimism, env.OPTIMISM_RPC_URL);
+  wire(CHAIN.polygon, env.POLYGON_RPC_URL);
+  wire(CHAIN.unichain, env.UNICHAIN_RPC_URL);
+  wire(CHAIN.avalanche, env.AVALANCHE_RPC_URL);
 
   return { urls };
 }
+
+/** Arc's own public endpoint. viem's Arc definition ships without one. */
+export const ARC_PUBLIC_RPC = 'https://rpc.mainnet.arc.io';
 
 /**
  * Spendable USDC in a wallet on one chain: base units, and the same amount as

@@ -1,5 +1,6 @@
 import { formatUsd, usdValueOf, type Address, type ChainId } from '@blocky/shared';
-import { CHAINS } from './chains';
+import { cached } from './cache';
+import { chainsOnNetwork } from './chains';
 import { getPriceSnapshot, priceAsDecimal, type PriceSnapshot } from './prices';
 import type { ChainReader } from './rpc';
 
@@ -26,23 +27,30 @@ export interface TokenHolding {
   stable: boolean;
 }
 
+/** Long enough to absorb the balance poll, short enough that money moved in shows up within a refresh or two. */
+const HOLDINGS_TTL_MS = 30_000;
+
 /**
- * Scan every chain the reader supports. Arc is skipped: its native currency is
- * the same USDC the spendable balance already counts, and adding it again
- * would double it.
+ * Scan every chain on this network that the reader supports. Arc is skipped:
+ * its native currency is the same USDC the spendable balance already counts,
+ * and adding it again would double it.
  *
  * One chain failing to answer never fails the rest — a dead RPC endpoint
  * degrades to "nothing found there", not a broken portfolio. Prices come from
- * the shared snapshot, so a full scan costs no price requests of its own.
+ * the shared snapshot, and a wallet's scan is reused for {@link HOLDINGS_TTL_MS}:
+ * on mainnet it is two reads on each of seven chains, which is not something
+ * to repeat on every twenty-second balance poll.
  */
-export async function fetchWalletHoldings(
+export function fetchWalletHoldings(
   reader: ChainReader,
   owner: Address,
   fetchImpl: typeof fetch = fetch,
 ): Promise<TokenHolding[]> {
-  const chains = Object.values(CHAINS).filter(
-    (chain) => chain.testnet && !chain.gasPaidInUsdc && reader.supports(chain.id),
-  );
+  return cached(fetchImpl, `holdings:${owner.toLowerCase()}`, HOLDINGS_TTL_MS, () => scan(reader, owner, fetchImpl));
+}
+
+async function scan(reader: ChainReader, owner: Address, fetchImpl: typeof fetch): Promise<TokenHolding[]> {
+  const chains = chainsOnNetwork().filter((chain) => !chain.gasPaidInUsdc && reader.supports(chain.id));
 
   const prices: PriceSnapshot | null = await getPriceSnapshot(fetchImpl).catch(() => null);
 

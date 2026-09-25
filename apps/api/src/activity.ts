@@ -66,10 +66,11 @@ interface BlockscoutTransfer {
  */
 export async function fetchExplorerTransfers(
   address: Address,
-  options: { apiBase: string; token: Address; fetch?: typeof fetch },
+  options: { apiBase: string; token: Address; apiKey?: string | undefined; fetch?: typeof fetch },
 ): Promise<ExplorerTransfer[]> {
   const doFetch = options.fetch ?? fetch;
-  const url = `${options.apiBase}/addresses/${address}/token-transfers?type=ERC-20&token=${options.token}`;
+  const key = options.apiKey ? `&apikey=${encodeURIComponent(options.apiKey)}` : '';
+  const url = `${options.apiBase}/addresses/${address}/token-transfers?type=ERC-20&token=${options.token}${key}`;
 
   const response = await doFetch(url, { headers: { accept: 'application/json' } });
 

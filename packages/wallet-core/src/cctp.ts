@@ -19,27 +19,33 @@ import type { Receipt } from './receipts';
  * USDC once it lands; that is what the planner's destination warning is for.
  *
  * Contract addresses and the burn event were verified against the live
- * testnets (Arc, Base Sepolia, Arbitrum Sepolia), not only the docs. Mainnet
- * addresses are deliberately absent until they are verified the same way: a
- * guessed contract address here is a burn nobody mints.
+ * chains — Arc, Base Sepolia and Arbitrum Sepolia for testnet; Arc and every
+ * mainnet destination for mainnet — not only the docs. A guessed contract
+ * address here is a burn nobody mints.
  */
 
 interface CctpContracts {
-  /** TokenMessengerV2: what the user's account calls to burn. */
+  /** TokenMessengerV2: what the user's account calls to burn. The same address on every chain of a network. */
   tokenMessenger: Address;
-  /** TokenMinterV2: receives the USDC from the user and burns it. */
+  /** TokenMinterV2: receives the USDC from the user and burns it. Also one address per network. */
   tokenMinter: Address;
   /** Circle's attestation API. */
   api: string;
 }
 
-const CCTP: { testnet: CctpContracts; mainnet: CctpContracts | null } = {
+const CCTP: { testnet: CctpContracts; mainnet: CctpContracts } = {
   testnet: {
     tokenMessenger: '0x8fe6b999dc680ccfdd5bf7eb0974218be2542daa',
     tokenMinter: '0xb43db544e2c27092c107639ad201b3defabcf192',
     api: 'https://iris-api-sandbox.circle.com',
   },
-  mainnet: null,
+  // Checked on Arc and on Ethereum, OP, Unichain, Polygon, Base, Arbitrum and
+  // Avalanche: the messenger has code and reports this minter on every one.
+  mainnet: {
+    tokenMessenger: '0x28b5a0e9c621a5badaa536219b3a228c8168cf5d',
+    tokenMinter: '0xfd78ee919681417d192449715b2594ab58f5d002',
+    api: 'https://iris-api.circle.com',
+  },
 };
 
 /** The contracts for a chain's network, or null where CCTP is not verified for it. */
@@ -55,7 +61,7 @@ export function cctpContracts(chainId: ChainId): CctpContracts | null {
  */
 export function isCctpTokenMinter(address: string): boolean {
   const lower = address.toLowerCase();
-  return [CCTP.testnet, CCTP.mainnet].some((contracts) => contracts?.tokenMinter === lower);
+  return [CCTP.testnet, CCTP.mainnet].some((contracts) => contracts.tokenMinter === lower);
 }
 
 /** Whether USDC can move from one chain to the other through CCTP. */

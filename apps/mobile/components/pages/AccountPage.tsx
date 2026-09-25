@@ -8,6 +8,7 @@ import { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../lib/api';
+import { homeChainName } from '../../lib/chain';
 import { useSmartAccount } from '../../lib/smart-account';
 import { useTheme } from '../../theme';
 import { BlockyCard } from '../BlockyCard';
@@ -104,7 +105,7 @@ export function AccountPage({ page, onPageChange }: PageProps) {
           action={copied ? 'Copied' : 'Copy'}
           onPress={address ? copyAddress : undefined}
         />
-        <Row icon="globe-outline" label="Network" value="Arc Testnet" />
+        <Row icon="globe-outline" label="Network" value={homeChainName} />
         <Row icon="receipt-outline" label="Activity" value="Everything sent and received" chevron onPress={() => router.push('/activity')} />
         <Row
           icon="shield-checkmark-outline"

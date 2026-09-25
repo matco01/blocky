@@ -1,4 +1,5 @@
 import { CHAIN, type Address, type ChainId } from '@blocky/shared';
+import { IS_TESTNET } from './network';
 
 /**
  * The chain registry.
@@ -9,9 +10,10 @@ import { CHAIN, type Address, type ChainId } from '@blocky/shared';
  * remove. Adding a chain here is a product decision, not a config change.
  *
  * ⚠️  Token addresses are load-bearing: a wrong one sends real money somewhere
- * unrecoverable. Every mainnet address below must be re-verified against
- * Circle's published list (https://developers.circle.com/stablecoins/usdc-contract-addresses)
- * before mainnet launch. v1 runs on Arc testnet.
+ * unrecoverable. Every mainnet USDC address and Circle domain below was checked
+ * against the live chains (`symbol()`/`decimals()` on each, and Circle's
+ * Gateway `/info`) before mainnet, not only against the docs. Re-check any
+ * you add the same way.
  */
 
 export interface ChainConfig {
@@ -53,7 +55,7 @@ export const CHAINS = {
     usdc: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
     explorerUrl: 'https://etherscan.io',
     gateway: true,
-    circleDomain: null,
+    circleDomain: 0,
     gasPaidInUsdc: false,
   },
   [CHAIN.optimism]: {
@@ -65,7 +67,7 @@ export const CHAINS = {
     usdc: '0x0b2c639c533813f4aa9d7837caf62653d097ff85',
     explorerUrl: 'https://optimistic.etherscan.io',
     gateway: true,
-    circleDomain: null,
+    circleDomain: 2,
     gasPaidInUsdc: false,
   },
   [CHAIN.unichain]: {
@@ -77,7 +79,7 @@ export const CHAINS = {
     usdc: '0x078d782b760474a361dda0af3839290b0ef57ad6',
     explorerUrl: 'https://uniscan.xyz',
     gateway: true,
-    circleDomain: null,
+    circleDomain: 10,
     gasPaidInUsdc: false,
   },
   [CHAIN.polygon]: {
@@ -89,7 +91,7 @@ export const CHAINS = {
     usdc: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
     explorerUrl: 'https://polygonscan.com',
     gateway: true,
-    circleDomain: null,
+    circleDomain: 7,
     gasPaidInUsdc: false,
   },
   [CHAIN.base]: {
@@ -101,7 +103,7 @@ export const CHAINS = {
     usdc: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
     explorerUrl: 'https://basescan.org',
     gateway: true,
-    circleDomain: null,
+    circleDomain: 6,
     gasPaidInUsdc: false,
   },
   [CHAIN.arbitrum]: {
@@ -113,7 +115,7 @@ export const CHAINS = {
     usdc: '0xaf88d065e77c8cc2239327c5edb3a432268e5831',
     explorerUrl: 'https://arbiscan.io',
     gateway: true,
-    circleDomain: null,
+    circleDomain: 3,
     gasPaidInUsdc: false,
   },
   [CHAIN.avalanche]: {
@@ -125,11 +127,32 @@ export const CHAINS = {
     usdc: '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e',
     explorerUrl: 'https://snowtrace.io',
     gateway: true,
-    circleDomain: null,
+    circleDomain: 1,
     gasPaidInUsdc: false,
   },
 
-  /* ---- Testnets. v1 lives here. ---------------------------------------- */
+  /**
+   * Arc — the home chain on mainnet.
+   *
+   * Verified against the live network: chain id 5042, USDC at the same 0x3600…
+   * address with `decimals()` 6, EntryPoint v0.7 and Kernel v3.3's 7702
+   * delegate deployed, Pimlico's bundler serving it, and CCTP v2 at Circle's
+   * standard addresses. Addresses from https://docs.arc.io/arc/references/contract-addresses
+   */
+  [CHAIN.arc]: {
+    id: CHAIN.arc,
+    name: 'Arc',
+    shortName: 'ARC',
+    testnet: false,
+    nativeCurrency: { symbol: 'USDC', decimals: 18 },
+    usdc: '0x3600000000000000000000000000000000000000',
+    explorerUrl: 'https://explorer.arc.io',
+    gateway: true,
+    circleDomain: 26,
+    gasPaidInUsdc: true,
+  },
+
+  /* ---- Testnets ---------------------------------------------------------- */
 
   /**
    * Arc testnet — the home chain.
@@ -177,8 +200,16 @@ export const CHAINS = {
   },
 } as const satisfies Record<ChainId, ChainConfig>;
 
-/** The home chain. Everything defaults here unless the user names another. */
-export const DEFAULT_CHAIN: ChainId = CHAIN.arcTestnet;
+/** The home chain: Arc, on whichever network this build runs. Everything defaults here. */
+export const DEFAULT_CHAIN: ChainId = IS_TESTNET ? CHAIN.arcTestnet : CHAIN.arc;
+
+/**
+ * The chains on this build's network. Test money and real money never meet:
+ * nothing lists, reads or moves money on a chain from the other network.
+ */
+export function chainsOnNetwork(): ChainConfig[] {
+  return Object.values(CHAINS).filter((chain) => chain.testnet === IS_TESTNET);
+}
 
 export function getChain(id: ChainId): ChainConfig {
   return CHAINS[id];

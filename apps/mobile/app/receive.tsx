@@ -10,6 +10,7 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { Tile } from '../components/Tile';
 import { useSmartAccount } from '../lib/smart-account';
+import { homeChainName } from '../lib/chain';
 import { useModalTopPadding } from '../lib/screenInsets';
 import { useTheme } from '../theme';
 
@@ -49,7 +50,7 @@ export default function ReceiveScreen() {
       <View style={{ gap: theme.space.sm }}>
         <ScreenHeader title="Receive" onClose={() => router.back()} />
         <Text variant="body" tone="secondary">
-          Send USDC on Arc Testnet to this address.
+          Send USDC on {homeChainName} to this address.
         </Text>
       </View>
 

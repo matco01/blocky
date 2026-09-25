@@ -12,7 +12,7 @@ import {
   type Client,
   type Hex,
 } from 'viem';
-import { arcTestnet } from 'viem/chains';
+import { homeChain, homeChainName } from './chain';
 import { config } from './config';
 
 /**
@@ -28,7 +28,7 @@ import { config } from './config';
  * planner already reserved room for it.
  */
 
-const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });
+const publicClient = createPublicClient({ chain: homeChain, transport: http() });
 
 /** EIP-7702 delegation designator: 0xef0100 followed by the delegate address. */
 const DELEGATED_CODE = `0xef0100${KERNEL_7702_DELEGATION_ADDRESS.slice(2)}`.toLowerCase();
@@ -76,10 +76,12 @@ export function useSmartAccount() {
     async (calls: readonly PreparedCall[], onStage?: (stage: SendStage) => void): Promise<Hex> => {
       if (!wallet) throw new Error('Your wallet is still being set up.');
 
-      // The planner only builds Arc calls today. Refuse anything else outright
-      // rather than signing a call against a chain this client isn't pointed at.
-      if (calls.length === 0 || calls.some((call) => call.chainId !== arcTestnet.id)) {
-        throw new Error('That transaction is not for Arc.');
+      // The planner only builds calls on the home chain. Refuse anything else
+      // outright rather than signing a call against a chain this client isn't
+      // pointed at — including the same app talking to a server that is on the
+      // other network.
+      if (calls.length === 0 || calls.some((call) => call.chainId !== homeChain.id)) {
+        throw new Error(`That transaction is not for ${homeChainName}. Nothing was signed.`);
       }
 
       onStage?.('preparing');
@@ -94,7 +96,7 @@ export function useSmartAccount() {
         onStage?.('authorizing');
         eip7702Auth = await signAuthorization({
           contractAddress: KERNEL_7702_DELEGATION_ADDRESS,
-          chainId: arcTestnet.id,
+          chainId: homeChain.id,
         });
       }
 
@@ -116,7 +118,7 @@ export function useSmartAccount() {
 
       const client = createKernelAccountClient({
         account,
-        chain: arcTestnet,
+        chain: homeChain,
         client: publicClient,
         bundlerTransport: http(config.bundlerUrl),
         userOperation: {

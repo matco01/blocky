@@ -24,6 +24,13 @@ const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
 
   /**
+   * Real money or test money. Anything but `mainnet` is testnet. The app has
+   * its own switch (`EXPO_PUBLIC_NETWORK`) and the two must match — the app
+   * refuses to sign a plan built for a chain it isn't on.
+   */
+  BLOCKY_NETWORK: z.enum(['mainnet', 'testnet']).default('testnet'),
+
+  /**
    * Arc testnet, the home chain. Defaults to Circle's public endpoint, which is
    * rate-limited — fine for development, not for real traffic.
    */
@@ -41,6 +48,29 @@ const EnvSchema = z.object({
    * for an address instead of guessing at one.
    */
   ETHEREUM_RPC_URL: z.string().url().optional(),
+
+  /*
+   * Mainnet endpoints. All optional: each falls back to the chain's public
+   * endpoint (Arc's own, or viem's default), which is rate-limited — fine to
+   * start on, worth replacing with a provider URL as traffic grows.
+   */
+  ARC_RPC_URL: z.string().url().optional(),
+  BASE_RPC_URL: z.string().url().optional(),
+  ARBITRUM_RPC_URL: z.string().url().optional(),
+  OPTIMISM_RPC_URL: z.string().url().optional(),
+  POLYGON_RPC_URL: z.string().url().optional(),
+  UNICHAIN_RPC_URL: z.string().url().optional(),
+  AVALANCHE_RPC_URL: z.string().url().optional(),
+
+  /**
+   * Blockscout's API key, for the activity feed on mainnet. Arc's mainnet
+   * explorer turns away server requests, so mainnet reads go through
+   * Blockscout's hosted API, which needs a key (free tier:
+   * https://dev.blockscout.com). Without one the feed still shows every send
+   * made through Blocky, and says it is incomplete rather than hiding
+   * payments received.
+   */
+  BLOCKSCOUT_API_KEY: z.string().min(1).optional(),
 
   /**
    * Postgres. Optional in development: without it the API runs an embedded

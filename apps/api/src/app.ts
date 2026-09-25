@@ -15,9 +15,9 @@ import {
   type Plan,
 } from '@blocky/shared';
 import {
-  CHAINS,
   DEFAULT_CHAIN,
   cctpContracts,
+  chainsOnNetwork,
   containsCctpBurn,
   containsTransfer,
   deriveSessionPermissions,
@@ -109,7 +109,7 @@ export function createApp(deps: AppDeps) {
   app.get('/v1/chains', (c) =>
     c.json({
       defaultChainId: DEFAULT_CHAIN,
-      chains: Object.values(CHAINS).map((chain) => ({
+      chains: chainsOnNetwork().map((chain) => ({
         id: chain.id,
         name: chain.name,
         shortName: chain.shortName,

@@ -1,7 +1,12 @@
+// First, before anything else is evaluated: this loads `.env`, and the shared
+// packages read the network switch from the environment as they load.
+import { loadEnv } from './env';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import {
   DEFAULT_CHAIN,
+  IS_TESTNET,
+  NETWORK,
   createChainReader,
   fetchGatewayBalances,
   fetchWalletHoldings,
@@ -13,10 +18,16 @@ import { createAgentHandler } from './agent';
 import { createApp } from './app';
 import { createPrivyIdentity } from './auth';
 import { openDatabase } from './db/client';
-import { loadEnv } from './env';
 import { createStore } from './store';
 
 const env = loadEnv();
+
+// The shared packages chose their network when they loaded. If that is not
+// what the environment says, something read the switch too early — stop
+// rather than serve one network while believing it is the other.
+if (env.BLOCKY_NETWORK !== NETWORK) {
+  throw new Error(`Network mismatch: BLOCKY_NETWORK is ${env.BLOCKY_NETWORK} but the chain registry loaded as ${NETWORK}.`);
+}
 
 // Embedded Postgres persists to `.data/` at the repo root unless a real
 // DATABASE_URL is set. `.data/` is gitignored.
@@ -30,8 +41,21 @@ const store = createStore(database.db);
 const reader = createChainReader(rpcConfigFromEnv(env));
 const home = getChain(DEFAULT_CHAIN);
 
+/*
+ * Testnet reads ArcScan directly. Arc's mainnet explorer turns away server
+ * requests, so mainnet goes through Blockscout's hosted API — which needs a
+ * key; without one the feed falls back to Blocky's own sends and says so.
+ */
 const explorerTransfers = (address: Parameters<typeof fetchExplorerTransfers>[0]) =>
-  fetchExplorerTransfers(address, { apiBase: `${home.explorerUrl}/api/v2`, token: home.usdc });
+  IS_TESTNET
+    ? fetchExplorerTransfers(address, { apiBase: `${home.explorerUrl}/api/v2`, token: home.usdc })
+    : env.BLOCKSCOUT_API_KEY
+      ? fetchExplorerTransfers(address, {
+          apiBase: `https://api.blockscout.com/${home.id}/api/v2`,
+          token: home.usdc,
+          apiKey: env.BLOCKSCOUT_API_KEY,
+        })
+      : Promise.reject(new Error('No BLOCKSCOUT_API_KEY configured for mainnet activity.'));
 
 const app = createApp({
   store,
@@ -40,14 +64,16 @@ const app = createApp({
   agent: env.ANTHROPIC_API_KEY
     ? createAgentHandler(store, env.ANTHROPIC_API_KEY, reader, explorerTransfers)
     : null,
-  gatewayBalances: (address) => fetchGatewayBalances(address, { testnet: true }),
+  gatewayBalances: (address) => fetchGatewayBalances(address, { testnet: IS_TESTNET }),
   walletHoldings: (address) => fetchWalletHoldings(reader, address),
   explorerTransfers,
   logRequests: true,
 });
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, ({ port }) => {
-  console.log(`blocky api on http://localhost:${port} (${env.NODE_ENV}, database: ${database.kind})`);
+  console.log(
+    `blocky api on http://localhost:${port} (${env.NODE_ENV}, ${NETWORK}: ${home.name}, database: ${database.kind})`,
+  );
 });
 
 async function shutdown() {
