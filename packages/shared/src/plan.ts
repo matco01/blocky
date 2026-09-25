@@ -109,6 +109,8 @@ export const FeeSchema = z.object({
     paymasterUsd: DecimalSchema,
     /** Aggregator or bridge fee — for a CCTP move, the most Circle may take. */
     serviceUsd: DecimalSchema,
+    /** Blocky's own fee, when there is one — see `Plan.blockyFee`. */
+    blockyUsd: DecimalSchema.optional(),
   }),
 });
 
@@ -199,6 +201,24 @@ export const PlanSchema = z.object({
       minimumReceived: BaseUnitsSchema.optional(),
       /** A little of the destination's gas token delivered alongside, so the money can move again there. */
       gasTopUp: z.object({ provider: z.string().min(1).max(32) }).optional(),
+    })
+    .optional(),
+
+  /**
+   * Blocky's own fee: a share of what leaves, paid in the same transaction as
+   * the move, to Blocky's address. Charged on swaps and moves that start on
+   * Arc — plain sends are free, and so is coming home. Inside the all-or-
+   * nothing batch, so if the move fails the fee is never taken. Already
+   * counted in `fee.totalUsd`.
+   */
+  blockyFee: z
+    .object({
+      /** In the base units of the token leaving. */
+      amount: BaseUnitsSchema,
+      usd: DecimalSchema,
+      recipient: AddressSchema,
+      /** Basis points: 50 is 0.5%. */
+      bps: z.number().int().min(1).max(100),
     })
     .optional(),
 

@@ -80,6 +80,15 @@ export function HomePage({ page, onPageChange }: PageProps) {
   // there — otherwise reading back through the conversation gets yanked back
   // to the bottom the moment a reply streams in.
   const atBottomRef = useRef(true);
+  // True while *we* are scrolling to the end. The animation's own scroll events
+  // pass through "not at the bottom yet" on the way down, and must not read as
+  // the user scrolling up — or the reply that lands mid-animation is left
+  // below the fold.
+  const autoScrollingRef = useRef(false);
+  const scrollToLatest = useCallback((animated: boolean) => {
+    autoScrollingRef.current = true;
+    scrollRef.current?.scrollToEnd({ animated });
+  }, []);
 
   const submit = useCallback(
     (text: string) => {
@@ -182,7 +191,13 @@ export function HomePage({ page, onPageChange }: PageProps) {
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    atBottomRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 40;
+    const near = contentSize.height - contentOffset.y - layoutMeasurement.height < 40;
+    if (near) {
+      atBottomRef.current = true;
+      autoScrollingRef.current = false;
+    } else if (!autoScrollingRef.current) {
+      atBottomRef.current = false;
+    }
   }, []);
 
   const shown =
@@ -257,14 +272,18 @@ export function HomePage({ page, onPageChange }: PageProps) {
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.textTertiary} />}
         onScroll={onScroll}
+        // A finger on the list always wins over an auto-scroll in flight.
+        onScrollBeginDrag={() => {
+          autoScrollingRef.current = false;
+        }}
         scrollEventThrottle={64}
         onContentSizeChange={() => {
-          if (atBottomRef.current) scrollRef.current?.scrollToEnd({ animated: true });
+          if (atBottomRef.current) scrollToLatest(true);
         }}
         // The visible area shrinks when the keyboard opens; keep the latest message
         // in view — but only if that's where the user already was.
         onLayout={() => {
-          if (atBottomRef.current) scrollRef.current?.scrollToEnd({ animated: false });
+          if (atBottomRef.current) scrollToLatest(false);
         }}
       >
         {messages.length === 0 && !busy ? (

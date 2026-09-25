@@ -35,7 +35,14 @@ import {
   selectGasStrategy,
 } from '@blocky/wallet-core';
 import { assetDelta, resolveAmount } from './amount';
-import { acrossDepositCalls, acrossSwapCalls, cctpBurnCalls, erc20TransferCall, gasZipDepositCall } from './calls';
+import {
+  acrossDepositCalls,
+  acrossSwapCalls,
+  cctpBurnCalls,
+  encodeErc20Transfer,
+  erc20TransferCall,
+  gasZipDepositCall,
+} from './calls';
 import { fail, type PlanFailure, type PlannerContext } from './context';
 import { destinationWarnings, feeWarnings, recipientWarnings, tokenWarnings } from './warnings';
 
@@ -226,6 +233,9 @@ interface Route {
 /** Slower routes only win by more than this: a rounding error is not worth minutes of waiting. */
 const SPEED_TIEBREAK_UNITS = 1_000n; // $0.001 of USDC
 
+/** How many gas estimates stay behind when the gas token itself is being sold. */
+const NATIVE_GAS_HEADROOM = 3n;
+
 /** Gas for a swap-and-bridge, in ordinary calls' worth — see where it's used. */
 const SWAP_AND_BRIDGE_CALLS = 5;
 
@@ -314,6 +324,10 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   const gasToken = nativeTokenOn(to);
   // Top-ups are bought with Arc USDC through Gas.zip, so only from Arc.
   const wantsGas = received.kind === 'usdc' && intent.includeGas === true && source.gasPaidInUsdc;
+  // Blocky's fee: on everything that starts on Arc — moves and swaps. Coming
+  // home is free, and so are plain sends. From Arc it rides in the same
+  // all-or-nothing batch as the move, so a move that fails takes no fee.
+  const feeTerms = source.id === DEFAULT_CHAIN ? (ctx.blockyFee?.() ?? null) : null;
 
   /* --- Read everything at once ------------------------------------------- */
 
@@ -321,7 +335,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   // Selling a gas token is one call, but it swaps on a DEX before it bridges:
   // measured at ~475k gas on Arbitrum, so it is sized as five ordinary calls
   // (~540k) — "all of it" must leave enough behind to pay for itself.
-  const callCount = (sendsNative ? SWAP_AND_BRIDGE_CALLS : 2) + (wantsGas ? 1 : 0);
+  const callCount = (sendsNative ? SWAP_AND_BRIDGE_CALLS : 2) + (wantsGas ? 1 : 0) + (feeTerms ? 1 : 0);
 
   const [
     balance,
@@ -372,8 +386,16 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   if (sendsNative && unitPrice === null) {
     return fail('unpriced_amount', `I don't have a reliable price for ${token.symbol} right now. Try again in a minute.`);
   }
-  const gasReserve =
-    source.gasPaidInUsdc || sendsNative ? feeInTokenUnits(gas.plan.totalUsd, token, unitPrice ?? '1') : 0n;
+  const gasReserve = source.gasPaidInUsdc
+    ? feeInTokenUnits(gas.plan.totalUsd, token, '1')
+    : sendsNative
+      ? // A wallet must afford its *maximum* fee, not today's: the node refuses
+        // a transaction unless balance covers value + gas limit × max fee per
+        // gas, and reports it as a bare revert. Measured on Arbitrum: a 2× max
+        // fee failed with the estimate held back. So three estimates stay
+        // behind — pennies, and still the user's.
+        feeInTokenUnits(gas.plan.totalUsd, token, unitPrice ?? '1') * NATIVE_GAS_HEADROOM
+      : 0n;
   const amount = resolveAmount({ spec: intent.amount, token, unitPrice, balance, reserve: gasReserve + topUp });
 
   if (!amount.ok) {
@@ -393,15 +415,18 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   }
 
   const input = amount.amount;
-  const displayAmount = formatUnits(input, token.decimals);
+  // Taken out of what leaves, never added on top: "move $100" still means $100 leaves.
+  const blockyFee = feeTerms ? (input * BigInt(feeTerms.bps)) / 10_000n : 0n;
+  const bridged = input - blockyFee;
+  const displayAmount = formatUnits(bridged, token.decimals);
 
   /* --- Price every route, keep the best ---------------------------------- */
 
   const routes = sendsNative
     ? await nativeSourceRoutes({ ctx, from, to, input, wallet, description: `Swap ${displayAmount} ${token.symbol} on ${source.name} into USDC on ${destination.name}` })
     : received.kind === 'usdc'
-      ? await usdcRoutes({ ctx, from, to, token, input, wallet, cctp, acrossPool, displayAmount })
-      : await nativeRoutes({ ctx, from, to, token, input, wallet, gasToken, displayAmount, useAcross: Boolean(acrossPool && swapHandler), useGasZip: gasZip });
+      ? await usdcRoutes({ ctx, from, to, token, input: bridged, wallet, cctp, acrossPool, displayAmount })
+      : await nativeRoutes({ ctx, from, to, token, input: bridged, wallet, gasToken, displayAmount, useAcross: Boolean(acrossPool && swapHandler), useGasZip: gasZip });
 
   const route = bestRoute(routes);
 
@@ -428,6 +453,22 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
       })
     : null;
 
+  /* --- Blocky's fee -------------------------------------------------------- */
+
+  // After the move, so on Arc it batches with it; a move that has to go alone
+  // (a Gas.zip deposit carries value) is sent first, and the fee only after it lands.
+  const feeCall: PreparedCall | null =
+    feeTerms && blockyFee > 0n
+      ? {
+          chainId: from,
+          to: token.address,
+          data: encodeErc20Transfer(feeTerms.recipient, blockyFee),
+          value: '0',
+          description: `Blocky fee (${feeTerms.bps / 100}%)`,
+        }
+      : null;
+  const blockyFeeUsd = feeCall ? (assetDelta(token, blockyFee, unitPrice).usdValue ?? '0') : '0';
+
   /* --- Build the plan ----------------------------------------------------- */
 
   const receivedAs = received.kind === 'usdc' ? usdcOn(to, token) : gasToken;
@@ -437,15 +478,20 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   const landed = assetDelta(receivedAs, route.arrive, receivedPrice);
   const toppedUp = topUpQuote ? assetDelta(gasToken, topUpQuote.expectedOut, gasTokenPrice) : null;
 
-  // What the route keeps: what left, less what landed, valued in dollars.
-  // Unpriced means unknown, and is counted as nothing rather than guessed.
-  const routeCost = lossUnits(moved.usdValue, landed.usdValue);
+  // What the route keeps: what it was given, less what landed, valued in
+  // dollars. Unpriced means unknown, and is counted as nothing rather than guessed.
+  const routeCost = lossUnits(assetDelta(token, bridged, unitPrice).usdValue, landed.usdValue);
   const topUpCost = topUpQuote ? lossUnits(formatUsd(topUp), toppedUp?.usdValue ?? null) : 0n;
 
   const fee: Fee = {
-    totalUsd: formatUsd(parseUsd(gas.plan.totalUsd) + routeCost + topUpCost),
+    totalUsd: formatUsd(parseUsd(gas.plan.totalUsd) + routeCost + topUpCost + parseUsd(blockyFeeUsd)),
     paidIn: gas.plan.mode,
-    breakdown: { networkUsd: gas.plan.networkUsd, paymasterUsd: '0', serviceUsd: formatUsd(routeCost + topUpCost) },
+    breakdown: {
+      networkUsd: gas.plan.networkUsd,
+      paymasterUsd: '0',
+      serviceUsd: formatUsd(routeCost + topUpCost),
+      ...(feeCall ? { blockyUsd: blockyFeeUsd } : {}),
+    },
   };
 
   const canActThere = hasGasThere || received.kind === 'native' || topUpQuote !== null;
@@ -472,7 +518,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
       recipient: null,
       fee,
       warnings,
-      calls: topUpCall ? [...route.calls, topUpCall] : route.calls,
+      calls: [...route.calls, ...(feeCall ? [feeCall] : []), ...(topUpCall ? [topUpCall] : [])],
       route: {
         provider: route.provider,
         etaSeconds: route.etaSeconds,
@@ -480,6 +526,9 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
         ...(route.minimum !== undefined ? { minimumReceived: route.minimum.toString() } : {}),
         ...(topUpQuote ? { gasTopUp: { provider: 'gas.zip' } } : {}),
       },
+      ...(feeCall && feeTerms
+        ? { blockyFee: { amount: blockyFee.toString(), usd: blockyFeeUsd, recipient: feeTerms.recipient, bps: feeTerms.bps } }
+        : {}),
     }),
   };
 }

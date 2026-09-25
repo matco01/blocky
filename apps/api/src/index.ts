@@ -58,18 +58,22 @@ const explorerTransfers = (address: Parameters<typeof fetchExplorerTransfers>[0]
         })
       : Promise.reject(new Error('No BLOCKSCOUT_API_KEY configured for mainnet activity.'));
 
+// Blocky's fee on swaps and moves out of Arc. No address configured, no fee.
+const blockyFee = env.BLOCKY_FEE_RECIPIENT ? { recipient: env.BLOCKY_FEE_RECIPIENT, bps: env.BLOCKY_FEE_BPS } : null;
+
 const app = createApp({
   store,
   reader,
   identity: createPrivyIdentity({ appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET }),
   agent: env.ANTHROPIC_API_KEY
-    ? createAgentHandler(store, env.ANTHROPIC_API_KEY, reader, explorerTransfers)
+    ? createAgentHandler(store, env.ANTHROPIC_API_KEY, reader, explorerTransfers, blockyFee)
     : null,
   gatewayBalances: (address) => fetchGatewayBalances(address, { testnet: IS_TESTNET }),
   walletHoldings: (address) => fetchWalletHoldings(reader, address),
   forgetHoldings: (address) => forgetWalletHoldings(address),
   explorerTransfers,
   logRequests: true,
+  blockyFee,
 });
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, ({ port }) => {

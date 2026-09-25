@@ -7,11 +7,13 @@ import { PROPOSE_INTENT, TOOLS, untrustedJson, unwrapIntentInput } from './tools
  * The agent loop.
  *
  * Written by hand rather than with the SDK's tool runner, for one reason:
- * `propose_intent` is *terminal*. When the model calls it the turn is over and
- * control returns to the policy engine — there is no tool result to feed back,
- * because whether the thing happens is not the model's decision to observe. A
- * runner that loops until the model stops wanting tools has the wrong shape for
- * that, and bending it into the right shape costs more than the loop below.
+ * `propose_intent` is *terminal once it plans*. A proposal the planner can
+ * build ends the turn — the card goes to the user, and whether it happens is
+ * the user's decision, not the model's to observe. A proposal the planner
+ * refuses goes back to the model with the reason, so it can fix what it got
+ * wrong (the wrong chain, too much) or explain in its own words — rather than
+ * the user reading the planner's one-liner under a reply that promised a card.
+ * A runner that loops until the model stops wanting tools has neither shape.
  */
 
 /** Sonnet 5 at low effort. Intent extraction is closer to classification than reasoning. */
@@ -29,6 +31,12 @@ const MAX_TOKENS = 4096;
 
 /** Tool round-trips before we stop. Prevents a loop from billing indefinitely. */
 const MAX_STEPS = 6;
+
+/**
+ * Refusals from the planner handed back before we stop trying. One fix is
+ * usually all it takes; a second refusal is a sign to explain, not to guess.
+ */
+const MAX_PLAN_RETRIES = 2;
 
 /**
  * Retries offered to the model when its intent fails validation.
@@ -79,19 +87,30 @@ export interface AgentUsage {
   steps: number;
 }
 
-export type AgentTurn =
+/**
+ * The planner, as the loop sees it: an intent in, a plan or the reason there
+ * is none out. The reason goes back to the model, so it must be something the
+ * model may read — the planner's own words, never anything a stranger wrote.
+ */
+export type PlanIntent<P> = (intent: Intent) => Promise<{ ok: true; plan: P } | { ok: false; message: string }>;
+
+export type AgentTurn<P = unknown> =
   /** The agent answered. Nothing is proposed. */
   | { kind: 'reply'; text: string; usage: AgentUsage }
-  /** A valid intent. Hand it to the planner. Nothing has executed. */
-  | { kind: 'intent'; intent: Intent; text: string; usage: AgentUsage }
+  /** A valid intent, and — when a planner was given — its plan. Nothing has executed. */
+  | { kind: 'intent'; intent: Intent; plan: P | null; text: string; usage: AgentUsage }
+  /** The planner kept refusing what the model proposed. `reason` is the planner's last word. */
+  | { kind: 'cannot_plan'; reason: string; text: string; usage: AgentUsage }
   /** The model could not produce a well-formed intent. Do not repair it — surface it. */
   | { kind: 'invalid_intent'; error: string; issues: string[]; text: string; usage: AgentUsage }
   /** The loop ran out of steps. */
   | { kind: 'exhausted'; text: string; usage: AgentUsage };
 
-export interface AgentOptions {
+export interface AgentOptions<P> {
   client: Anthropic;
   tools: AgentTools;
+  /** Plan each proposal inside the turn, handing refusals back to the model. Without it, a proposal ends the turn unplanned. */
+  plan?: PlanIntent<P>;
   /** Prior turns. The API is stateless, so the caller owns the history. */
   history?: Anthropic.MessageParam[];
 }
@@ -100,10 +119,10 @@ export interface AgentOptions {
 /*  Loop                                                                       */
 /* -------------------------------------------------------------------------- */
 
-export async function runAgentTurn(
+export async function runAgentTurn<P = unknown>(
   message: string,
-  { client, tools, history = [] }: AgentOptions,
-): Promise<AgentTurn> {
+  { client, tools, plan, history = [] }: AgentOptions<P>,
+): Promise<AgentTurn<P>> {
   const messages: Anthropic.MessageParam[] = [...history, { role: 'user', content: message }];
 
   const usage: AgentUsage = {
@@ -116,6 +135,7 @@ export async function runAgentTurn(
   };
 
   let intentRetries = 0;
+  let planRetries = 0;
 
   for (let step = 0; step < MAX_STEPS; step += 1) {
     const response = await client.messages.create({
@@ -162,33 +182,50 @@ export async function runAgentTurn(
       return { kind: 'reply', text, usage };
     }
 
-    /* --- A proposal ends the turn, whatever was called alongside it -------- */
+    /* --- A proposal that plans ends the turn -------------------------------- */
 
     const proposal = toolUses.find((use) => use.name === PROPOSE_INTENT);
 
     if (proposal) {
       const parsed = parseIntent(unwrapIntentInput(proposal.input));
+      let refusal: string;
 
       if (parsed.ok) {
-        return { kind: 'intent', intent: parsed.intent, text, usage };
+        if (!plan) return { kind: 'intent', intent: parsed.intent, plan: null, text, usage };
+
+        const outcome = await plan(parsed.intent);
+        if (outcome.ok) return { kind: 'intent', intent: parsed.intent, plan: outcome.plan, text, usage };
+
+        planRetries += 1;
+        if (planRetries > MAX_PLAN_RETRIES) {
+          return { kind: 'cannot_plan', reason: outcome.message, text, usage };
+        }
+
+        // Nothing was shown to the user yet, so the model gets to answer
+        // knowing the outcome: fix the proposal, or say why it can't be done.
+        refusal =
+          `The planner could not build this: ${outcome.message}\n\n` +
+          `Nothing was shown to the user, including your text so far. If you got something wrong — the chain, ` +
+          `the token, the amount — check with a tool and call ${PROPOSE_INTENT} again. If it cannot be done, ` +
+          `tell the user why in your own words, and what they can do instead.`;
+      } else {
+        intentRetries += 1;
+        if (intentRetries > MAX_INTENT_RETRIES) {
+          return { kind: 'invalid_intent', error: parsed.error, issues: parsed.issues, text, usage };
+        }
+
+        // Hand the errors back and let it try again. Never repair it ourselves.
+        refusal = `${parsed.error}\n\nFix these and call ${PROPOSE_INTENT} again. Do not guess at a value you are unsure of — ask the user instead.`;
       }
 
-      intentRetries += 1;
-
-      if (intentRetries > MAX_INTENT_RETRIES) {
-        return { kind: 'invalid_intent', error: parsed.error, issues: parsed.issues, text, usage };
-      }
-
-      // Hand the errors back and let it try again. Never repair it ourselves.
+      // Every tool call in a message needs its result in the next one — the
+      // read-only ones called alongside the proposal included.
+      const others = toolUses.filter((use) => use !== proposal);
       messages.push({
         role: 'user',
         content: [
-          {
-            type: 'tool_result',
-            tool_use_id: proposal.id,
-            is_error: true,
-            content: `${parsed.error}\n\nFix these and call ${PROPOSE_INTENT} again. Do not guess at a value you are unsure of — ask the user instead.`,
-          },
+          { type: 'tool_result', tool_use_id: proposal.id, is_error: true, content: refusal },
+          ...(await runTools(others, tools)),
         ],
       });
 
@@ -197,31 +234,34 @@ export async function runAgentTurn(
 
     /* --- Every other tool: execute all, answer in one message ------------- */
 
-    const results = await Promise.all(
-      toolUses.map(async (use): Promise<Anthropic.ToolResultBlockParam> => {
-        try {
-          return {
-            type: 'tool_result',
-            tool_use_id: use.id,
-            content: JSON.stringify(untrustedJson(await callTool(use.name, use.input, tools))),
-          };
-        } catch (error) {
-          return {
-            type: 'tool_result',
-            tool_use_id: use.id,
-            is_error: true,
-            content: error instanceof Error ? error.message : 'Tool failed',
-          };
-        }
-      }),
-    );
-
     // All results in a single user message. Splitting them across several
     // teaches the model to stop making parallel calls.
-    messages.push({ role: 'user', content: results });
+    messages.push({ role: 'user', content: await runTools(toolUses, tools) });
   }
 
   return { kind: 'exhausted', text: '', usage };
+}
+
+/** Run read-only tool calls in parallel. A failing tool is reported to the model, never thrown. */
+function runTools(uses: Anthropic.ToolUseBlock[], tools: AgentTools): Promise<Anthropic.ToolResultBlockParam[]> {
+  return Promise.all(
+    uses.map(async (use): Promise<Anthropic.ToolResultBlockParam> => {
+      try {
+        return {
+          type: 'tool_result',
+          tool_use_id: use.id,
+          content: JSON.stringify(untrustedJson(await callTool(use.name, use.input, tools))),
+        };
+      } catch (error) {
+        return {
+          type: 'tool_result',
+          tool_use_id: use.id,
+          is_error: true,
+          content: error instanceof Error ? error.message : 'Tool failed',
+        };
+      }
+    }),
+  );
 }
 
 /** The shape a tool call's arguments are expected to have, checked before use. */

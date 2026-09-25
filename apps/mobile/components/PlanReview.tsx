@@ -1,6 +1,15 @@
 import { shortAddress, type Plan } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
-import { planAmountLabel, planArrivalLabel, planDestinationLabel, planFeeLabel, planFeeName, planGasTopUpLabel, planVerb } from '../lib/planLabels';
+import {
+  planAmountLabel,
+  planArrivalLabel,
+  planBlockyFeeLabel,
+  planDestinationLabel,
+  planFeeLabel,
+  planFeeName,
+  planGasTopUpLabel,
+  planVerb,
+} from '../lib/planLabels';
 import { useTheme } from '../theme';
 import { Icon } from './Icon';
 import { Text } from './Text';
@@ -38,6 +47,7 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
       <Tile style={{ padding: theme.space.lg, gap: 14 }}>
         <Row label="Amount" value={`${outflow?.displayAmount ?? '0'} ${outflow?.token.symbol ?? ''}`} />
         <Row label={planFeeName(plan)} value={fee} />
+        {planBlockyFeeLabel(plan) ? <Row label="Includes Blocky's fee" value={planBlockyFeeLabel(plan)!} /> : null}
         {arrival ? <Row label="Arrives" value={arrival} /> : null}
         {planGasTopUpLabel(plan) ? <Row label="Gas" value={planGasTopUpLabel(plan)!.replace(/^\+ /, '')} /> : null}
         {plan.recipient && plan.recipient.display !== plan.recipient.address ? (

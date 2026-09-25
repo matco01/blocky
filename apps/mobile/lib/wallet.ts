@@ -4,8 +4,11 @@ import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { useCallback } from 'react';
 import {
   BaseError,
+  ExecutionRevertedError,
   HttpRequestError,
+  InsufficientFundsError,
   TimeoutError,
+  UserRejectedRequestError,
   createPublicClient,
   createWalletClient,
   custom,
@@ -16,7 +19,7 @@ import {
   type Hex,
   type PublicClient,
 } from 'viem';
-import { homeChainName, signingChain } from './chain';
+import { homeChain, homeChainName, signingChain } from './chain';
 
 /**
  * The user's wallet: their Privy embedded wallet, sending ordinary
@@ -70,6 +73,28 @@ export class SubmittedButUnconfirmedError extends Error {
 function isAmbiguousNetworkError(error: unknown): boolean {
   if (!(error instanceof BaseError)) return false;
   return Boolean(error.walk((cause) => cause instanceof TimeoutError || cause instanceof HttpRequestError));
+}
+
+/**
+ * What a wallet error means, in a sentence — never viem's dump of the request.
+ *
+ * On a chain whose gas is its own token, a "revert" at estimation is almost
+ * always the wallet unable to cover value plus its maximum fee: nodes report
+ * that as a bare revert, not as insufficient funds.
+ */
+function friendlyError(error: unknown, chain: Chain): Error {
+  if (!(error instanceof BaseError)) return error instanceof Error ? error : new Error(String(error));
+  if (error.walk((cause) => cause instanceof UserRejectedRequestError)) {
+    return new Error('You cancelled it. Nothing was sent.');
+  }
+  if (error.walk((cause) => cause instanceof InsufficientFundsError || cause instanceof ExecutionRevertedError)) {
+    return new Error(
+      chain.id === homeChain.id
+        ? `${homeChainName} wouldn't accept it — there may not be enough left for the network fee. Nothing was sent.`
+        : `Not enough ${chain.nativeCurrency.symbol} left on ${chain.name} to cover its network fee. Nothing was sent — try a slightly smaller amount.`,
+    );
+  }
+  return new Error(`${error.shortMessage} Nothing was sent.`);
 }
 
 export function useWallet() {
@@ -151,7 +176,7 @@ async function sendOne(
     // A rejection means nothing was submitted. A timeout or dropped
     // connection means we cannot know — it may have gone through.
     if (isAmbiguousNetworkError(error)) throw new SubmittedButUnconfirmedError();
-    throw error;
+    throw friendlyError(error, chain);
   }
 
   onStage?.('confirming');

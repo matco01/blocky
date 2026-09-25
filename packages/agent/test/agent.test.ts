@@ -249,6 +249,25 @@ describe('proposing an intent', () => {
     expect(turn.kind).toBe('intent');
   });
 
+  it('answers every tool call in the message when handing a proposal back', async () => {
+    const { client, calls } = fakeClient([
+      {
+        content: [
+          toolUse('get_balance', {}, 'a'),
+          toolUse(PROPOSE_INTENT, { intent: { type: 'nonsense' } }, 'b'),
+        ],
+      },
+      { content: [toolUse(PROPOSE_INTENT, { intent: VALID_TRANSFER })] },
+    ]);
+
+    await runAgentTurn('send it', { client, tools });
+
+    // The API rejects a tool_use without its tool_result in the next message.
+    const retry = JSON.stringify(calls[1]?.messages.at(-1));
+    expect(retry).toContain('"tool_use_id":"a"');
+    expect(retry).toContain('"tool_use_id":"b"');
+  });
+
   it('never accepts smuggled calldata, even wrapped in a valid intent', async () => {
     const smuggled = { ...VALID_TRANSFER, calldata: '0xdeadbeef' };
 
@@ -325,5 +344,79 @@ describe('estimateCostUsd', () => {
         steps: 1,
       }),
     ).toBeCloseTo(18.7, 6);
+  });
+});
+
+describe('planning inside the turn', () => {
+  const WRONG_CHAIN = { type: 'bridge', token: { kind: 'symbol', symbol: 'ETH' }, amount: { kind: 'max' }, fromChainId: 42161, toChainId: 42161, rationale: 'Bring ETH home.' };
+  const HOME = { ...WRONG_CHAIN, toChainId: 5042 };
+
+  it('ends the turn with the plan when the planner builds it', async () => {
+    const { client, calls } = fakeClient([{ content: [text('Here it is.'), toolUse(PROPOSE_INTENT, { intent: HOME })] }]);
+
+    const turn = await runAgentTurn('bring my eth home', {
+      client,
+      tools,
+      plan: async () => ({ ok: true, plan: 'the plan' }),
+    });
+
+    expect(turn.kind).toBe('intent');
+    if (turn.kind === 'intent') expect(turn.plan).toBe('the plan');
+    // A plan that builds costs nothing extra: no second model call.
+    expect(calls).toHaveLength(1);
+  });
+
+  it('hands a refusal back so the model can fix its proposal', async () => {
+    const { client, calls } = fakeClient([
+      { content: [text("I'll propose it."), toolUse(PROPOSE_INTENT, { intent: WRONG_CHAIN })] },
+      { content: [text('Here it is.'), toolUse(PROPOSE_INTENT, { intent: HOME })] },
+    ]);
+
+    const turn = await runAgentTurn('bring my eth home', {
+      client,
+      tools,
+      plan: async (intent) =>
+        intent.type === 'bridge' && intent.toChainId === 5042
+          ? { ok: true, plan: 'home' }
+          : { ok: false, message: 'That money is already on Arbitrum One.' },
+    });
+
+    expect(turn.kind).toBe('intent');
+    // Only the final words reach the user — not the reply that preceded a refusal.
+    expect(turn.text).toBe('Here it is.');
+    const retry = JSON.stringify(calls[1]?.messages.at(-1));
+    expect(retry).toContain('is_error');
+    expect(retry).toContain('already on Arbitrum One');
+  });
+
+  it('lets the model explain a refusal in its own words', async () => {
+    const { client } = fakeClient([
+      { content: [toolUse(PROPOSE_INTENT, { intent: HOME })] },
+      { content: [text("You don't have any ETH on Arbitrum right now.")] },
+    ]);
+
+    const turn = await runAgentTurn('bring my eth home', {
+      client,
+      tools,
+      plan: async () => ({ ok: false, message: "You don't have any ETH on Arbitrum One." }),
+    });
+
+    expect(turn.kind).toBe('reply');
+    expect(turn.text).toBe("You don't have any ETH on Arbitrum right now.");
+  });
+
+  it('gives up after a bounded number of refusals, keeping the reason', async () => {
+    const again = { content: [toolUse(PROPOSE_INTENT, { intent: HOME })] };
+    const { client, calls } = fakeClient([again, again, again, again]);
+
+    const turn = await runAgentTurn('bring my eth home', {
+      client,
+      tools,
+      plan: async () => ({ ok: false, message: 'No route.' }),
+    });
+
+    expect(turn.kind).toBe('cannot_plan');
+    if (turn.kind === 'cannot_plan') expect(turn.reason).toBe('No route.');
+    expect(calls).toHaveLength(3);
   });
 });

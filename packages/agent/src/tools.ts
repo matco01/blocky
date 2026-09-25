@@ -232,7 +232,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_arc_ecosystem',
     description:
-      'What is actually live on Arc right now, ranked by TVL (total value locked) — for questions like "what are the best apps on Arc" or "is there anywhere to lend/stake USDC". No APY or yield figure is included, because there is no reliable one to give yet; if the user asks for a specific rate, say you don\'t have a trustworthy number rather than estimating one. A protocol appearing here is not a recommendation and never a basis for propose_intent — Blocky only sends plain USDC transfers today.',
+      'What is actually live on Arc right now, ranked by TVL (total value locked) — for questions like "what are the best apps on Arc" or "is there anywhere to lend/stake USDC". No APY or yield figure is included, because there is no reliable one to give yet; if the user asks for a specific rate, say you don\'t have a trustworthy number rather than estimating one. A protocol appearing here is not a recommendation and never a basis for propose_intent — Blocky cannot swap, lend or stake through any of them.',
     input_schema: NO_INPUT,
   },
   {
@@ -244,7 +244,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: PROPOSE_INTENT,
     description:
-      'Propose that money move. This does NOT execute — it hands a structured intent to the planner, which builds the real transaction, prices it, and checks it against the user\'s limits. The user then approves it on their phone. Call this once you know exactly what the user wants; ask a clarifying question instead if any of the token, the amount, or the recipient is ambiguous. Two things work today: a USDC transfer on Arc (type "transfer"), and moving the user\'s own USDC from Arc to another chain (type "bridge", toChainId from get_supported_chains) — optionally arriving as that chain\'s gas token (receive) or with a little of it for gas (includeGas). Do not propose type "swap".',
+      'Propose that money move. This does NOT execute — it hands a structured intent to the planner, which builds the real transaction, prices it, and checks it against the user\'s limits. If it can be built, the user sees a card and approves it on their phone; if not, you get the reason back to fix the proposal or explain. Call this once you know exactly what the user wants; ask a clarifying question instead if the token, the amount, or the recipient is ambiguous. Two things work today: a USDC transfer on Arc (type "transfer"), and moving the user\'s own money between chains (type "bridge", chain ids from get_supported_chains) — from Arc as USDC, optionally arriving as that chain\'s gas token (receive) or with a little of it for gas (includeGas); or home to Arc from another chain, as USDC or that chain\'s gas token. Do not propose type "swap".',
     input_schema: intentJsonSchema() as Anthropic.Tool['input_schema'],
   },
 ];

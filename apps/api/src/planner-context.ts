@@ -59,12 +59,20 @@ async function gasTokenPrice(chainId: ChainId): Promise<string | null> {
   return priceAsDecimal(await getTokenPriceUsd(getChain(chainId).nativeCurrency.symbol));
 }
 
+/** Where Blocky's fee goes and how much it is. Server configuration, never the model's. */
+export interface BlockyFeeTerms {
+  recipient: Address;
+  bps: number;
+}
+
 export interface PlannerDeps {
   reader: ChainReader;
   store: Store;
   userId: string;
   /** The user's wallet. Privy supplies this for real in M1. */
   account: Address;
+  /** Null or absent: no fee. */
+  blockyFee?: BlockyFeeTerms | null;
 }
 
 export function createPlannerContext({
@@ -72,6 +80,7 @@ export function createPlannerContext({
   store,
   userId,
   account,
+  blockyFee = null,
 }: PlannerDeps): PlannerContext {
   /*
    * One read per token for the life of this context (one plan). For a USDC
@@ -90,6 +99,8 @@ export function createPlannerContext({
   }
 
   return {
+    blockyFee: () => blockyFee,
+
     async resolveToken(ref: TokenRef, chainId: ChainId): Promise<ResolvedToken | null> {
       const chain = getChain(chainId);
 

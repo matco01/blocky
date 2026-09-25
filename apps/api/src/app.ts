@@ -1,4 +1,4 @@
-import { buildPlan } from '@blocky/planner';
+import { buildPlan, encodeErc20Transfer } from '@blocky/planner';
 import {
   AddressSchema,
   AmountSpecSchema,
@@ -43,7 +43,7 @@ import { z } from 'zod';
 import { mergeActivity, type ExplorerTransfer } from './activity';
 import type { AgentResponse, ChatTurn } from './agent';
 import { authenticate, type AuthenticatedUser, type IdentityProvider } from './auth';
-import { createPlannerContext } from './planner-context';
+import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
 import { DuplicateExecutionError, type Store } from './store';
 
 export interface AppDeps {
@@ -67,6 +67,8 @@ export interface AppDeps {
   /** How long to wait for a just-submitted transaction to become visible. */
   receiptPolling?: { attempts: number; delayMs: number };
   logRequests?: boolean;
+  /** Blocky's fee on swaps and moves out of Arc; absent means none. */
+  blockyFee?: BlockyFeeTerms | null;
 }
 
 type Vars = { user: AuthenticatedUser };
@@ -295,7 +297,7 @@ export function createApp(deps: AppDeps) {
     });
 
     const userId = c.get('user').id;
-    const outcome = await buildPlan(intent, createPlannerContext({ reader, store, userId, account: wallet }));
+    const outcome = await buildPlan(intent, createPlannerContext({ reader, store, userId, account: wallet, blockyFee: deps.blockyFee ?? null }));
 
     if (!outcome.ok) {
       return c.json({ error: outcome.failure.code, message: outcome.failure.message }, 422);
@@ -369,7 +371,7 @@ export function createApp(deps: AppDeps) {
             rationale,
           });
 
-    const outcome = await buildPlan(intent, createPlannerContext({ reader, store, userId, account: wallet }));
+    const outcome = await buildPlan(intent, createPlannerContext({ reader, store, userId, account: wallet, blockyFee: deps.blockyFee ?? null }));
     if (!outcome.ok) {
       return c.json({ error: outcome.failure.code, message: outcome.failure.message }, 422);
     }
@@ -457,8 +459,9 @@ export function createApp(deps: AppDeps) {
         );
       }
 
+      const exactly = index > 0 || shape.kind === 'exact';
       const matches =
-        index > 0 || shape.kind === 'exact'
+        exactly
           ? isExactTransaction(receipt.transaction, receipt.status, { from: wallet, calls: group })
           : shape.kind === 'transfer'
             ? containsTransfer(receipt, {
@@ -491,7 +494,15 @@ export function createApp(deps: AppDeps) {
                   recipient: wallet,
                 });
 
-      if (!matches) {
+      // Checked by its events, the move doesn't prove the fee rode along in
+      // the same batch. A client that drops it has not sent this plan.
+      const feeHere = shape.kind !== 'transfer' && shape.blockyFee && group.includes(shape.blockyFee.call) ? shape.blockyFee : null;
+      const feePaid =
+        exactly ||
+        !feeHere ||
+        containsTransfer(receipt, { token: feeHere.token, from: wallet, to: feeHere.recipient, amount: feeHere.amount });
+
+      if (!matches || !feePaid) {
         return c.json(
           {
             error: 'mismatch',
@@ -505,8 +516,12 @@ export function createApp(deps: AppDeps) {
       }
     }
 
-    // The transaction that actually moves the money: the last required one.
-    const txHash = hashes[required - 1]!;
+    // The transaction that actually moves the money: the last required one
+    // that isn't Blocky's fee going on its own.
+    const feeCall = shape.kind === 'transfer' ? null : shape.blockyFee?.call;
+    let moneyIndex = required - 1;
+    while (moneyIndex > 0 && groups[moneyIndex]!.length === 1 && groups[moneyIndex]![0] === feeCall) moneyIndex -= 1;
+    const txHash = hashes[moneyIndex]!;
     const incomplete = hashes.length < groups.length;
 
     try {
@@ -771,6 +786,28 @@ interface BridgeShape {
   destination: ChainId;
   /** The contract the money went to on-chain — what the explorer reports as the counterparty. */
   counterparty: Address;
+  /** Blocky's fee transfer, when the plan charges one: it must land exactly as planned. */
+  blockyFee: { call: Plan['calls'][number]; token: Address; recipient: Address; amount: bigint } | null;
+}
+
+/**
+ * Blocky's fee in a plan: exactly one USDC transfer on Arc, of exactly the
+ * planned amount, to exactly the planned address — set aside, so the move
+ * reads as it always has. `undefined` for a plan that charges none; null for
+ * one whose fee is not what it says, which is refused.
+ */
+function blockyFeeOf(plan: Plan): BridgeShape['blockyFee'] | undefined {
+  if (!plan.blockyFee) return undefined;
+
+  const amount = BigInt(plan.blockyFee.amount);
+  const data = encodeErc20Transfer(plan.blockyFee.recipient, amount);
+  const matching = plan.calls.filter((call) => call.data === data);
+  const call = matching[0];
+
+  if (matching.length !== 1 || !call || call.value !== '0' || !supportsBatching(call.chainId)) return null;
+  if (call.to !== getChain(call.chainId).usdc) return null;
+
+  return { call, token: call.to, recipient: plan.blockyFee.recipient, amount };
 }
 
 function planShape(plan: Plan): PlanShape | null {
@@ -785,8 +822,13 @@ function planShape(plan: Plan): PlanShape | null {
 
   if (plan.intentType !== 'bridge' || plan.recipient !== null) return null;
 
+  const fee = blockyFeeOf(plan);
+  if (fee === null) return null;
+  const blockyFee = fee ?? null;
+  const calls = blockyFee ? plan.calls.filter((call) => call !== blockyFee.call) : plan.calls;
+
   const [inflow] = plan.inflow;
-  const groups = groupCalls(plan.calls);
+  const groups = groupCalls(calls);
   const main = groups[0];
   if (!inflow || !main || main.length === 0) return null;
 
@@ -801,6 +843,8 @@ function planShape(plan: Plan): PlanShape | null {
         (address): address is Address => Boolean(address),
       ),
     );
+    // Blocky charges nothing from other chains; a fee here is not a plan we made.
+    if (blockyFee) return null;
     const usdc = getChain(chainId).usdc;
     const last = plan.calls[plan.calls.length - 1]!;
     const allowed = plan.calls.every(
@@ -808,15 +852,16 @@ function planShape(plan: Plan): PlanShape | null {
     );
     if (!allowed || !pinned.has(last.to)) return null;
 
-    return { chainId, outflow, destination: inflow.token.chainId, kind: 'exact', counterparty: last.to };
+    return { chainId, outflow, destination: inflow.token.chainId, kind: 'exact', counterparty: last.to, blockyFee };
   }
 
   // Anything after the main transaction may only be a Gas.zip top-up.
   const gasZip = gasZipDepositContract(chainId);
   if (groups.slice(1).some((group) => group.length !== 1 || group[0]!.to !== gasZip)) return null;
 
-  const base = { chainId, outflow, destination: inflow.token.chainId };
-  const input = BigInt(outflow.amount);
+  const base = { chainId, outflow, destination: inflow.token.chainId, blockyFee };
+  // What the bridge is given: what leaves, less Blocky's fee.
+  const input = BigInt(outflow.amount) - (blockyFee?.amount ?? 0n);
 
   // Which road it takes is read off the contract it calls — and only a
   // contract we pinned ourselves counts.

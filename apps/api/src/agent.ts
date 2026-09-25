@@ -23,7 +23,7 @@ import {
   type ChainReader,
 } from '@blocky/wallet-core';
 import { mergeActivity, type ExplorerTransfer } from './activity';
-import { createPlannerContext } from './planner-context';
+import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
 import type { Store } from './store';
 
 /**
@@ -223,7 +223,7 @@ export interface ChatTurn {
 }
 
 export interface AgentResponse {
-  kind: AgentTurn['kind'] | 'plan' | 'cannot_plan';
+  kind: AgentTurn['kind'] | 'plan';
   reply: string;
   /** The planner's output. Proposed, priced and checked — but not signed. */
   plan: Plan | null;
@@ -239,6 +239,7 @@ export function createAgentHandler(
   apiKey: string,
   reader: ChainReader,
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>,
+  blockyFee: BlockyFeeTerms | null = null,
 ) {
   // One client for the process. Constructing per request throws away the
   // connection pool for no benefit.
@@ -252,9 +253,17 @@ export function createAgentHandler(
     const userId = user.id;
     const account = user.walletAddress;
 
-    const turn = await runAgentTurn(message, {
+    // The planner runs inside the turn, so a refusal goes back to the model to
+    // fix or explain — the user never reads a planner one-liner under a reply
+    // that promised a card.
+    const context = createPlannerContext({ reader, store, userId, account, blockyFee });
+    const turn = await runAgentTurn<Plan>(message, {
       client,
       tools: agentToolsFor(store, userId, reader, account, explorerTransfers),
+      plan: async (intent) => {
+        const outcome = await buildPlan(intent, context);
+        return outcome.ok ? { ok: true, plan: outcome.plan } : { ok: false, message: outcome.failure.message };
+      },
       history: history.map((entry) => ({ role: entry.role, content: entry.content })),
     });
 
@@ -282,40 +291,32 @@ export function createAgentHandler(
           status: 'The agent used its step budget without reaching an answer.',
         };
 
+      case 'cannot_plan':
+        // The model tried and kept getting refused. Its own words, if it had
+        // any; the planner's reason otherwise.
+        return { ...empty, kind: turn.kind, reply: turn.text || turn.reason, status: turn.reason };
+
       case 'intent':
         break;
     }
 
-    /* --- An intent was proposed. Plan it, then judge it. ------------------- */
+    /* --- Planned. Judge it against the user's limits. ---------------------- */
 
-    const outcome = await buildPlan(
-      turn.intent,
-      createPlannerContext({ reader, store, userId, account }),
-    );
-
-    if (!outcome.ok) {
-      return {
-        ...empty,
-        kind: 'cannot_plan',
-        reply: turn.text,
-        status: outcome.failure.message,
-      };
-    }
-
+    const plan = turn.plan!;
     const decision = evaluatePolicy({
       policy: await store.getPolicy(userId),
-      plan: outcome.plan,
+      plan,
       spentTodayUsd: await store.spentTodayUsd(userId),
     });
 
     // Held so the client can approve it by id rather than posting a plan back —
     // a plan that arrives from a client is a plan an attacker can edit.
-    await store.putPlan(userId, outcome.plan, 'agent');
+    await store.putPlan(userId, plan, 'agent');
 
     return {
       kind: 'plan',
       reply: turn.text,
-      plan: outcome.plan,
+      plan,
       decision,
       status: statusFor(decision),
       usage: turn.usage,

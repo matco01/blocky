@@ -408,6 +408,19 @@ describe('bringing ETH home as USDC', () => {
     expect(PlanSchema.safeParse(plan).success).toBe(true);
   });
 
+  it("is free of Blocky's fee: coming home costs only the route", async () => {
+    const plan = await planFor(
+      sellEth,
+      onArbitrum({
+        acrossNativeSwapQuote: async (_f, _t, input) => nativeSwapQuote(input),
+        blockyFee: () => ({ recipient: '0x7777777777777777777777777777777777777777', bps: 50 }),
+      }),
+    );
+
+    expect(plan.blockyFee).toBeUndefined();
+    expect(plan.calls).toHaveLength(1);
+  });
+
   it('for "all of it", keeps back the ETH that pays the gas', async () => {
     let sold = 0n;
     await planFor(
@@ -415,9 +428,10 @@ describe('bringing ETH home as USDC', () => {
       onArbitrum({ acrossNativeSwapQuote: async (_f, _t, input) => ((sold = input), nativeSwapQuote(input)) }),
     );
 
-    // 0.01 ETH, less the $0.10 fee at $2,600 — about 0.0000385 ETH.
+    // 0.01 ETH, less three times the $0.10 fee at $2,600 — the wallet has to
+    // afford its maximum fee, not today's.
     expect(sold).toBeLessThan(10_000_000_000_000_000n);
-    expect(10_000_000_000_000_000n - sold).toBe(38_461_538_461_539n);
+    expect(10_000_000_000_000_000n - sold).toBe(38_461_538_461_539n * 3n);
   });
 
   it('refuses to turn ETH into another gas token — only USDC comes home', async () => {

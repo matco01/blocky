@@ -336,3 +336,12 @@ describe('handing off to the policy engine', () => {
 function codes(plan: { warnings: Array<{ code: string }> }): string[] {
   return plan.warnings.map((w) => w.code);
 }
+
+describe("Blocky's fee", () => {
+  it('never touches a plain send', async () => {
+    const plan = await planOk({}, fakeContext({ blockyFee: () => ({ recipient: '0x7777777777777777777777777777777777777777', bps: 50 }) }));
+
+    expect(plan.blockyFee).toBeUndefined();
+    expect(plan.calls).toHaveLength(1);
+  });
+});

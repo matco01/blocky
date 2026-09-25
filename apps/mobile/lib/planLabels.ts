@@ -14,6 +14,15 @@ export function planFeeLabel(plan: Plan): string {
 }
 
 /**
+ * Blocky's own share of the fee, said plainly — "$0.10 (0.5%)" — or null when
+ * the plan charges none (every plain send, and every move home).
+ */
+export function planBlockyFeeLabel(plan: Plan): string | null {
+  if (!plan.blockyFee) return null;
+  return `${displayUsd(plan.blockyFee.usd)} (${plan.blockyFee.bps / 100}%)`;
+}
+
+/**
  * What the fee line is called. Some routes between chains quote a ceiling —
  * whatever they don't use arrives with the money — and those say so.
  */

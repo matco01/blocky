@@ -255,7 +255,8 @@ describe('a move with a gas top-up: two transactions', () => {
 /** A CCTP burn of the plan's move, word by word, as the messenger emits it. */
 function burnReceipt(plan: Plan): Receipt {
   const messenger = plan.calls[1]!.to;
-  const input = BigInt(plan.outflow[0]!.amount);
+  // What was burned: what left, less Blocky's fee when there is one.
+  const input = BigInt(plan.outflow[0]!.amount) - BigInt(plan.blockyFee?.amount ?? 0);
   const maxFee = input - BigInt(plan.inflow[0]!.amount);
   const word = (value: bigint) => value.toString(16).padStart(64, '0');
   const addr = (a: string) => a.slice(2).toLowerCase().padStart(64, '0');
@@ -341,5 +342,75 @@ describe('coming home from another chain', () => {
 
     receipts.set(hash('c'), sent(deposit!));
     expect((await report(p.id, [hash('b'), hash('c')])).status).toBe(201);
+  });
+});
+
+describe("Blocky's fee", () => {
+  const TREASURY = '0x7777777777777777777777777777777777777777' as Address;
+  const charging = (over: Partial<PlannerContext> = {}) => context({ blockyFee: () => ({ recipient: TREASURY, bps: 50 }), ...over });
+
+  /** The USDC Transfer event of the fee, as the token emits it. */
+  function feeLog(to: Address, amount: bigint): Receipt['logs'][number] {
+    const addr = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, '0')}`;
+    return {
+      address: USDC,
+      topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', addr(WALLET), addr(to)],
+      data: `0x${amount.toString(16).padStart(64, '0')}`,
+    };
+  }
+
+  const move = () => stored({ toChainId: CHAIN.base }, charging());
+
+  it('rides in the same batch as the move', async () => {
+    const p = await move();
+
+    expect(groupCalls(p.calls).map((group) => group.length)).toEqual([3]);
+    expect(p.blockyFee).toMatchObject({ amount: '100000', recipient: TREASURY });
+  });
+
+  it('records a move whose fee landed exactly as planned', async () => {
+    const p = await move();
+    const burn = burnReceipt(p);
+    receipts.set(hash('a'), { ...burn, logs: [...burn.logs, feeLog(TREASURY, 100_000n)] });
+
+    expect((await report(p.id, [hash('a')])).status).toBe(201);
+  });
+
+  it.each([
+    ['dropped', () => []],
+    ['sent somewhere else', () => [feeLog(OTHER, 100_000n)]],
+    ['smaller', () => [feeLog(TREASURY, 1n)]],
+  ])('refuses a move whose fee was %s, and records nothing', async (_, logs) => {
+    const p = await move();
+    const burn = burnReceipt(p);
+    receipts.set(hash('b'), { ...burn, logs: [...burn.logs, ...logs()] });
+
+    expect((await report(p.id, [hash('b')])).status).toBe(422);
+    expect(await store.listExecutions('did:privy:alice')).toEqual([]);
+  });
+
+  describe('after a move that has to go alone', () => {
+    const swap = () =>
+      stored(
+        { toChainId: CHAIN.arbitrum, receive: { kind: 'symbol', symbol: 'ETH' } },
+        charging({ gasZipQuote: async (_f, _t, input) => gasZipQuote(input) }),
+      );
+
+    it('goes out after the Gas.zip deposit, as its own transaction', async () => {
+      const p = await swap();
+
+      expect(groupCalls(p.calls).map((group) => group[0]!.to)).toEqual([GAS_ZIP, USDC]);
+    });
+
+    it('is required, and the deposit is what gets recorded', async () => {
+      const p = await swap();
+      const [deposit, fee] = groupCalls(p.calls);
+      receipts.set(hash('c'), sent(deposit!));
+      receipts.set(hash('d'), sent(fee!));
+
+      expect((await report(p.id, [hash('c')])).status).toBe(422);
+      expect((await report(p.id, [hash('c'), hash('d')])).status).toBe(201);
+      expect((await store.listExecutions('did:privy:alice'))[0]?.txHash).toBe(hash('c'));
+    });
   });
 });

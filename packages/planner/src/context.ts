@@ -25,6 +25,12 @@ import type {
  */
 export interface PlannerContext {
   /**
+   * Blocky's fee on swaps and moves out of Arc, or null for none. Where it
+   * goes and how much is the server's configuration, never the model's.
+   */
+  blockyFee?(): { recipient: Address; bps: number } | null;
+
+  /**
    * Resolve a token reference to a real contract.
    *
    * Null means "could not resolve" and produces a clarifying question, never a

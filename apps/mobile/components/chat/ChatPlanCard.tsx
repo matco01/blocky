@@ -1,6 +1,15 @@
 import type { Plan, PolicyDecision } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
-import { planAmountLabel, planArrivalLabel, planDestinationLabel, planFeeLabel, planFeeName, planGasTopUpLabel, planVerb } from '../../lib/planLabels';
+import {
+  planAmountLabel,
+  planArrivalLabel,
+  planBlockyFeeLabel,
+  planDestinationLabel,
+  planFeeLabel,
+  planFeeName,
+  planGasTopUpLabel,
+  planVerb,
+} from '../../lib/planLabels';
 import { useTheme } from '../../theme';
 import { Button } from '../Button';
 import { Icon } from '../Icon';
@@ -96,6 +105,11 @@ export function ChatPlanCard({
           {fee}
         </Text>
       </View>
+      {planBlockyFeeLabel(plan) ? (
+        <Text variant="caption" tone="tertiary" style={{ textAlign: 'right' }}>
+          Includes Blocky's {planBlockyFeeLabel(plan)}
+        </Text>
+      ) : null}
 
       {!denied && compactWarnings.length > 0 ? (
         <View style={{ gap: 4, marginTop: theme.space.sm }}>

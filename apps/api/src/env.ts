@@ -79,6 +79,19 @@ const EnvSchema = z.object({
    * production, where a local file is not a database.
    */
   DATABASE_URL: z.string().url().optional(),
+
+  /**
+   * Blocky's fee on swaps and moves out of Arc, paid to this address in the
+   * same transaction as the move. Unset means no fee. Plain sends are always
+   * free, and so is bringing money home.
+   */
+  BLOCKY_FEE_RECIPIENT: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'Must be a 0x-prefixed 20-byte address')
+    .transform((value) => value.toLowerCase() as `0x${string}`)
+    .optional(),
+  /** The fee, in basis points: 50 is 0.5%. Capped at 1%. */
+  BLOCKY_FEE_BPS: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

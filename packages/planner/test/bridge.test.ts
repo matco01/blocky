@@ -1,7 +1,7 @@
 import { CHAIN, DEFAULT_POLICY, IntentSchema, PlanSchema, evaluatePolicy, type Plan } from '@blocky/shared';
 import { cctpContracts } from '@blocky/wallet-core';
 import { describe, expect, it } from 'vitest';
-import { encodeDepositForBurnWithHook, encodeErc20Approve } from '../src/calls';
+import { encodeDepositForBurnWithHook, encodeErc20Approve, encodeErc20Transfer } from '../src/calls';
 import { buildPlan } from '../src/plan';
 import { ME, bridgeIntent, fakeContext, tokenOn } from './factories';
 
@@ -206,5 +206,50 @@ describe('handing off to the policy engine', () => {
     expect(decision.outflowUsd).toBe('20.154565');
     // The destination warning is a `warn`: worth reading, not a reason to force a review.
     expect(decision.outcome).toBe('auto_execute');
+  });
+});
+
+describe("Blocky's fee", () => {
+  const TREASURY = '0x7777777777777777777777777777777777777777';
+  const withFee = () => fakeContext({ blockyFee: () => ({ recipient: TREASURY, bps: 50 }) });
+
+  it('takes 0.5% out of what leaves, in the same batch, after the move', async () => {
+    const plan = await planOk({}, withFee());
+
+    // $20 leaves: $0.10 to Blocky, $19.90 is burned.
+    expect(plan.outflow[0]?.amount).toBe('20000000');
+    expect(plan.calls.map((call) => call.to)).toEqual([
+      tokenOn(CHAIN.arcTestnet).address,
+      MESSENGER,
+      tokenOn(CHAIN.arcTestnet).address,
+    ]);
+    expect(plan.calls[0]?.data).toBe(encodeErc20Approve(MESSENGER, 19_900_000n));
+    expect(plan.calls[2]?.data).toBe(encodeErc20Transfer(TREASURY, 100_000n));
+    expect(plan.inflow[0]?.amount).toBe(String(19_900_000n - 54_565n));
+    expect(plan.blockyFee).toEqual({ amount: '100000', usd: '0.1', recipient: TREASURY, bps: 50 });
+  });
+
+  it('shows it inside the one fee the user sees', async () => {
+    const plan = await planOk({}, withFee());
+
+    expect(plan.fee.totalUsd).toBe('0.254565');
+    expect(plan.fee.breakdown.blockyUsd).toBe('0.1');
+    expect(plan.fee.breakdown.serviceUsd).toBe('0.054565');
+    expect(PlanSchema.safeParse(plan).success).toBe(true);
+  });
+
+  it('leaves "everything" still fitting in the balance', async () => {
+    const plan = await planOk({ amount: { kind: 'max' } }, withFee());
+    const fee = BigInt(plan.blockyFee!.amount);
+
+    expect(fee).toBe(4_999_500n);
+    expect(plan.calls[0]?.data).toBe(encodeErc20Approve(MESSENGER, 999_900_000n - fee));
+  });
+
+  it('is not charged when none is configured', async () => {
+    const plan = await planOk();
+
+    expect(plan.blockyFee).toBeUndefined();
+    expect(plan.calls).toHaveLength(2);
   });
 });

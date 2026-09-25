@@ -156,8 +156,12 @@ function assistantMessage(
 
 function fromResponse(response: AgentResponse): ChatMessage {
   const note =
+    // Rare now: the planner's refusals go back to Blocky, who usually fixes or
+    // explains them himself. Only a reason he didn't already say is added.
     response.kind === 'cannot_plan'
-      ? response.status
+      ? response.status === response.reply
+        ? null
+        : response.status
       : response.kind === 'invalid_intent' || response.kind === 'exhausted'
         ? "I couldn't work that out. Try saying it another way."
         : null;
