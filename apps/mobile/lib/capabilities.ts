@@ -29,6 +29,8 @@ export const ALL_CAPABILITIES: Capability[] = [
   { title: 'Move to another chain', action: { kind: 'prefill', text: 'Move to Base, with a bit of gas: $' } },
   { title: 'My balance', action: { kind: 'send', text: "What's my balance?" } },
   { title: 'Token prices', action: { kind: 'send', text: "What are ETH and HYPE worth right now?" } },
+  { title: 'How is the market?', action: { kind: 'send', text: "How's the crypto market doing today?" } },
+  { title: 'Crypto news', action: { kind: 'send', text: "What's the biggest crypto news today?" } },
   { title: 'Recent activity', action: { kind: 'send', text: 'Show my recent activity' } },
   { title: 'My contacts', action: { kind: 'send', text: 'Show my contacts' } },
   { title: 'Spending limits', action: { kind: 'send', text: 'What are my spending limits?' } },

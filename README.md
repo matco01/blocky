@@ -1,9 +1,16 @@
 # Blocky
 
-A non-custodial crypto wallet where an AI agent does the work.
+**An AI-powered money app. Tell Blocky what you want to do with your money, and
+it handles the rest.**
 
-The UI is your balance, Receive, and Send. Everything else — swapping, bridging,
-finding a token, working out what you spent — happens by typing it to an agent.
+Blocky is a money app, not a crypto app. Underneath it is a non-custodial
+crypto wallet and onchain infrastructure, but the user thinks about money, not
+chains, bridges or gas. **Read [VISION.md](VISION.md) first**: it is what
+Blocky is, who it's for, and the principles every feature has to follow.
+
+The UI is your balance, Receive, and Send. Everything else (sending, moving,
+swapping, checking the market, working out what you spent) happens by talking
+to Blocky.
 
 ## The one rule
 

@@ -18,6 +18,7 @@ import {
   fetchWalletHoldings,
   getArcProtocols,
   getChain,
+  fetchMarketOverview,
   getTokenPriceUsd,
   readUsdcBalance,
   type ChainReader,
@@ -185,6 +186,14 @@ export function agentToolsFor(
       }
     },
 
+    async getMarketOverview() {
+      try {
+        return await fetchMarketOverview();
+      } catch {
+        return { error: 'Market data is temporarily unavailable.' };
+      }
+    },
+
     /**
      * Reuses the same merge the Activity screen renders, so the agent's answer
      * about the past can never disagree with what the user sees when they look.
@@ -260,6 +269,8 @@ export function createAgentHandler(
     const turn = await runAgentTurn<Plan>(message, {
       client,
       tools: agentToolsFor(store, userId, reader, account, explorerTransfers),
+      // News and "why did it move" need the web; a turn that searches can't propose.
+      webSearch: true,
       plan: async (intent) => {
         const outcome = await buildPlan(intent, context);
         return outcome.ok ? { ok: true, plan: outcome.plan } : { ok: false, message: outcome.failure.message };
@@ -353,6 +364,7 @@ function logUsage(turn: AgentTurn): void {
   const u = turn.usage;
   console.log(
     `agent ${turn.kind}: $${estimateCostUsd(u).toFixed(4)} · ${u.steps} step(s) · ` +
-      `in ${u.inputTokens} · out ${u.outputTokens} · cache read ${u.cacheReadTokens} · cache write ${u.cacheWriteTokens}`,
+      `in ${u.inputTokens} · out ${u.outputTokens} · cache read ${u.cacheReadTokens} · cache write ${u.cacheWriteTokens}` +
+      (u.webSearches > 0 ? ` · ${u.webSearches} web search(es)` : ''),
   );
 }

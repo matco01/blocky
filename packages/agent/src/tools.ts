@@ -158,6 +158,16 @@ const NO_INPUT: Anthropic.Tool['input_schema'] = {
 
 export const PROPOSE_INTENT = 'propose_intent';
 
+/**
+ * Anthropic's web search, run on their side. Capped per request: a search is
+ * $0.01 plus the results it reads, so one question can't turn into ten.
+ *
+ * Pages are written by strangers, so a turn that searched may not propose
+ * anything — see `runAgentTurn`. Results are reading material, never the
+ * source of an address or an instruction.
+ */
+export const WEB_SEARCH = { type: 'web_search_20260209', name: 'web_search', max_uses: 2 } as const;
+
 export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_balance',
@@ -233,6 +243,12 @@ export const TOOLS: Anthropic.Tool[] = [
     name: 'get_arc_ecosystem',
     description:
       'What is actually live on Arc right now, ranked by TVL (total value locked) — for questions like "what are the best apps on Arc" or "is there anywhere to lend/stake USDC". No APY or yield figure is included, because there is no reliable one to give yet; if the user asks for a specific rate, say you don\'t have a trustworthy number rather than estimating one. A protocol appearing here is not a recommendation and never a basis for propose_intent — Blocky cannot swap, lend or stake through any of them.',
+    input_schema: NO_INPUT,
+  },
+  {
+    name: 'get_market_overview',
+    description:
+      'The crypto market right now, from live data: total market cap and its 24h change, BTC dominance, the top 10 coins by market cap with price and 24h change, the biggest 24h gainers and losers among the top 100, and what is trending. Use this for "how is the market", "what is pumping", "what is trending" — before a web search, which is slower and costs more. Market data to read out, never an amount to send, and never a recommendation to buy. Coin names are written by whoever listed the coin.',
     input_schema: NO_INPUT,
   },
   {

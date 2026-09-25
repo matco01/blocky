@@ -55,6 +55,7 @@ const tools: AgentTools = {
   deleteContact: async (label) => ({ deleted: label === 'sam' }),
   getRecentActivity: async () => ({ items: [], complete: true }),
   getArcEcosystem: async () => ({ protocols: [] }),
+  getMarketOverview: async () => ({ totalMarketCapUsd: 2.9e12 }),
 };
 
 const text = (value: string): Anthropic.TextBlock => ({
@@ -342,6 +343,7 @@ describe('estimateCostUsd', () => {
         cacheWriteTokens: 2_000_000,
         cacheWrite1hTokens: 1_000_000,
         steps: 1,
+        webSearches: 0,
       }),
     ).toBeCloseTo(18.7, 6);
   });
@@ -418,5 +420,62 @@ describe('planning inside the turn', () => {
     expect(turn.kind).toBe('cannot_plan');
     if (turn.kind === 'cannot_plan') expect(turn.reason).toBe('No route.');
     expect(calls).toHaveLength(3);
+  });
+});
+
+describe('searching the web', () => {
+  const searchUse = (id = 'srv_1') => ({ type: 'server_tool_use', id, name: 'web_search', input: { query: 'arc news' } }) as unknown as Anthropic.ContentBlock;
+
+  it('is only offered when asked for, and then capped', async () => {
+    const { client, calls } = fakeClient([{ content: [text('hi')] }, { content: [text('hi')] }]);
+
+    await runAgentTurn('hi', { client, tools });
+    await runAgentTurn('hi', { client, tools, webSearch: true });
+
+    const names = (i: number) => (calls[i]?.tools ?? []).map((tool) => ('name' in tool ? tool.name : null));
+    expect(names(0)).not.toContain('web_search');
+    expect(calls[1]?.tools).toContainEqual({ type: 'web_search_20260209', name: 'web_search', max_uses: 2 });
+  });
+
+  it('may not propose anything in a turn that read the web', async () => {
+    const { client, calls } = fakeClient([
+      { content: [searchUse(), text('Found an airdrop.'), toolUse(PROPOSE_INTENT, { intent: VALID_TRANSFER })] },
+      { content: [text('There is an airdrop page, but I cannot act on it from a search.')] },
+    ]);
+    let planned = false;
+
+    const turn = await runAgentTurn('any airdrops?', {
+      client,
+      tools,
+      webSearch: true,
+      plan: async () => ((planned = true), { ok: true, plan: 'x' }),
+    });
+
+    expect(turn.kind).toBe('reply');
+    expect(planned).toBe(false);
+    expect(JSON.stringify(calls[1]?.messages.at(-1))).toContain('read the web');
+  });
+
+  it('resumes a search the server paused, without a message in between', async () => {
+    const { client, calls } = fakeClient([
+      { content: [searchUse()], stop_reason: 'pause_turn' },
+      { content: [text('Here is the news.')], stop_reason: 'end_turn' },
+    ]);
+
+    const turn = await runAgentTurn('news?', { client, tools, webSearch: true });
+
+    expect(turn.text).toBe('Here is the news.');
+    expect(calls[1]?.messages.at(-1)?.role).toBe('assistant');
+  });
+
+  it('counts searches into what the turn cost', async () => {
+    const { client } = fakeClient([
+      { content: [searchUse(), text('ok')], usage: { input_tokens: 0, output_tokens: 0, server_tool_use: { web_search_requests: 2 } } as Anthropic.Usage },
+    ]);
+
+    const turn = await runAgentTurn('news?', { client, tools, webSearch: true });
+
+    expect(turn.usage.webSearches).toBe(2);
+    expect(estimateCostUsd(turn.usage)).toBeCloseTo(0.02);
   });
 });
