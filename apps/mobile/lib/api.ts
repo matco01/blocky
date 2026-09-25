@@ -191,10 +191,11 @@ export const api = {
     ),
 
   /**
-   * Report a submitted transaction. The server verifies the receipt against the
-   * plan before recording anything; a 202 means "not visible yet, ask again".
+   * Report a plan's transactions, in order. The server verifies each receipt
+   * against its part of the plan before recording anything; a 202 means "not
+   * visible yet, ask again".
    */
-  reportExecution: async (planId: string, txHash: string) => {
+  reportExecution: async (planId: string, txHashes: readonly string[]) => {
     const token = await getToken();
     const response = await fetch(`${config.apiUrl}/v1/plans/${planId}/executions`, {
       method: 'POST',
@@ -202,7 +203,7 @@ export const api = {
         'content-type': 'application/json',
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ txHash }),
+      body: JSON.stringify({ txHashes }),
     });
 
     if (response.status === 202) return { confirmed: false as const };

@@ -18,6 +18,8 @@ export const CHAIN = {
   base: 8453,
   arbitrum: 42161,
   avalanche: 43114,
+  /** Hyperliquid's EVM chain, where HYPE is the native token. */
+  hyperevm: 999,
   /**
    * Arc — Circle's L1, where USDC is the native gas token. The home chain: a
    * user holding only USDC can pay gas here and needs nothing else.

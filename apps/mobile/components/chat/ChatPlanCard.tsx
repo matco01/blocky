@@ -1,6 +1,6 @@
 import type { Plan, PolicyDecision } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
-import { planAmountLabel, planArrivalLabel, planDestinationLabel, planFeeLabel, planFeeName, planVerb } from '../../lib/planLabels';
+import { planAmountLabel, planArrivalLabel, planDestinationLabel, planFeeLabel, planFeeName, planGasTopUpLabel, planVerb } from '../../lib/planLabels';
 import { useTheme } from '../../theme';
 import { Button } from '../Button';
 import { Icon } from '../Icon';
@@ -48,7 +48,7 @@ export function ChatPlanCard({
   const status = denied
     ? { label: 'Blocked', tone: 'warning' as const }
     : sent
-      ? { label: verb === 'Move' ? 'On its way' : 'Sent', tone: 'positive' as const }
+      ? { label: verb === 'Send' ? 'Sent' : 'On its way', tone: 'positive' as const }
       : withinLimits
         ? { label: 'Within your limits', tone: 'secondary' as const }
         : { label: 'Needs approval', tone: 'tertiary' as const };
@@ -77,6 +77,11 @@ export function ChatPlanCard({
         {planArrivalLabel(plan) ? (
           <Text variant="caption" tone="tertiary">
             {planArrivalLabel(plan)}
+          </Text>
+        ) : null}
+        {planGasTopUpLabel(plan) ? (
+          <Text variant="caption" tone="tertiary">
+            {planGasTopUpLabel(plan)}
           </Text>
         ) : null}
       </View>

@@ -254,3 +254,58 @@ export function acrossDepositCalls(args: {
     },
   ];
 }
+
+/**
+ * A Gas.zip deposit: the destination's gas token, paid for with native value.
+ * On Arc native *is* USDC, so `value` is the USDC being spent at 18 decimals.
+ * It carries value, so it always goes out as its own transaction.
+ */
+export function gasZipDepositCall(args: {
+  chainId: ChainId;
+  contract: Address;
+  data: Hex;
+  value: bigint;
+  description: string;
+}): PreparedCall {
+  return {
+    chainId: args.chainId,
+    to: args.contract,
+    data: args.data,
+    value: args.value.toString(),
+    description: args.description,
+  };
+}
+
+/**
+ * The two calls behind an Across swap, signed together as one transaction:
+ * allow the SpokePool exactly the USDC deposited, then deposit it with
+ * Across's instructions for the destination — which `fetchAcrossSwapQuote`
+ * has already taken apart and checked. The approval is ours; the deposit is
+ * the one piece of calldata in the product not written here.
+ */
+export function acrossSwapCalls(args: {
+  chainId: ChainId;
+  token: ResolvedToken;
+  spokePool: Address;
+  inputAmount: bigint;
+  depositData: Hex;
+  displayAmount: string;
+  description: string;
+}): PreparedCall[] {
+  return [
+    {
+      chainId: args.chainId,
+      to: args.token.address,
+      data: encodeErc20Approve(args.spokePool, args.inputAmount),
+      value: '0',
+      description: `Allow Across to move ${args.displayAmount} ${args.token.symbol}`,
+    },
+    {
+      chainId: args.chainId,
+      to: args.spokePool,
+      data: args.depositData,
+      value: '0',
+      description: args.description,
+    },
+  ];
+}

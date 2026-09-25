@@ -54,6 +54,7 @@ export const KNOWN_SYMBOLS: Record<string, string> = {
   SHIB: 'shiba-inu',
   TRX: 'tron',
   ATOM: 'cosmos',
+  HYPE: 'hyperliquid',
 };
 
 export interface PriceQuote {

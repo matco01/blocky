@@ -17,14 +17,14 @@ import { useModalTopPadding } from '../lib/screenInsets';
 import { confirmWithBiometrics } from '../lib/biometrics';
 import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
 import { planAmountLabel, planArrivalLabel, planDestinationLabel, planVerb } from '../lib/planLabels';
-import { SubmittedButUnconfirmedError, useWallet, type SendStage } from '../lib/wallet';
+import { SubmittedButUnconfirmedError, useWallet, type SendResult, type SendStage } from '../lib/wallet';
 import { font, useTheme } from '../theme';
 
 type Step =
   | { name: 'form' }
   | { name: 'review'; plan: Plan }
   | { name: 'sending'; plan: Plan; stage: SendStage }
-  | { name: 'done'; plan: Plan; recorded: boolean }
+  | { name: 'done'; plan: Plan; recorded: boolean; extrasFailed: boolean }
   /** Nothing reached the chain. Safe to try again. */
   | { name: 'failed'; plan: Plan; message: string }
   /** Submitted, outcome unknown. Never offer a retry: it could send twice. */
@@ -129,9 +129,9 @@ export default function SendScreen() {
 
     setStep({ name: 'sending', plan, stage: 'preparing' });
 
-    let txHash: string;
+    let result: SendResult;
     try {
-      txHash = await sendCalls(plan.calls, (stage) => setStep({ name: 'sending', plan, stage }));
+      result = await sendCalls(plan.calls, (stage) => setStep({ name: 'sending', plan, stage }));
     } catch (error) {
       if (error instanceof SubmittedButUnconfirmedError) {
         setStep({ name: 'unconfirmed', plan });
@@ -154,8 +154,8 @@ export default function SendScreen() {
      * to our server hiccups, the transfer still happened on-chain, and telling
      * the user otherwise invites them to send it again.
      */
-    const recorded = await reportWithRetry(plan.id, txHash);
-    setStep({ name: 'done', plan, recorded });
+    const recorded = await reportWithRetry(plan.id, result.hashes);
+    setStep({ name: 'done', plan, recorded, extrasFailed: result.extrasFailed });
   }
 
   /* Straight to the fingerprint for a plan the user's limits already cleared. */
@@ -216,13 +216,18 @@ export default function SendScreen() {
             <View style={[styles.check, { backgroundColor: theme.colors.accentTint, borderRadius: theme.radius.xl }]}>
               <Icon name="checkmark" size={36} tone="accent" />
             </View>
-            <Text variant="title">{planVerb(step.plan) === 'Move' ? 'On its way' : 'Sent'}</Text>
+            <Text variant="title">{planVerb(step.plan) === 'Send' ? 'Sent' : 'On its way'}</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
               {planAmountLabel(step.plan)} to {planDestinationLabel(step.plan)}
             </Text>
             {planArrivalLabel(step.plan) ? (
               <Text variant="caption" tone="tertiary" style={styles.center}>
                 {planArrivalLabel(step.plan)}.
+              </Text>
+            ) : null}
+            {step.extrasFailed ? (
+              <Text variant="caption" tone="warning" style={styles.center}>
+                The gas top-up may not have gone through. Check Activity before trying it again.
               </Text>
             ) : null}
             {!step.recorded ? (
@@ -416,10 +421,10 @@ function secondsUntil(iso: string): number {
  * Tell the server about the transaction, retrying while it isn't visible yet.
  * Returns whether it was recorded. Never throws: the send already happened.
  */
-async function reportWithRetry(planId: string, txHash: string): Promise<boolean> {
+async function reportWithRetry(planId: string, txHashes: readonly string[]): Promise<boolean> {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
-      const result = await api.reportExecution(planId, txHash);
+      const result = await api.reportExecution(planId, txHashes);
       if (result.confirmed) return true;
     } catch {
       return false;

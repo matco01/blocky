@@ -13,8 +13,11 @@ import type { PlannerContext } from '@blocky/planner';
 import {
   CHAINS,
   DEFAULT_CHAIN,
+  NATIVE_TOKEN,
   fetchAcrossQuote,
+  fetchAcrossSwapQuote,
   fetchCctpFees,
+  fetchGasZipQuote,
   getChain,
   getTokenPriceUsd,
   nativeToUsdcUnits,
@@ -149,10 +152,13 @@ export function createPlannerContext({
     },
 
     async priceOf(token: ResolvedToken) {
-      // USDC is a dollar. Everything else needs a price feed, which lands with
-      // swaps in M5 — until then an honest null, which makes the planner refuse
-      // USD-denominated amounts rather than guess at them.
-      return token.address === getChain(token.chainId).usdc ? '1' : null;
+      // USDC is a dollar. A chain's gas token (ETH, HYPE…) is priced live from
+      // the shared snapshot — for valuing what a swap delivers, never for
+      // deciding how much is sent. Anything else is an honest null, which makes
+      // the planner refuse USD-denominated amounts rather than guess at them.
+      if (token.address === getChain(token.chainId).usdc) return '1';
+      if (token.address === NATIVE_TOKEN) return gasTokenPrice(token.chainId);
+      return null;
     },
 
     async balanceOf(token: ResolvedToken) {
@@ -205,6 +211,14 @@ export function createPlannerContext({
 
     async acrossQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address) {
       return fetchAcrossQuote({ from, to, inputAmount, recipient });
+    },
+
+    async acrossSwapQuote(from: ChainId, to: ChainId, inputAmount: bigint, outputToken: Address, recipient: Address) {
+      return fetchAcrossSwapQuote({ from, to, inputAmount, outputToken, recipient });
+    },
+
+    async gasZipQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address) {
+      return fetchGasZipQuote({ from, to, inputAmount, recipient });
     },
 
     async isAddressFlagged() {

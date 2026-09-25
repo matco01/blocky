@@ -182,11 +182,23 @@ export const PlanSchema = z.object({
    */
   route: z
     .object({
-      /** `cctp` (Circle burns and re-mints) or `across` (a relayer pays out from its own funds). */
+      /**
+       * Who carries it: `cctp` (Circle burns and re-mints), `across` (a
+       * relayer pays out from its own funds), `across-swap` (Across bridges,
+       * then swaps on arrival), `gas.zip` (the destination's gas token, from
+       * Gas.zip's inventory).
+       */
       provider: z.string().min(1).max(32),
       etaSeconds: z.number().int().nonnegative(),
       /** True when the fee shown is a ceiling and whatever it doesn't use arrives too. */
       feeIsCeiling: z.boolean(),
+      /**
+       * For a swap: the least that can land, in the received token's base
+       * units. Below it the swap reverts and the user gets their USDC back.
+       */
+      minimumReceived: BaseUnitsSchema.optional(),
+      /** A little of the destination's gas token delivered alongside, so the money can move again there. */
+      gasTopUp: z.object({ provider: z.string().min(1).max(32) }).optional(),
     })
     .optional(),
 
@@ -205,3 +217,29 @@ export function isPlanExpired(plan: Plan, now: Date = new Date()): boolean {
   return new Date(plan.expiresAt).getTime() <= now.getTime();
 }
 
+/**
+ * How a plan's calls go out as transactions, in order.
+ *
+ * Consecutive calls that carry no value share one transaction — on Arc, one
+ * all-or-nothing Multicall3From batch. A call that carries native value (a
+ * Gas.zip deposit pays in native USDC) goes alone, because the batching
+ * contract cannot forward value. The app sends by this and the server verifies
+ * by this, so both must agree — which is why it lives here, once.
+ */
+export function transactionsOf<T extends { value: string }>(calls: readonly T[]): T[][] {
+  const groups: T[][] = [];
+  let batch: T[] = [];
+
+  for (const call of calls) {
+    if (BigInt(call.value) === 0n) {
+      batch.push(call);
+      continue;
+    }
+    if (batch.length > 0) groups.push(batch);
+    batch = [];
+    groups.push([call]);
+  }
+
+  if (batch.length > 0) groups.push(batch);
+  return groups;
+}

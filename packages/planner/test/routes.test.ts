@@ -192,3 +192,160 @@ describe('bestRoute', () => {
     expect(bestRoute([route(0n, 1)])).toBeNull();
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/*  Swapping into the destination's gas token, and gas top-ups                 */
+/* -------------------------------------------------------------------------- */
+
+import { NATIVE_TOKEN, encodeGasZipDeposit, gasZipDepositContract, type AcrossSwapQuote, type GasZipQuote } from '@blocky/wallet-core';
+
+const GAS_ZIP = gasZipDepositContract(CHAIN.arc)!;
+const ETH_PRICE = '2600';
+
+function gasZipQuote(inputAmount: bigint, expectedOut: bigint): GasZipQuote {
+  return { contract: GAS_ZIP, shortId: 57, inputAmount, value: inputAmount * 10n ** 12n, expectedOut, outDecimals: 18, etaSeconds: 1 };
+}
+
+function swapQuote(expectedOut: bigint, minOut: bigint): AcrossSwapQuote {
+  return { spokePool: SPOKE, inputAmount: 20_000_000n, depositData: '0xad5425c6deadbeef', outputToken: NATIVE_TOKEN, expectedOut, minOut, etaSeconds: 2 };
+}
+
+/** ETH at $2,600; USDC at $1. */
+const priced = (over: Parameters<typeof fakeContext>[0] = {}) =>
+  context({ priceOf: async (token) => (token.address === NATIVE_TOKEN ? ETH_PRICE : '1'), ...over });
+
+async function planFor(overrides: Record<string, unknown>, ctx: ReturnType<typeof fakeContext>) {
+  const result = await buildPlan(IntentSchema.parse(bridgeIntent(overrides)), ctx);
+  if (!result.ok) throw new Error(`${result.failure.code}: ${result.failure.message}`);
+  return result.plan;
+}
+
+describe('swapping USDC on Arc into ETH on another chain', () => {
+  const ethOnArbitrum = { toChainId: CHAIN.arbitrum, receive: { kind: 'symbol', symbol: 'ETH' } };
+
+  it('takes Gas.zip when it lands more ETH, as one transaction carrying the USDC as value', async () => {
+    const plan = await planFor(
+      ethOnArbitrum,
+      priced({
+        gasZipQuote: async (_f, _t, input) => gasZipQuote(input, 7_690_000_000_000_000n),
+        acrossSwapQuote: async () => swapQuote(7_600_000_000_000_000n, 7_500_000_000_000_000n),
+      }),
+    );
+
+    expect(plan.route?.provider).toBe('gas.zip');
+    expect(plan.inflow[0]).toMatchObject({ amount: '7690000000000000', token: { address: NATIVE_TOKEN, symbol: 'ETH', chainId: CHAIN.arbitrum } });
+    expect(plan.calls).toEqual([
+      expect.objectContaining({ to: GAS_ZIP, value: '20000000000000000000', data: encodeGasZipDeposit(57, ME) }),
+    ]);
+    expect(plan.summary).toBe('Swap $20.00 into ETH on Arbitrum One. About 0.00769 ETH ($19.99) arrives in about a second.');
+    expect(PlanSchema.safeParse(plan).success).toBe(true);
+  });
+
+  it('takes the Across swap when it lands more, and records the minimum', async () => {
+    const plan = await planFor(
+      ethOnArbitrum,
+      priced({
+        gasZipQuote: async () => null,
+        acrossSwapQuote: async () => swapQuote(7_600_000_000_000_000n, 7_480_000_000_000_000n),
+      }),
+    );
+
+    expect(plan.route).toMatchObject({ provider: 'across-swap', minimumReceived: '7480000000000000' });
+    expect(plan.calls.map((call) => call.to)).toEqual([USDC_ARC.address, SPOKE]);
+    expect(plan.calls[0]?.data).toBe(encodeErc20Approve(SPOKE, 20_000_000n));
+    expect(plan.calls[1]?.data).toBe('0xad5425c6deadbeef');
+  });
+
+  it('counts what the swap keeps as its fee, at the live ETH price', async () => {
+    // 0.0076 ETH at $2,600 = $19.76 lands for $20.
+    const plan = await planFor(
+      ethOnArbitrum,
+      priced({ acrossSwapQuote: async () => swapQuote(7_600_000_000_000_000n, 7_480_000_000_000_000n) }),
+    );
+
+    expect(plan.fee.breakdown.serviceUsd).toBe('0.24');
+  });
+
+  it('does not warn about gas there — the user is receiving the gas token itself', async () => {
+    const plan = await planFor(ethOnArbitrum, priced({ gasZipQuote: async (_f, _t, input) => gasZipQuote(input, 7_690_000_000_000_000n) }));
+
+    expect(plan.warnings.map((w) => w.code)).not.toContain('destination_no_gas_route');
+  });
+
+  it('refuses a token it cannot deliver there, rather than guessing', async () => {
+    const intent = IntentSchema.parse(bridgeIntent({ toChainId: CHAIN.arbitrum, receive: { kind: 'symbol', symbol: 'ARB' } }));
+    const result = await buildPlan(intent, priced());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe('not_implemented');
+  });
+
+  it('refuses when no route can deliver it', async () => {
+    const result = await buildPlan(IntentSchema.parse(bridgeIntent(ethOnArbitrum)), priced());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe('no_bridge_route');
+  });
+});
+
+describe('a gas top-up alongside a move', () => {
+  const withGas = { toChainId: CHAIN.base, includeGas: true };
+  const acrossOnly = { acrossQuote: async () => acrossQuote(19_994_305n) };
+
+  it('adds a little ETH when the user has none there, as its own transaction', async () => {
+    const plan = await planFor(
+      withGas,
+      priced({ ...acrossOnly, gasZipQuote: async (_f, _t, input) => gasZipQuote(input, 384_000_000_000_000n) }),
+    );
+
+    // 20 transactions at the fake $0.10 fee: a $2 top-up.
+    expect(plan.outflow.map((d) => d.amount)).toEqual(['20000000', '2000000']);
+    expect(plan.inflow.map((d) => d.token.symbol)).toEqual(['USDC', 'ETH']);
+    expect(plan.calls.map((call) => call.to)).toEqual([USDC_ARC.address, SPOKE, GAS_ZIP]);
+    expect(plan.calls[2]?.value).toBe('2000000000000000000');
+    expect(plan.route?.gasTopUp).toEqual({ provider: 'gas.zip' });
+    expect(plan.summary).toMatch(/^Move \$20\.00 to your wallet on Base, plus \$2\.00 of ETH for gas\./);
+    expect(plan.warnings.map((w) => w.code)).not.toContain('destination_no_gas_route');
+  });
+
+  it('skips the top-up when the user already has gas there', async () => {
+    const plan = await planFor(
+      withGas,
+      priced({ ...acrossOnly, nativeBalanceUsd: async () => '10', gasZipQuote: async (_f, _t, input) => gasZipQuote(input, 1n) }),
+    );
+
+    expect(plan.calls).toHaveLength(2);
+    expect(plan.route?.gasTopUp).toBeUndefined();
+  });
+
+  it('never adds one unasked', async () => {
+    const plan = await planFor(
+      { toChainId: CHAIN.base },
+      priced({ ...acrossOnly, gasZipQuote: async (_f, _t, input) => gasZipQuote(input, 1n) }),
+    );
+
+    expect(plan.calls).toHaveLength(2);
+  });
+
+  it('still moves the money when no top-up can be quoted, and keeps the warning', async () => {
+    const plan = await planFor(withGas, priced({ ...acrossOnly, gasZipQuote: async () => null }));
+
+    expect(plan.calls).toHaveLength(2);
+    expect(plan.warnings.map((w) => w.code)).toContain('destination_no_gas_route');
+  });
+
+  it('sizes the top-up to the destination, within $1–$5', async () => {
+    let asked = 0n;
+    await planFor(
+      { toChainId: CHAIN.ethereum, includeGas: true },
+      priced({
+        estimateNetworkFeeUsd: async (chainId) => (chainId === CHAIN.ethereum ? '0.60' : '0.10'),
+        acrossQuote: async () => acrossQuote(19_800_000n, { destinationChainId: CHAIN.ethereum }),
+        gasZipQuote: async (_f, _t, input) => ((asked = input), gasZipQuote(input, 1n)),
+      }),
+    );
+
+    // 20 transactions × $0.60 = $12, capped at $5.
+    expect(asked).toBe(5_000_000n);
+  });
+});

@@ -244,7 +244,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: PROPOSE_INTENT,
     description:
-      'Propose that money move. This does NOT execute — it hands a structured intent to the planner, which builds the real transaction, prices it, and checks it against the user\'s limits. The user then approves it on their phone. Call this once you know exactly what the user wants; ask a clarifying question instead if any of the token, the amount, or the recipient is ambiguous. Two things work today: a USDC transfer on Arc (type "transfer"), and moving the user\'s own USDC from Arc to another chain (type "bridge", toChainId from get_supported_chains). Do not propose swaps.',
+      'Propose that money move. This does NOT execute — it hands a structured intent to the planner, which builds the real transaction, prices it, and checks it against the user\'s limits. The user then approves it on their phone. Call this once you know exactly what the user wants; ask a clarifying question instead if any of the token, the amount, or the recipient is ambiguous. Two things work today: a USDC transfer on Arc (type "transfer"), and moving the user\'s own USDC from Arc to another chain (type "bridge", toChainId from get_supported_chains) — optionally arriving as that chain\'s gas token (receive) or with a little of it for gas (includeGas). Do not propose type "swap".',
     input_schema: intentJsonSchema() as Anthropic.Tool['input_schema'],
   },
 ];

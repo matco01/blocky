@@ -61,6 +61,7 @@ const EnvSchema = z.object({
   POLYGON_RPC_URL: z.string().url().optional(),
   UNICHAIN_RPC_URL: z.string().url().optional(),
   AVALANCHE_RPC_URL: z.string().url().optional(),
+  HYPEREVM_RPC_URL: z.string().url().optional(),
 
   /**
    * Blockscout's API key, for the activity feed on mainnet. Arc's mainnet

@@ -1,6 +1,6 @@
 import { shortAddress, type Plan } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
-import { planAmountLabel, planArrivalLabel, planDestinationLabel, planFeeLabel, planFeeName, planVerb } from '../lib/planLabels';
+import { planAmountLabel, planArrivalLabel, planDestinationLabel, planFeeLabel, planFeeName, planGasTopUpLabel, planVerb } from '../lib/planLabels';
 import { useTheme } from '../theme';
 import { Icon } from './Icon';
 import { Text } from './Text';
@@ -25,7 +25,7 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
     <View style={{ gap: theme.space.xl }}>
       <View style={styles.hero}>
         <Text variant="label" tone="secondary">
-          {planVerb(plan) === 'Move' ? "You're moving" : "You're sending"}
+          {planVerb(plan) === 'Move' ? "You're moving" : planVerb(plan) === 'Swap' ? "You're swapping" : "You're sending"}
         </Text>
         <Text variant="balance">
           {planAmountLabel(plan)}
@@ -39,6 +39,7 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
         <Row label="Amount" value={`${outflow?.displayAmount ?? '0'} ${outflow?.token.symbol ?? ''}`} />
         <Row label={planFeeName(plan)} value={fee} />
         {arrival ? <Row label="Arrives" value={arrival} /> : null}
+        {planGasTopUpLabel(plan) ? <Row label="Gas" value={planGasTopUpLabel(plan)!.replace(/^\+ /, '')} /> : null}
         {plan.recipient && plan.recipient.display !== plan.recipient.address ? (
           <Row label="Address" value={shortAddress(plan.recipient.address, 10, 8)} />
         ) : null}

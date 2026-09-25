@@ -16,6 +16,8 @@ export * from './receipts';
 export * from './gateway';
 export * from './cctp';
 export * from './across';
+export * from './gaszip';
+export * from './transactions';
 export * from './prices';
 export * from './ecosystem';
 export * from './holdings';

@@ -57,12 +57,28 @@ export const SwapIntentSchema = z.object({
   ...IntentBase,
 });
 
+/**
+ * Moving the user's own money to another chain — always to their own wallet.
+ * `amount` is what leaves; the planner picks the route and shows what lands.
+ */
 export const BridgeIntentSchema = z.object({
   type: z.literal('bridge'),
   token: TokenRefSchema,
   amount: AmountSpecSchema,
   toChainId: ChainIdSchema,
   fromChainId: ChainIdSchema.optional(),
+  /**
+   * Arrive as a different token than the one sent — e.g. send USDC, receive
+   * ETH on Base. Omit to arrive as the same token. What can be received is
+   * the planner's call: an unsupported token is refused, never guessed at.
+   */
+  receive: TokenRefSchema.optional(),
+  /**
+   * Also deliver a little of the destination chain's gas token, so the money
+   * can be moved again once it lands. Paid on top of `amount`, and skipped
+   * when the user already holds enough there.
+   */
+  includeGas: z.boolean().optional(),
   ...IntentBase,
 });
 

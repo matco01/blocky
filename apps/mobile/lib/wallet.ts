@@ -1,4 +1,5 @@
-import type { Address, PreparedCall } from '@blocky/shared';
+import { transactionsOf, type Address, type PreparedCall } from '@blocky/shared';
+import { transactionFor } from '@blocky/wallet-core';
 import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { useCallback } from 'react';
 import {
@@ -8,9 +9,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
-  encodeFunctionData,
   http,
-  parseAbi,
   type Hex,
 } from 'viem';
 import { homeChain, homeChainName } from './chain';
@@ -26,23 +25,22 @@ import { homeChain, homeChainName } from './chain';
  * send as an ERC-4337 user operation, and nothing sits between the phone and
  * the chain.
  *
- * Several calls (approve, then move) go out as one transaction through Arc's
- * Multicall3From, which runs each call *as the wallet* — through Arc's CallFrom
- * precompile — and reverts all of them if any one fails. Verified on the live
- * chain before this was written: the approval inside the batch is the
- * wallet's own, a batch with a failing call reverts whole, and the burn it
- * performs is attributed to the wallet.
+ * How a plan's calls become transactions is shared with the server, which
+ * verifies each one byte for byte: consecutive calls without value go as one
+ * all-or-nothing Multicall3From batch; a call carrying value (a Gas.zip
+ * deposit) goes on its own. See `transactionsOf` and `transactionFor`.
  */
-
-/** Arc's Multicall3From, at the same address on mainnet and testnet. */
-const MULTICALL_FROM: Address = '0x522faf9a91c41c443c66765030741e4aace147d0';
-const MULTICALL_FROM_ABI = parseAbi([
-  'function aggregate((address target, bytes callData)[] calls) returns (uint256 blockNumber, bytes[] returnData)',
-]);
 
 const publicClient = createPublicClient({ chain: homeChain, transport: http() });
 
 export type SendStage = 'preparing' | 'submitting' | 'confirming';
+
+export interface SendResult {
+  /** One per transaction that landed, in plan order. The first always carries the money. */
+  hashes: Hex[];
+  /** A later, extra transaction (a gas top-up) did not go through, or its outcome is unknown. */
+  extrasFailed: boolean;
+}
 
 /**
  * The transaction was (or may have been) submitted, and its outcome is unknown.
@@ -62,39 +60,21 @@ function isAmbiguousNetworkError(error: unknown): boolean {
   return Boolean(error.walk((cause) => cause instanceof TimeoutError || cause instanceof HttpRequestError));
 }
 
-/** One call goes as itself; several go as one all-or-nothing Multicall3From batch. */
-function toTransaction(calls: readonly PreparedCall[]): { to: Address; data: Hex; value: bigint } {
-  if (calls.length === 1) {
-    const [call] = calls as [PreparedCall];
-    return { to: call.to, data: call.data as Hex, value: BigInt(call.value) };
-  }
-
-  // Multicall3From is not payable; the planner never attaches value to a batched call.
-  if (calls.some((call) => BigInt(call.value) !== 0n)) {
-    throw new Error('A batched call carried a value. Nothing was sent.');
-  }
-
-  return {
-    to: MULTICALL_FROM,
-    data: encodeFunctionData({
-      abi: MULTICALL_FROM_ABI,
-      functionName: 'aggregate',
-      args: [calls.map((call) => ({ target: call.to, callData: call.data as Hex }))],
-    }),
-    value: 0n,
-  };
-}
-
 export function useWallet() {
   const { wallets } = useEmbeddedEthereumWallet();
   const wallet = wallets[0];
 
   /**
-   * Sign and send a planned set of calls as one transaction. Resolves to the
-   * transaction hash once it is included — on Arc, that is final.
+   * Sign and send a plan's calls, transaction by transaction, in order.
+   * Resolves once each is included — on Arc, that is final.
+   *
+   * The first transaction carries the money, and fails the whole send if it
+   * fails. Anything after it (a gas top-up) is extra: if one does not go
+   * through, the money has still moved, and saying "failed" would invite the
+   * user to send it again — so it is reported, not thrown.
    */
   const sendCalls = useCallback(
-    async (calls: readonly PreparedCall[], onStage?: (stage: SendStage) => void): Promise<Hex> => {
+    async (calls: readonly PreparedCall[], onStage?: (stage: SendStage) => void): Promise<SendResult> => {
       if (!wallet) throw new Error('Your wallet is still being set up.');
 
       // The planner only builds calls on the home chain. Refuse anything else
@@ -108,45 +88,25 @@ export function useWallet() {
       onStage?.('preparing');
 
       const address = wallet.address.toLowerCase() as Address;
-      const transaction = toTransaction(calls);
+      const transactions = transactionsOf(calls).map(transactionFor);
       const walletClient = createWalletClient({
         account: address,
         chain: homeChain,
         transport: custom(await wallet.getProvider()),
       });
 
-      onStage?.('submitting');
+      const hashes: Hex[] = [];
 
-      let hash: Hex;
-      try {
-        hash = await walletClient.sendTransaction({ ...transaction, chain: homeChain });
-      } catch (error) {
-        // A rejection means nothing was submitted. A timeout or dropped
-        // connection means we cannot know — it may have gone through.
-        if (isAmbiguousNetworkError(error)) throw new SubmittedButUnconfirmedError();
-        throw error;
+      for (const [index, transaction] of transactions.entries()) {
+        try {
+          hashes.push(await sendOne(walletClient, transaction, index === 0 ? onStage : undefined));
+        } catch (error) {
+          if (index === 0) throw error;
+          return { hashes, extrasFailed: true };
+        }
       }
 
-      onStage?.('confirming');
-
-      /*
-       * From here the transaction is out. Any failure to *observe* the result
-       * is not a failure of the send, and must never be reported as one: the
-       * user would tap "try again" and pay twice.
-       */
-      let receipt: Awaited<ReturnType<typeof publicClient.waitForTransactionReceipt>>;
-      try {
-        receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
-      } catch {
-        throw new SubmittedButUnconfirmedError(hash);
-      }
-
-      if (receipt.status !== 'success') {
-        // Included, but it reverted: the money did not move.
-        throw new Error('The transaction failed on-chain. Nothing was sent.');
-      }
-
-      return hash;
+      return { hashes, extrasFailed: false };
     },
     [wallet],
   );
@@ -156,4 +116,44 @@ export function useWallet() {
     ready: Boolean(wallet),
     sendCalls,
   };
+}
+
+/** Send one transaction and wait for it to land. */
+async function sendOne(
+  walletClient: ReturnType<typeof createWalletClient>,
+  transaction: ReturnType<typeof transactionFor>,
+  onStage?: (stage: SendStage) => void,
+): Promise<Hex> {
+  onStage?.('submitting');
+
+  let hash: Hex;
+  try {
+    hash = await walletClient.sendTransaction({ ...transaction, account: walletClient.account!, chain: homeChain });
+  } catch (error) {
+    // A rejection means nothing was submitted. A timeout or dropped
+    // connection means we cannot know — it may have gone through.
+    if (isAmbiguousNetworkError(error)) throw new SubmittedButUnconfirmedError();
+    throw error;
+  }
+
+  onStage?.('confirming');
+
+  /*
+   * From here the transaction is out. Any failure to *observe* the result is
+   * not a failure of the send, and must never be reported as one: the user
+   * would tap "try again" and pay twice.
+   */
+  let receipt: Awaited<ReturnType<typeof publicClient.waitForTransactionReceipt>>;
+  try {
+    receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
+  } catch {
+    throw new SubmittedButUnconfirmedError(hash);
+  }
+
+  if (receipt.status !== 'success') {
+    // Included, but it reverted: the money did not move.
+    throw new Error('The transaction failed on-chain. Nothing was sent.');
+  }
+
+  return hash;
 }

@@ -1,4 +1,4 @@
-import type { AcrossQuote, CctpFees } from '@blocky/wallet-core';
+import type { AcrossQuote, AcrossSwapQuote, CctpFees, GasZipQuote } from '@blocky/wallet-core';
 import type {
   Address,
   ChainId,
@@ -74,6 +74,27 @@ export interface PlannerContext {
    * quote cannot be read; the planner then simply leaves Across out.
    */
   acrossQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address): Promise<AcrossQuote | null>;
+
+  /**
+   * An Across quote for swapping exactly `inputAmount` of USDC into
+   * `outputToken` on another chain — already checked field by field (see
+   * `fetchAcrossSwapQuote`). Null when there is no route; throws when a quote
+   * cannot be read or fails its checks, and the planner leaves Across out.
+   */
+  acrossSwapQuote(
+    from: ChainId,
+    to: ChainId,
+    inputAmount: bigint,
+    outputToken: Address,
+    recipient: Address,
+  ): Promise<AcrossSwapQuote | null>;
+
+  /**
+   * A Gas.zip quote for turning exactly `inputAmount` of USDC into the
+   * destination's gas token. Null when Gas.zip has no route, no liquidity, or
+   * the amount is over its limit.
+   */
+  gasZipQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address): Promise<GasZipQuote | null>;
 
   /** Sanctions and known-scam screening. True means flagged. */
   isAddressFlagged(address: Address): Promise<boolean>;

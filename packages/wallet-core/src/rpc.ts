@@ -14,6 +14,7 @@ import {
   avalanche,
   base,
   baseSepolia,
+  hyperEvm,
   mainnet,
   optimism,
   polygon,
@@ -40,6 +41,7 @@ const VIEM_CHAINS: Record<ChainId, Chain> = {
   [CHAIN.base]: base,
   [CHAIN.arbitrum]: arbitrum,
   [CHAIN.avalanche]: avalanche,
+  [CHAIN.hyperevm]: hyperEvm,
   [CHAIN.arc]: arc,
   [CHAIN.arcTestnet]: arcTestnet,
   [CHAIN.baseSepolia]: baseSepolia,
@@ -227,7 +229,11 @@ export function createChainReader(config: RpcConfig): ChainReader {
 
     async transactionReceipt(chainId, hash) {
       try {
-        const receipt = await clientFor(chainId).getTransactionReceipt({ hash });
+        const client = clientFor(chainId);
+        const [receipt, transaction] = await Promise.all([
+          client.getTransactionReceipt({ hash }),
+          client.getTransaction({ hash }).catch(() => null),
+        ]);
 
         return {
           status: receipt.status,
@@ -236,6 +242,16 @@ export function createChainReader(config: RpcConfig): ChainReader {
             topics: log.topics,
             data: log.data,
           })),
+          ...(transaction
+            ? {
+                transaction: {
+                  from: lowercase(transaction.from),
+                  to: transaction.to ? lowercase(transaction.to) : null,
+                  value: transaction.value,
+                  input: transaction.input,
+                },
+              }
+            : {}),
         };
       } catch (error) {
         if (error instanceof TransactionReceiptNotFoundError) return null;
@@ -284,6 +300,7 @@ export interface RpcEnv {
   POLYGON_RPC_URL?: string | undefined;
   UNICHAIN_RPC_URL?: string | undefined;
   AVALANCHE_RPC_URL?: string | undefined;
+  HYPEREVM_RPC_URL?: string | undefined;
   /** Both networks: ENS always resolves on Ethereum mainnet. */
   ETHEREUM_RPC_URL?: string | undefined;
 }
@@ -329,6 +346,7 @@ export function rpcConfigFromEnv(env: RpcEnv, network: Network = NETWORK): RpcCo
   wire(CHAIN.polygon, env.POLYGON_RPC_URL);
   wire(CHAIN.unichain, env.UNICHAIN_RPC_URL);
   wire(CHAIN.avalanche, env.AVALANCHE_RPC_URL);
+  wire(CHAIN.hyperevm, env.HYPEREVM_RPC_URL);
 
   return { urls };
 }

@@ -1,6 +1,7 @@
 import {
   displayUsd,
   formatUnits,
+  type Address,
   formatUsd,
   parseUsd,
   type AssetDelta,
@@ -19,16 +20,21 @@ import {
   CCTP_FAST_FINALITY,
   CCTP_FORWARD_HOOK_DATA,
   DEFAULT_CHAIN,
+  NATIVE_TOKEN,
   acrossSpokePool,
+  acrossSwapHandler,
   canMoveUsdcBetween,
   canPayForGeneralAction,
   cctpArrivalForBurn,
   cctpContracts,
+  encodeGasZipDeposit,
+  gasZipDepositContract,
+  gasZipShortId,
   getChain,
   selectGasStrategy,
 } from '@blocky/wallet-core';
 import { assetDelta, resolveAmount } from './amount';
-import { acrossDepositCalls, cctpBurnCalls, erc20TransferCall } from './calls';
+import { acrossDepositCalls, acrossSwapCalls, cctpBurnCalls, erc20TransferCall, gasZipDepositCall } from './calls';
 import { fail, type PlanFailure, type PlannerContext } from './context';
 import { destinationWarnings, feeWarnings, recipientWarnings, tokenWarnings } from './warnings';
 
@@ -198,24 +204,38 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Bridge: USDC from Arc to another chain, by the best route there is          */
+/*  Bridge: USDC from Arc to another chain — as USDC, or swapped on arrival     */
 /* -------------------------------------------------------------------------- */
 
 /**
- * One way of getting the money there, fully priced: exactly what it delivers,
- * how long it takes, and the calls that do it.
+ * One way of getting the money there, fully priced: what it delivers, how long
+ * it takes, and the calls that do it.
  */
 interface Route {
-  provider: 'cctp' | 'across';
-  /** What lands on the destination — the floor, for a route whose fee is a ceiling. */
+  provider: string;
+  /** What lands, in the received token's base units — the floor, where the fee is a ceiling. */
   arrive: bigint;
+  /** For a swap: the least that can land before it reverts and refunds the USDC. */
+  minimum?: bigint;
   etaSeconds: number;
   feeIsCeiling: boolean;
   calls: PreparedCall[];
 }
 
-/** Slower routes only win by more than this: a few cents is not worth minutes of waiting. */
-const SPEED_TIEBREAK_UNITS = 1_000n; // $0.001
+/** Slower routes only win by more than this: a rounding error is not worth minutes of waiting. */
+const SPEED_TIEBREAK_UNITS = 1_000n; // $0.001 of USDC
+
+/** CCTP Fast Transfers with forwarding land in well under a minute. */
+const CCTP_ETA_SECONDS = 30;
+
+/**
+ * A gas top-up buys roughly this many ordinary transactions on the
+ * destination, within these bounds (USD, 6 decimals): enough to move the money
+ * again a few times, small enough not to matter if it goes unused.
+ */
+const TOP_UP_TRANSACTIONS = 20n;
+const TOP_UP_MIN_UNITS = 1_000_000n; // $1
+const TOP_UP_MAX_UNITS = 5_000_000n; // $5
 
 async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<PlanOutcome> {
   const from: ChainId = intent.fromChainId ?? DEFAULT_CHAIN;
@@ -230,10 +250,28 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     return fail('no_bridge_route', `That money is already on ${source.name}.`);
   }
 
-  const cctp = canMoveUsdcBetween(from, to) ? cctpContracts(from) : null;
-  const acrossPool = source.testnet === destination.testnet ? acrossSpokePool(from) : null;
+  if (source.testnet !== destination.testnet) {
+    return fail('no_bridge_route', `Blocky can't move money to ${destination.name} from here.`);
+  }
 
-  if (!cctp && !acrossPool) {
+  /* --- What arrives ------------------------------------------------------- */
+
+  const received = receivedToken(intent, to);
+  if (!received) {
+    return fail(
+      'not_implemented',
+      `On ${destination.name} Blocky can deliver USDC or ${destination.nativeCurrency.symbol} right now.`,
+    );
+  }
+
+  const cctp = received.kind === 'usdc' && canMoveUsdcBetween(from, to) ? cctpContracts(from) : null;
+  const acrossPool = acrossSpokePool(from);
+  const swapHandler = received.kind === 'native' ? acrossSwapHandler(to) : null;
+  const gasZip = gasZipDepositContract(from) !== null && gasZipShortId(to) !== null;
+
+  const anyRoute =
+    received.kind === 'usdc' ? Boolean(cctp || acrossPool) : Boolean((acrossPool && swapHandler) || gasZip);
+  if (!anyRoute) {
     return fail('no_bridge_route', `Blocky can't move money to ${destination.name} yet.`);
   }
 
@@ -246,7 +284,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     return fail('unknown_token', describeUnknownToken(intent.token));
   }
 
-  // Every route moves USDC and nothing else — swaps are a different intent.
+  // Every route starts from USDC on Arc.
   if (token.address !== source.usdc) {
     return fail('not_implemented', `Only USDC can move between chains right now, not ${token.symbol}.`);
   }
@@ -258,18 +296,19 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   // Always the user's own address: moving money between chains is moving it
   // to yourself. Paying someone else on another chain is a different intent.
   const wallet = self.address;
+  const gasToken = nativeTokenOn(to);
+  const wantsGas = received.kind === 'usdc' && intent.includeGas === true;
 
-  /* --- How much leaves ---------------------------------------------------- */
+  /* --- Read everything at once ------------------------------------------- */
 
-  // Every route is an approve plus one deposit, so one estimate sizes the gas
-  // for all of them.
-  const [balance, usdcBalanceUsd, networkFeeUsd, destinationGasUsd, destinationFeeUsd] = await Promise.all([
+  const [balance, usdcBalanceUsd, networkFeeUsd, destinationGasUsd, destinationFeeUsd, gasTokenPrice] = await Promise.all([
     ctx.balanceOf(token),
     ctx.usdcBalanceUsd(from),
-    ctx.estimateNetworkFeeUsd(from, [probeCall(from, token), probeCall(from, token)]),
-    // Only for the warning below — never a reason to refuse the move itself.
+    // An approve and a deposit; a gas top-up adds a transaction of its own.
+    ctx.estimateNetworkFeeUsd(from, probeCalls(from, token, wantsGas ? 3 : 2)),
     ctx.nativeBalanceUsd(to).catch(() => null),
     ctx.estimateNetworkFeeUsd(to, []).catch(() => null),
+    ctx.priceOf(gasToken).catch(() => null),
   ]);
 
   const gas = selectGasStrategy({ chainId: from, networkFeeUsd, usdcBalanceUsd, nativeBalanceUsd: null });
@@ -277,11 +316,24 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     return fail('no_gas_route', gas.message);
   }
 
-  // Arc gas comes out of the same USDC, so it stays behind whatever moves.
-  // "Move $20" sends $20 and shows what arrives; "move everything" sends all
-  // of it but the gas.
+  // Whether the user can already pay for a transaction there, before anything lands.
+  const hasGasThere =
+    destinationFeeUsd !== null &&
+    canPayForGeneralAction({ chainId: to, networkFeeUsd: destinationFeeUsd, usdcBalanceUsd: '0', nativeBalanceUsd: destinationGasUsd });
+
+  /* --- How much leaves ---------------------------------------------------- */
+
+  // A top-up only when asked for and actually needed — never a surprise
+  // purchase on top of what the user said.
+  const topUp =
+    wantsGas && !hasGasThere && !destination.gasPaidInUsdc
+      ? clamp(parseUsd(destinationFeeUsd ?? '0') * TOP_UP_TRANSACTIONS, TOP_UP_MIN_UNITS, TOP_UP_MAX_UNITS)
+      : 0n;
+
+  // Arc gas comes out of the same USDC, so it stays behind, and so does the
+  // top-up. "Move $20" sends $20; "move everything" sends all the rest.
   const gasReserve = feeInTokenUnits(gas.plan.totalUsd, token, '1');
-  const amount = resolveAmount({ spec: intent.amount, token, unitPrice: '1', balance, reserve: gasReserve });
+  const amount = resolveAmount({ spec: intent.amount, token, unitPrice: '1', balance, reserve: gasReserve + topUp });
 
   if (!amount.ok) {
     return fail(...amountFailure(amount.reason, token));
@@ -291,6 +343,104 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   const displayAmount = formatUnits(input, token.decimals);
 
   /* --- Price every route, keep the best ---------------------------------- */
+
+  const routes =
+    received.kind === 'usdc'
+      ? await usdcRoutes({ ctx, from, to, token, input, wallet, cctp, acrossPool, displayAmount })
+      : await nativeRoutes({ ctx, from, to, token, input, wallet, gasToken, displayAmount, useAcross: Boolean(acrossPool && swapHandler), useGasZip: gasZip });
+
+  const route = bestRoute(routes);
+
+  if (!route) {
+    return fail(
+      'no_bridge_route',
+      input < 1_000_000n
+        ? `That's too little to move to ${destination.name} — the fees would take all of it.`
+        : `Moving money to ${destination.name} isn't available right now. Try again in a minute.`,
+    );
+  }
+
+  /* --- The gas top-up, if there is one ----------------------------------- */
+
+  const topUpQuote = topUp > 0n ? await ctx.gasZipQuote(from, to, topUp, wallet).catch(() => null) : null;
+  const topUpCall = topUpQuote
+    ? gasZipDepositCall({
+        chainId: from,
+        contract: topUpQuote.contract,
+        data: encodeGasZipDeposit(topUpQuote.shortId, wallet),
+        value: topUpQuote.value,
+        description: `Get ${displayUsd(formatUsd(topUp))} of ${gasToken.symbol} on ${destination.name} for gas`,
+      })
+    : null;
+
+  /* --- Build the plan ----------------------------------------------------- */
+
+  const receivedAs = received.kind === 'usdc' ? { ...token, chainId: to, address: destination.usdc } : gasToken;
+  const receivedPrice = received.kind === 'usdc' ? '1' : gasTokenPrice;
+
+  const moved = assetDelta(token, input, '1');
+  const landed = assetDelta(receivedAs, route.arrive, receivedPrice);
+  const toppedUp = topUpQuote ? assetDelta(gasToken, topUpQuote.expectedOut, gasTokenPrice) : null;
+
+  // What the route keeps: what left, less what landed, valued in dollars.
+  // Unpriced means unknown, and is counted as nothing rather than guessed.
+  const routeCost = lossUnits(input, landed.usdValue);
+  const topUpCost = topUpQuote ? lossUnits(topUp, toppedUp?.usdValue ?? null) : 0n;
+
+  const fee: Fee = {
+    totalUsd: formatUsd(parseUsd(gas.plan.totalUsd) + routeCost + topUpCost),
+    paidIn: 'usdc',
+    breakdown: { networkUsd: gas.plan.networkUsd, paymasterUsd: '0', serviceUsd: formatUsd(routeCost + topUpCost) },
+  };
+
+  const canActThere = hasGasThere || received.kind === 'native' || topUpQuote !== null;
+
+  const warnings: Warning[] = [
+    ...feeWarnings(fee.totalUsd, moved.usdValue),
+    ...destinationWarnings({ chainName: destination.name, gasToken: gasToken.symbol, canActThere }),
+  ];
+
+  return {
+    ok: true,
+    plan: stamp({
+      intentType: 'bridge',
+      summary:
+        received.kind === 'usdc'
+          ? summariseMove(moved, landed, destination.name, route, topUpQuote ? topUp : null, gasToken.symbol)
+          : summariseSwap(moved, landed, destination.name, route),
+      modelRationale: intent.rationale,
+      outflow: topUpQuote ? [moved, assetDelta(token, topUp, '1')] : [moved],
+      inflow: toppedUp ? [landed, toppedUp] : [landed],
+      // Your own wallet, on another chain: there is no third party to vet.
+      recipient: null,
+      fee,
+      warnings,
+      calls: topUpCall ? [...route.calls, topUpCall] : route.calls,
+      route: {
+        provider: route.provider,
+        etaSeconds: route.etaSeconds,
+        feeIsCeiling: route.feeIsCeiling,
+        ...(route.minimum !== undefined ? { minimumReceived: route.minimum.toString() } : {}),
+        ...(topUpQuote ? { gasTopUp: { provider: 'gas.zip' } } : {}),
+      },
+    }),
+  };
+}
+
+/** Moving USDC as USDC: Circle's CCTP and Across, both priced. */
+async function usdcRoutes(args: {
+  ctx: PlannerContext;
+  from: ChainId;
+  to: ChainId;
+  token: ResolvedToken;
+  input: bigint;
+  wallet: Address;
+  cctp: ReturnType<typeof cctpContracts>;
+  acrossPool: Address | null;
+  displayAmount: string;
+}): Promise<Route[]> {
+  const { ctx, from, to, token, input, wallet, cctp, acrossPool, displayAmount } = args;
+  const destination = getChain(to);
 
   const [cctpFees, acrossQuote] = await Promise.all([
     cctp ? ctx.bridgeFees(from, to).catch(() => null) : null,
@@ -349,67 +499,120 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     });
   }
 
-  const route = bestRoute(routes);
+  return routes;
+}
 
-  if (!route) {
-    return fail(
-      'no_bridge_route',
-      input < 1_000_000n
-        ? `That's too little to move to ${destination.name} — the transfer fee would take all of it.`
-        : `Moving money to ${destination.name} isn't available right now. Try again in a minute.`,
-    );
+/**
+ * USDC in, the destination's gas token out: Gas.zip (cheapest, for amounts it
+ * has room for) and an Across swap (any size), both priced in the same token.
+ */
+async function nativeRoutes(args: {
+  ctx: PlannerContext;
+  from: ChainId;
+  to: ChainId;
+  token: ResolvedToken;
+  input: bigint;
+  wallet: Address;
+  gasToken: ResolvedToken;
+  displayAmount: string;
+  useAcross: boolean;
+  useGasZip: boolean;
+}): Promise<Route[]> {
+  const { ctx, from, to, token, input, wallet, gasToken, displayAmount, useAcross, useGasZip } = args;
+  const destination = getChain(to);
+  const description = `Swap ${displayAmount} ${token.symbol} into ${gasToken.symbol} on ${destination.name}`;
+
+  const [gasZipQuote, swapQuote] = await Promise.all([
+    useGasZip ? ctx.gasZipQuote(from, to, input, wallet).catch(() => null) : null,
+    useAcross ? ctx.acrossSwapQuote(from, to, input, gasToken.address, wallet).catch(() => null) : null,
+  ]);
+
+  const routes: Route[] = [];
+
+  if (gasZipQuote && gasZipQuote.inputAmount === input) {
+    routes.push({
+      provider: 'gas.zip',
+      arrive: gasZipQuote.expectedOut,
+      etaSeconds: gasZipQuote.etaSeconds,
+      feeIsCeiling: false,
+      calls: [
+        gasZipDepositCall({
+          chainId: from,
+          contract: gasZipQuote.contract,
+          data: encodeGasZipDeposit(gasZipQuote.shortId, wallet),
+          value: gasZipQuote.value,
+          description,
+        }),
+      ],
+    });
   }
 
-  /* --- Build the plan ----------------------------------------------------- */
-
-  const moved = assetDelta(token, input, '1');
-  const landed = assetDelta({ ...token, chainId: to, address: destination.usdc }, route.arrive, '1');
-  const transferFee = input - route.arrive;
-
-  const fee: Fee = {
-    totalUsd: formatUsd(parseUsd(gas.plan.totalUsd) + transferFee),
-    paidIn: 'usdc',
-    breakdown: { networkUsd: gas.plan.networkUsd, paymasterUsd: '0', serviceUsd: formatUsd(transferFee) },
-  };
-
-  const canActThere =
-    destinationFeeUsd !== null &&
-    canPayForGeneralAction({
-      chainId: to,
-      networkFeeUsd: destinationFeeUsd,
-      usdcBalanceUsd: formatUsd(route.arrive),
-      nativeBalanceUsd: destinationGasUsd,
+  if (swapQuote && swapQuote.inputAmount === input) {
+    routes.push({
+      provider: 'across-swap',
+      arrive: swapQuote.expectedOut,
+      minimum: swapQuote.minOut,
+      etaSeconds: swapQuote.etaSeconds,
+      feeIsCeiling: false,
+      calls: acrossSwapCalls({
+        chainId: from,
+        token,
+        spokePool: swapQuote.spokePool,
+        inputAmount: input,
+        depositData: swapQuote.depositData,
+        displayAmount,
+        description,
+      }),
     });
+  }
 
-  const warnings: Warning[] = [
-    ...feeWarnings(fee.totalUsd, moved.usdValue),
-    ...destinationWarnings({
-      chainName: destination.name,
-      gasToken: destination.nativeCurrency.symbol,
-      canActThere,
-    }),
-  ];
+  return routes;
+}
 
+/** What the user asked to receive: USDC (the default), or the destination's gas token. Null for anything else. */
+function receivedToken(intent: BridgeIntent, to: ChainId): { kind: 'usdc' } | { kind: 'native' } | null {
+  const ref = intent.receive;
+  if (!ref) return { kind: 'usdc' };
+
+  const destination = getChain(to);
+
+  if (ref.kind === 'symbol') {
+    const symbol = ref.symbol.trim().toUpperCase();
+    if (symbol === 'USDC') return { kind: 'usdc' };
+    if (symbol === destination.nativeCurrency.symbol.toUpperCase()) return { kind: 'native' };
+    return null;
+  }
+
+  if (ref.chainId !== to) return null;
+  if (ref.address === destination.usdc) return { kind: 'usdc' };
+  if (ref.address === NATIVE_TOKEN) return { kind: 'native' };
+  return null;
+}
+
+/** A chain's native gas token, as a resolved token named by the zero address. */
+function nativeTokenOn(chainId: ChainId): ResolvedToken {
+  const { nativeCurrency } = getChain(chainId);
   return {
-    ok: true,
-    plan: stamp({
-      intentType: 'bridge',
-      summary: summariseBridge(moved, landed, destination.name, route),
-      modelRationale: intent.rationale,
-      outflow: [moved],
-      inflow: [landed],
-      // Your own wallet, on another chain: there is no third party to vet.
-      recipient: null,
-      fee,
-      warnings,
-      calls: route.calls,
-      route: { provider: route.provider, etaSeconds: route.etaSeconds, feeIsCeiling: route.feeIsCeiling },
-    }),
+    chainId,
+    address: NATIVE_TOKEN,
+    symbol: nativeCurrency.symbol,
+    name: nativeCurrency.symbol,
+    decimals: nativeCurrency.decimals,
+    logoUrl: null,
+    verified: true,
   };
 }
 
-/** CCTP Fast Transfers with forwarding land in well under a minute. */
-const CCTP_ETA_SECONDS = 30;
+/** Dollars in, less dollars out, as USD base units; never negative, and nothing when the output is unpriced. */
+function lossUnits(input: bigint, landedUsd: string | null): bigint {
+  if (landedUsd === null) return 0n;
+  const loss = input - parseUsd(landedUsd);
+  return loss > 0n ? loss : 0n;
+}
+
+function clamp(value: bigint, min: bigint, max: bigint): bigint {
+  return value < min ? min : value > max ? max : value;
+}
 
 /**
  * The route that delivers the most. A slower route has to deliver more than
@@ -434,9 +637,9 @@ export function bestRoute<T extends { arrive: bigint; etaSeconds: number }>(rout
   return best;
 }
 
-/** A stand-in call, for sizing gas before the amounts are known. */
-function probeCall(chainId: ChainId, token: ResolvedToken): PreparedCall {
-  return { chainId, to: token.address, data: '0x', value: '0', description: 'Gas estimate' };
+/** Stand-in calls, for sizing gas before the amounts are known. */
+function probeCalls(chainId: ChainId, token: ResolvedToken, count: number): PreparedCall[] {
+  return Array.from({ length: count }, () => ({ chainId, to: token.address, data: '0x', value: '0', description: 'Gas estimate' }));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -489,15 +692,39 @@ function summariseTransfer(outflow: AssetDelta, recipient: ResolvedRecipient, fe
 /**
  * "Move $20.00 to your wallet on Base. $19.99 arrives in about 2 seconds." A
  * route whose fee is a ceiling says "at least": whatever it doesn't use
- * arrives too.
+ * arrives too. A gas top-up is named, so it is never a surprise.
  */
-function summariseBridge(moved: AssetDelta, landed: AssetDelta, destinationName: string, route: Route): string {
+function summariseMove(
+  moved: AssetDelta,
+  landed: AssetDelta,
+  destinationName: string,
+  route: Route,
+  topUp: bigint | null,
+  gasSymbol: string,
+): string {
+  const plus = topUp ? `, plus ${displayUsd(formatUsd(topUp))} of ${gasSymbol} for gas` : '';
   const arrives = `${route.feeIsCeiling ? 'At least ' : ''}${displayUsd(landed.usdValue ?? '0')} arrives`;
-  return `Move ${displayUsd(moved.usdValue ?? '0')} to your wallet on ${destinationName}. ${arrives} in ${describeEta(route.etaSeconds)}.`;
+  return `Move ${displayUsd(moved.usdValue ?? '0')} to your wallet on ${destinationName}${plus}. ${arrives} in ${describeEta(route.etaSeconds)}.`;
+}
+
+/** "Swap $20.00 into ETH on Arbitrum. About 0.00743 ETH ($19.99) arrives in about 2 seconds." */
+function summariseSwap(moved: AssetDelta, landed: AssetDelta, destinationName: string, route: Route): string {
+  const worth = landed.usdValue === null ? '' : ` (${displayUsd(landed.usdValue)})`;
+  return `Swap ${displayUsd(moved.usdValue ?? '0')} into ${landed.token.symbol} on ${destinationName}. About ${shortAmount(landed.displayAmount)} ${landed.token.symbol}${worth} arrives in ${describeEta(route.etaSeconds)}.`;
+}
+
+/** A token amount trimmed for reading: six significant digits at most. */
+function shortAmount(amount: string): string {
+  const [whole = '0', fraction = ''] = amount.split('.');
+  if (whole !== '0') return fraction ? `${whole}.${fraction.slice(0, Math.max(0, 6 - whole.length))}`.replace(/\.?0+$/, '') : whole;
+  const firstSignificant = fraction.search(/[1-9]/);
+  if (firstSignificant === -1) return '0';
+  return `0.${fraction.slice(0, firstSignificant + 4)}`.replace(/0+$/, '');
 }
 
 function describeEta(seconds: number): string {
-  if (seconds < 60) return `about ${Math.max(1, Math.round(seconds))} seconds`;
+  if (seconds < 1.5) return 'about a second';
+  if (seconds < 60) return `about ${Math.round(seconds)} seconds`;
   const minutes = Math.round(seconds / 60);
   return minutes === 1 ? 'about a minute' : `about ${minutes} minutes`;
 }

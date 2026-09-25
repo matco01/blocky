@@ -132,6 +132,24 @@ export const CHAINS = {
   },
 
   /**
+   * HyperEVM — Hyperliquid's EVM chain; HYPE is its native token. Native
+   * Circle USDC (checked on-chain: `symbol()` USDC, `decimals()` 6), Circle
+   * domain 19, and Across's swap handler deployed.
+   */
+  [CHAIN.hyperevm]: {
+    id: CHAIN.hyperevm,
+    name: 'HyperEVM',
+    shortName: 'HYPE',
+    testnet: false,
+    nativeCurrency: { symbol: 'HYPE', decimals: 18 },
+    usdc: '0xb88339cb7199b77e23db6e890353e22632ba630f',
+    explorerUrl: 'https://hyperevmscan.io',
+    gateway: true,
+    circleDomain: 19,
+    gasPaidInUsdc: false,
+  },
+
+  /**
    * Arc — the home chain on mainnet.
    *
    * Verified against the live network: chain id 5042, USDC at the same 0x3600…

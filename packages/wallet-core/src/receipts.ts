@@ -19,6 +19,12 @@ export interface ReceiptLog {
 export interface Receipt {
   status: 'success' | 'reverted';
   logs: readonly ReceiptLog[];
+  /**
+   * The transaction itself — sender, target, value, calldata. Needed where
+   * what happened is a plain call with value rather than an event, like a
+   * Gas.zip deposit. Absent when the node did not return it.
+   */
+  transaction?: { from: string; to: string | null; value: bigint; input: string };
 }
 
 /** keccak256("Transfer(address,address,uint256)") */

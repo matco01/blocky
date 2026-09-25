@@ -272,6 +272,8 @@ async function planBridge(userId = 'did:privy:alice', wallet: Address = ALICE_WA
     isAddressFlagged: async () => false,
     bridgeFees: async () => ({ forwardFee: 54_565n, protocolFeeCentiBps: 0n }),
     acrossQuote: async () => null,
+    acrossSwapQuote: async () => null,
+    gasZipQuote: async () => null,
   });
   if (!outcome.ok) throw new Error(outcome.failure.message);
 

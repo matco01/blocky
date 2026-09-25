@@ -10,15 +10,19 @@ import {
   formatUsd,
   parseUsd,
   planOutflowUsd,
+  transactionsOf,
   type Address,
   type ChainId,
   type Plan,
 } from '@blocky/shared';
 import {
   DEFAULT_CHAIN,
+  NATIVE_TOKEN,
   acrossSpokePool,
   cctpContracts,
   containsAcrossDeposit,
+  gasZipDepositContract,
+  isExactTransaction,
   chainsOnNetwork,
   containsCctpBurn,
   containsTransfer,
@@ -328,6 +332,12 @@ export function createApp(deps: AppDeps) {
             amount,
             fromChainId: shape.chainId,
             toChainId: shape.destination,
+            // The same thing arriving, and the same gas top-up, as the quote
+            // being refreshed.
+            ...(plan.inflow[0]?.token.address === NATIVE_TOKEN
+              ? { receive: { kind: 'symbol', symbol: plan.inflow[0].token.symbol } }
+              : {}),
+            ...(plan.route?.gasTopUp ? { includeGas: true } : {}),
             rationale,
           })
         : TransferIntentSchema.parse({
@@ -369,7 +379,14 @@ export function createApp(deps: AppDeps) {
     return c.json({ plan: outcome.plan }, 201);
   });
 
-  const ExecutionBodySchema = z.object({ txHash: TxHashSchema });
+  /**
+   * One hash per transaction the plan goes out as, in order (see
+   * `transactionsOf`) — usually one; two when a gas top-up rides along.
+   * `txHash` alone is the older, single-transaction form.
+   */
+  const ExecutionBodySchema = z
+    .object({ txHash: TxHashSchema.optional(), txHashes: z.array(TxHashSchema).min(1).max(4).optional() })
+    .refine((body) => body.txHash || body.txHashes, 'A transaction hash is required.');
 
   /**
    * "I signed and submitted plan X; here is the transaction."
@@ -402,60 +419,77 @@ export function createApp(deps: AppDeps) {
     }
 
     const chainId = shape.kind === 'transfer' ? shape.call.chainId : shape.chainId;
-    const txHash = parsed.data.txHash.toLowerCase() as `0x${string}`;
-    const receipt = await pollReceipt(() => reader.transactionReceipt(chainId, txHash), polling);
+    const hashes = (parsed.data.txHashes ?? [parsed.data.txHash!]).map((hash) => hash.toLowerCase() as `0x${string}`);
+    const groups = transactionsOf(plan.calls);
 
-    if (!receipt) {
-      return c.json(
-        { status: 'unconfirmed', message: "That transaction isn't visible on-chain yet. Try again shortly." },
-        202,
-      );
+    if (hashes.length > groups.length) {
+      return c.json({ error: 'mismatch', message: 'More transactions than that plan makes.' }, 422);
     }
 
-    const matches =
-      shape.kind === 'transfer'
-        ? containsTransfer(receipt, {
-            token: shape.call.to,
-            from: wallet,
-            to: shape.recipient.address,
-            amount: BigInt(shape.outflow.amount),
-          })
-        : shape.kind === 'cctp'
-          ? containsCctpBurn(receipt, {
-              messenger: shape.messenger,
-              burnToken: shape.token,
-              depositor: wallet,
-              amount: shape.input,
-              // Only ever the user's own wallet: a burn minting to anyone else
-              // is not the move they approved.
-              mintRecipient: wallet,
-              destinationDomain: shape.destinationDomain,
-              maxFee: shape.maxFee,
-            })
-          : containsAcrossDeposit(receipt, {
-              spokePool: shape.spokePool,
-              inputToken: shape.token,
-              outputToken: shape.outputToken,
-              inputAmount: shape.input,
-              outputAmount: shape.output,
-              destinationChainId: shape.destination,
-              depositor: wallet,
-              // The same rule: paying out to anyone but the user is not this plan.
-              recipient: wallet,
-            });
+    // Every transaction reported must be exactly its part of the plan. The
+    // first carries the money; later ones (a gas top-up) are extras, and a
+    // missing extra is recorded as not sent rather than failing the move.
+    for (const [index, hash] of hashes.entries()) {
+      const receipt = await pollReceipt(() => reader.transactionReceipt(chainId, hash), polling);
 
-    if (!matches) {
-      return c.json(
-        {
-          error: 'mismatch',
-          message:
-            receipt.status === 'reverted'
-              ? 'That transaction failed on-chain. Nothing was sent.'
-              : "That transaction didn't make this transfer.",
-        },
-        422,
-      );
+      if (!receipt) {
+        return c.json(
+          { status: 'unconfirmed', message: "That transaction isn't visible on-chain yet. Try again shortly." },
+          202,
+        );
+      }
+
+      const group = groups[index]!;
+      const matches =
+        index > 0 || shape.kind === 'exact'
+          ? isExactTransaction(receipt.transaction, receipt.status, { from: wallet, calls: group })
+          : shape.kind === 'transfer'
+            ? containsTransfer(receipt, {
+                token: shape.call.to,
+                from: wallet,
+                to: shape.recipient.address,
+                amount: BigInt(shape.outflow.amount),
+              })
+            : shape.kind === 'cctp'
+              ? containsCctpBurn(receipt, {
+                  messenger: shape.messenger,
+                  burnToken: shape.token,
+                  depositor: wallet,
+                  amount: shape.input,
+                  // Only ever the user's own wallet: a burn minting to anyone
+                  // else is not the move they approved.
+                  mintRecipient: wallet,
+                  destinationDomain: shape.destinationDomain,
+                  maxFee: shape.maxFee,
+                })
+              : containsAcrossDeposit(receipt, {
+                  spokePool: shape.spokePool,
+                  inputToken: shape.token,
+                  outputToken: shape.outputToken,
+                  inputAmount: shape.input,
+                  outputAmount: shape.output,
+                  destinationChainId: shape.destination,
+                  depositor: wallet,
+                  // The same rule: paying out to anyone but the user is not this plan.
+                  recipient: wallet,
+                });
+
+      if (!matches) {
+        return c.json(
+          {
+            error: 'mismatch',
+            message:
+              receipt.status === 'reverted'
+                ? 'That transaction failed on-chain. Nothing was sent.'
+                : "That transaction didn't make this transfer.",
+          },
+          422,
+        );
+      }
     }
+
+    const txHash = hashes[0]!;
+    const incomplete = hashes.length < groups.length;
 
     try {
       const execution = await store.recordExecution(userId, {
@@ -465,8 +499,7 @@ export function createApp(deps: AppDeps) {
         txHash,
         // For a move between chains, the contract the USDC went to on-chain —
         // the same counterparty the explorer reports for it.
-        counterparty:
-          shape.kind === 'transfer' ? shape.recipient.address : shape.kind === 'cctp' ? shape.minter : shape.spokePool,
+        counterparty: shape.kind === 'transfer' ? shape.recipient.address : shape.counterparty,
         amount: shape.outflow.displayAmount,
         /*
          * USDC is always priced. An unpriced plan cannot auto-execute (the
@@ -474,7 +507,7 @@ export function createApp(deps: AppDeps) {
          * alone understates spend only for tokens we do not support yet.
          */
         outflowUsd: planOutflowUsd(plan) ?? plan.fee.totalUsd,
-        summary: plan.summary,
+        summary: incomplete ? `${plan.summary} The gas top-up was not sent.` : plan.summary,
       });
 
       // Verified against the receipt above, so it settles immediately.
@@ -686,31 +719,37 @@ type PlanShape =
       outflow: Plan['outflow'][number];
       recipient: NonNullable<Plan['recipient']>;
     }
-  | {
-      kind: 'cctp';
-      chainId: ChainId;
-      outflow: Plan['outflow'][number];
-      destination: ChainId;
-      destinationDomain: number;
-      token: Address;
-      /** What leaves, exactly as approved and burned. */
-      input: bigint;
-      maxFee: bigint;
-      messenger: Address;
-      minter: Address;
-    }
-  | {
-      kind: 'across';
-      chainId: ChainId;
-      outflow: Plan['outflow'][number];
-      destination: ChainId;
-      token: Address;
-      outputToken: Address;
-      input: bigint;
-      /** Exactly what the relayer pays out, as quoted and deposited. */
-      output: bigint;
-      spokePool: Address;
-    };
+  | (BridgeShape &
+      (
+        | {
+            kind: 'cctp';
+            destinationDomain: number;
+            token: Address;
+            /** What leaves, exactly as approved and burned. */
+            input: bigint;
+            maxFee: bigint;
+            messenger: Address;
+          }
+        | {
+            kind: 'across';
+            token: Address;
+            outputToken: Address;
+            input: bigint;
+            /** Exactly what the relayer pays out, as quoted and deposited. */
+            output: bigint;
+            spokePool: Address;
+          }
+        /** A swap or a Gas.zip deposit: verified as the exact transaction, byte for byte. */
+        | { kind: 'exact' }
+      ));
+
+interface BridgeShape {
+  chainId: ChainId;
+  outflow: Plan['outflow'][number];
+  destination: ChainId;
+  /** The contract the money went to on-chain — what the explorer reports as the counterparty. */
+  counterparty: Address;
+}
 
 function planShape(plan: Plan): PlanShape | null {
   const [outflow] = plan.outflow;
@@ -722,52 +761,64 @@ function planShape(plan: Plan): PlanShape | null {
     return { kind: 'transfer', call, outflow, recipient: plan.recipient };
   }
 
-  if (plan.intentType === 'bridge') {
-    const [approve, deposit] = plan.calls;
-    const [inflow] = plan.inflow;
-    if (plan.calls.length !== 2 || !approve || !deposit || !inflow || plan.recipient !== null) return null;
+  if (plan.intentType !== 'bridge' || plan.recipient !== null) return null;
 
-    const chainId = deposit.chainId;
-    const destination = inflow.token.chainId;
-    const input = BigInt(outflow.amount);
+  const [inflow] = plan.inflow;
+  const groups = transactionsOf(plan.calls);
+  const main = groups[0];
+  if (!inflow || !main || main.length === 0) return null;
 
-    // Which road it takes is read off the contract it calls — and only a
-    // contract we pinned ourselves counts.
-    const cctp = cctpContracts(chainId);
-    if (cctp && deposit.to === cctp.tokenMessenger) {
-      const destinationDomain = getChain(destination).circleDomain;
-      if (destinationDomain === null) return null;
+  // Anything after the main transaction may only be a Gas.zip top-up.
+  const chainId = main[0]!.chainId;
+  const gasZip = gasZipDepositContract(chainId);
+  if (groups.slice(1).some((group) => group.length !== 1 || group[0]!.to !== gasZip)) return null;
 
-      return {
-        kind: 'cctp',
-        chainId,
-        outflow,
-        destination,
-        destinationDomain,
-        token: approve.to,
-        input,
-        // USDC's six decimals are the dollar scale, so the fee ceiling in
-        // dollars is also its amount in base units.
-        maxFee: parseUsd(plan.fee.breakdown.serviceUsd),
-        messenger: cctp.tokenMessenger,
-        minter: cctp.tokenMinter,
-      };
-    }
+  const base = { chainId, outflow, destination: inflow.token.chainId };
+  const input = BigInt(outflow.amount);
 
-    const spokePool = acrossSpokePool(chainId);
-    if (spokePool && deposit.to === spokePool) {
-      return {
-        kind: 'across',
-        chainId,
-        outflow,
-        destination,
-        token: approve.to,
-        outputToken: inflow.token.address,
-        input,
-        output: BigInt(inflow.amount),
-        spokePool,
-      };
-    }
+  // Which road it takes is read off the contract it calls — and only a
+  // contract we pinned ourselves counts.
+  if (main.length === 1) {
+    return main[0]!.to === gasZip ? { ...base, kind: 'exact', counterparty: gasZip } : null;
+  }
+
+  const [approve, deposit] = main;
+  if (main.length !== 2 || !approve || !deposit) return null;
+
+  const cctp = cctpContracts(chainId);
+  if (cctp && deposit.to === cctp.tokenMessenger) {
+    const destinationDomain = getChain(inflow.token.chainId).circleDomain;
+    if (destinationDomain === null) return null;
+
+    return {
+      ...base,
+      kind: 'cctp',
+      counterparty: cctp.tokenMinter,
+      destinationDomain,
+      token: approve.to,
+      input,
+      // What leaves less what is promised to land: the ceiling Circle may take.
+      maxFee: input - BigInt(inflow.amount),
+      messenger: cctp.tokenMessenger,
+    };
+  }
+
+  const spokePool = acrossSpokePool(chainId);
+  if (spokePool && deposit.to === spokePool) {
+    // A swap deposit carries Across's instructions for the destination; it is
+    // checked as the exact transaction the user approved.
+    if (plan.route?.provider === 'across-swap') return { ...base, kind: 'exact', counterparty: spokePool };
+
+    return {
+      ...base,
+      kind: 'across',
+      counterparty: spokePool,
+      token: approve.to,
+      outputToken: inflow.token.address,
+      input,
+      output: BigInt(inflow.amount),
+      spokePool,
+    };
   }
 
   return null;
