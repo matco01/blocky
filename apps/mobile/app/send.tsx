@@ -17,7 +17,7 @@ import { useModalTopPadding } from '../lib/screenInsets';
 import { confirmWithBiometrics } from '../lib/biometrics';
 import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
 import { planAmountLabel, planDestinationLabel, planVerb } from '../lib/planLabels';
-import { SubmittedButUnconfirmedError, useSmartAccount, type SendStage } from '../lib/smart-account';
+import { SubmittedButUnconfirmedError, useWallet, type SendStage } from '../lib/wallet';
 import { font, useTheme } from '../theme';
 
 type Step =
@@ -32,7 +32,6 @@ type Step =
 
 const STAGE_COPY: Record<SendStage, string> = {
   preparing: 'Getting ready…',
-  authorizing: 'Setting up your account — this happens once…',
   submitting: 'Sending…',
   confirming: 'Confirming…',
 };
@@ -60,7 +59,7 @@ export default function SendScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const topPadding = useModalTopPadding();
-  const { sendCalls, ready } = useSmartAccount();
+  const { sendCalls, ready } = useWallet();
 
   const { planId, autosend } = useLocalSearchParams<{ planId?: string; autosend?: string }>();
   const [handedOff] = useState(() => getHandedOffPlan(planId));
@@ -162,7 +161,7 @@ export default function SendScreen() {
   /* Straight to the fingerprint for a plan the user's limits already cleared. */
   useEffect(() => {
     if (!autoSendPending.current) return;
-    // The smart account has to be ready before anything can be signed.
+    // The wallet has to be ready before anything can be signed.
     if (!ready || step.name !== 'review') return;
 
     autoSendPending.current = false;

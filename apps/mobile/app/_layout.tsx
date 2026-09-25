@@ -32,8 +32,8 @@ export default function RootLayout() {
         <PrivyProvider
           appId={config.privyAppId}
           {...(config.privyClientId ? { clientId: config.privyClientId } : {})}
-          // Arc is the home chain. Privy needs it listed to fetch the nonce when
-          // signing the EIP-7702 authorization.
+          // Arc is the home chain, and the embedded wallet defaults to the first
+          // chain listed here — so every transaction it sends is on Arc.
           supportedChains={[homeChain]}
           config={{
             // Every user gets an embedded wallet at first login — there is no

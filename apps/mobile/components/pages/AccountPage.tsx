@@ -9,7 +9,7 @@ import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../lib/api';
 import { homeChainName } from '../../lib/chain';
-import { useSmartAccount } from '../../lib/smart-account';
+import { useWallet } from '../../lib/wallet';
 import { useTheme } from '../../theme';
 import { BlockyCard } from '../BlockyCard';
 import { Button } from '../Button';
@@ -30,7 +30,7 @@ export function AccountPage({ page, onPageChange }: PageProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { user, logout } = usePrivy();
-  const { address } = useSmartAccount();
+  const { address } = useWallet();
 
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [copied, setCopied] = useState(false);

@@ -20,8 +20,6 @@
     "@expo/vector-icons": "^15.0.2",
     "@privy-io/expo": "^0.73.1",
     "@privy-io/expo-native-extensions": "^0.0.12",
-    "@zerodev/ecdsa-validator": "^5.4.9",
-    "@zerodev/sdk": "^5.5.10",
     "events": "^3.3.0",
     "expo": "~57.0.22",
     "expo-apple-authentication": "~57.0.2",

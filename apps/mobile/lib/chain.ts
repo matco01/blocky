@@ -7,9 +7,8 @@ import { arc, arcTestnet } from 'viem/chains';
  * `EXPO_PUBLIC_NETWORK` names (testnet unless it says exactly `mainnet`).
  *
  * viem's mainnet Arc definition ships without an RPC endpoint, so Arc's own
- * public one is filled in. Every signing path — Privy's EIP-7702
- * authorization, the smart account, the bundler — uses this one object, so
- * they cannot end up on different networks.
+ * public one is filled in. Privy's embedded wallet and every read and send
+ * use this one object, so they cannot end up on different networks.
  */
 export const homeChain: Chain = IS_TESTNET
   ? arcTestnet

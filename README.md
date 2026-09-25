@@ -69,14 +69,11 @@ computer's LAN address, not `localhost`.
 |---|---|---|
 | Privy | Login + the embedded wallet | [dashboard.privy.io](https://dashboard.privy.io) |
 | Anthropic | The agent | [console.anthropic.com](https://console.anthropic.com) |
-| Pimlico *(optional)* | Bundler API key once past the public rate limit | [dashboard.pimlico.io](https://dashboard.pimlico.io) |
+| Blockscout *(mainnet)* | API key for the activity feed on mainnet | [dev.blockscout.com](https://dev.blockscout.com) |
 
 In the Privy dashboard: enable **email** login, enable **Ethereum embedded
 wallets**, and add the app identifier `com.blocky.wallet` as an allowed mobile
 client (put its client id in `EXPO_PUBLIC_PRIVY_CLIENT_ID`).
-
-No ZeroDev account is needed. We use ZeroDev's open-source Kernel contracts and
-SDK, which require no dashboard, with Pimlico as the bundler.
 
 **Passkeys** need a domain you own: host Apple's `apple-app-site-association`
 and Android's `assetlinks.json` there, register it in Privy, and set
@@ -107,11 +104,10 @@ gas token**. A user holding only USDC pays gas from that same balance — no ETH
 no paymaster, no sponsorship. USDC moves from Arc to other chains through
 Circle's CCTP (see "Moving money between chains").
 
-Everything the send path depends on was checked against the live Arc testnet,
-not just the docs: chain id 5042002, USDC `decimals()` = 6, EntryPoint v0.7 and
-v0.8 deployed, EIP-7702 authorizations charged the spec's 25,000 gas, Kernel
-v3.3's 7702 delegate deployed, Pimlico's bundler serving the chain, Circle
-Gateway's balance API, and ArcScan's transfer API.
+Everything the send path depends on was checked against the live chains, not
+just the docs: chain ids 5042 (mainnet) and 5042002 (testnet), USDC
+`decimals()` = 6 at the same address on both, Multicall3From's batching as the
+sender, Circle's CCTP contracts, and Gateway's balance API.
 
 > **Arc's decimals trap.** The same USDC is visible at **18 decimals** natively
 > (`eth_getBalance`, gas prices, fees) and at **6 decimals** through the ERC-20
@@ -129,10 +125,12 @@ Gateway's balance API, and ArcScan's transfer API.
 2. **Review.** The confirmation card shows the *server's* plan — what leaves,
    to whom, the fee in dollars — with a 60-second quote.
 3. **Approve.** Face ID (or passcode). Nothing signs without it.
-4. **Sign and submit.** The user's Privy embedded wallet is upgraded in place to
-   a ZeroDev Kernel v3.3 account with EIP-7702 — signed once, on first send —
-   and the call goes out as a user operation through Pimlico. Gas comes from
-   the user's USDC.
+4. **Sign and submit.** The user's Privy embedded wallet sends an ordinary
+   transaction on Arc and pays the gas itself, in USDC — no smart account, no
+   bundler, no paymaster. A plan with several calls (approve, then move) goes
+   out as one all-or-nothing transaction through Arc's Multicall3From, which
+   runs each call as the wallet. This is also the cheapest path: ~75k gas for a
+   USDC send, against ~125k for the same send as an ERC-4337 user operation.
 5. **Verify.** The app reports the transaction hash. The server does not take
    its word for it: the receipt must contain exactly the planned USDC transfer
    — right token contract, sender, recipient and amount — or nothing is
@@ -178,8 +176,8 @@ card, in dollars. It is never a question put to the user.
 
 **Not yet verified on a real device.** Everything above typechecks, 240 tests
 pass, both platforms bundle, and every external API was probed live — but the
-full loop (Privy login → first 7702 authorization → user operation on Arc →
-server verification) has not been run on a phone with real testnet USDC. That
+full loop (Privy login → transaction on Arc → server verification) has not
+been run on a phone with real USDC. That
 is the next thing to do, and the first place to look if something breaks.
 
 ## Design direction *(ideas, not final)*
@@ -246,8 +244,9 @@ hex outside it.
 - **Simulation is not wired up.** Every plan carries a `simulation_failed` warning
   (`warn`, not `danger`). See "A note on severity" below before letting anything
   execute unattended.
-- **Development uses public endpoints**: Circle's Arc RPC and Pimlico's public
-  bundler are rate-limited. Use keyed endpoints before real traffic.
+- **Development uses public endpoints**: Arc's public RPC and the other
+  chains' public endpoints are rate-limited. Use provider URLs before real
+  traffic.
 - The embedded dev database lives in `.data/`. Delete that folder to reset local
   state; it is gitignored. Production must set `DATABASE_URL`.
 - `.npmrc` sets `legacy-peer-deps`: Privy's Expo SDK has optional peers
@@ -468,11 +467,10 @@ because three transfers that each pass alone can breach the cap together.
 partial revocation. The one operation a frightened user performs must not have
 options.
 
-> ⚠️  **The on-chain half is not built.** These permissions are enforced
-> server-side only, which stops mistakes but not a compromised server — the
-> weaker half of the guarantee. Installing the permission validator on the
-> user's Kernel account needs the user's device signature, and nothing signs
-> unattended until it exists. Every session response says `onChain: false` for
-> that reason. The Kernel account itself is live — the app already delegates to
-> it with EIP-7702 on the first send.
+> ⚠️  **The on-chain half is not built, and is not planned.** These permissions
+> are enforced server-side only, which stops mistakes but not a compromised
+> server. Every session response says `onChain: false` for that reason. Blocky
+> stays non-custodial: every transfer is signed on the user's device, and the
+> wallet is a plain embedded wallet with no smart account to install a session
+> validator on.
 
