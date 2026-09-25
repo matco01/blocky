@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { IntentSchema } from '@blocky/shared';
+import { BridgeIntentSchema, TransferIntentSchema } from '@blocky/shared';
 import { z } from 'zod';
 import { UNTRUSTED_CLOSE, UNTRUSTED_OPEN } from './system-prompt';
 
@@ -92,8 +92,36 @@ export function untrustedJson(value: unknown): unknown {
  *    `parseIntent` was never going to trust them anyway: a malformed proposal
  *    comes back as validation errors the model gets one chance to fix.
  */
+/**
+ * The intent types the planner can build today — the only ones worth
+ * describing to the model.
+ *
+ * This schema is sent with every request, so every intent type in it is paid
+ * for on every message. Swap is left out until the planner can build one: it
+ * was a third of the schema, and the planner refuses it anyway. Validation is
+ * unaffected — `parseIntent` still checks proposals against the full
+ * `IntentSchema`, so narrowing this only changes what the model is offered.
+ */
+const OFFERED_INTENTS = z.discriminatedUnion('type', [TransferIntentSchema, BridgeIntentSchema]);
+
+/** The bounds Zod puts on every `int`: true, meaningless to the model, and ~25 tokens a field. */
+function withoutSafeIntegerBounds(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutSafeIntegerBounds);
+  if (value === null || typeof value !== 'object') return value;
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(
+        ([key, inner]) =>
+          !(key === 'minimum' && inner === Number.MIN_SAFE_INTEGER) &&
+          !(key === 'maximum' && inner === Number.MAX_SAFE_INTEGER),
+      )
+      .map(([key, inner]) => [key, withoutSafeIntegerBounds(inner)]),
+  );
+}
+
 function intentJsonSchema(): Record<string, unknown> {
-  const union = z.toJSONSchema(IntentSchema, { io: 'input' }) as Record<string, unknown>;
+  const union = withoutSafeIntegerBounds(z.toJSONSchema(OFFERED_INTENTS, { io: 'input' })) as Record<string, unknown>;
 
   // `$schema` is meaningless to the tools API and costs tokens on every request.
   delete union['$schema'];

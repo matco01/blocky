@@ -110,13 +110,20 @@ describe('the tool surface', () => {
     expect(tool?.input_schema.required).toEqual(['label', 'address']);
   });
 
-  it('generates the intent schema from the Zod union, covering all three types', () => {
+  it('generates the intent schema from the Zod schemas, offering only what the planner builds', () => {
     const propose = TOOLS.find((tool) => tool.name === PROPOSE_INTENT);
     const schema = JSON.stringify(propose?.input_schema);
 
     expect(schema).toContain('transfer');
-    expect(schema).toContain('swap');
     expect(schema).toContain('bridge');
+    // Paid for on every request, and always refused: not offered until it can be built.
+    expect(schema).not.toContain('swap');
+  });
+
+  it('drops the meaningless safe-integer bounds Zod adds to every int', () => {
+    const schema = JSON.stringify(TOOLS.find((tool) => tool.name === PROPOSE_INTENT)?.input_schema);
+
+    expect(schema).not.toContain(String(Number.MAX_SAFE_INTEGER));
   });
 
   it('offers no calldata field anywhere in the intent schema', () => {

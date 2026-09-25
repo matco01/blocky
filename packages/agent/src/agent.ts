@@ -71,7 +71,10 @@ export interface AgentUsage {
   outputTokens: number;
   /** Tokens served from cache at ~10% of input cost. Zero here means caching is broken. */
   cacheReadTokens: number;
+  /** Every cache write, whatever its lifetime. */
   cacheWriteTokens: number;
+  /** The part of `cacheWriteTokens` written with the one-hour TTL, which costs more to write. */
+  cacheWrite1hTokens: number;
   /** Model turns billed. A turn that called tools costs more than one. */
   steps: number;
 }
@@ -108,6 +111,7 @@ export async function runAgentTurn(
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
+    cacheWrite1hTokens: 0,
     steps: 0,
   };
 
@@ -123,10 +127,17 @@ export async function runAgentTurn(
       /*
        * One cache breakpoint, on the system block. The API renders
        * tools -> system -> messages, so a breakpoint here covers the tool
-       * schemas *and* the prompt — the whole stable prefix — while the
-       * conversation sits outside it and varies freely.
+       * schemas *and* the prompt — the whole stable prefix, ~7k tokens —
+       * while the conversation sits outside it and varies freely.
+       *
+       * An hour, not the default five minutes. The prefix is identical for
+       * every user, so under steady traffic it never goes cold either way; but
+       * with gaps between messages, a five-minute entry expires and the next
+       * message re-writes the whole prefix — most of what a message costs. The
+       * one-hour write costs 2x instead of 1.25x and pays for itself on the
+       * third message in the hour.
        */
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral', ttl: '1h' } }],
       tools: TOOLS,
       messages,
       /*
@@ -264,4 +275,31 @@ function accumulate(total: AgentUsage, usage: Anthropic.Usage): void {
   total.outputTokens += usage.output_tokens;
   total.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
   total.cacheWriteTokens += usage.cache_creation_input_tokens ?? 0;
+  total.cacheWrite1hTokens += usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+}
+
+/**
+ * What a turn cost, in USD, at Claude Sonnet 5's list prices — for logs and
+ * dashboards, not billing. Thinking is billed as output, so it is inside
+ * `outputTokens`. Update these if `AGENT_MODEL` changes.
+ */
+const PRICE_PER_MTOK = {
+  input: 2,
+  output: 10,
+  cacheRead: 0.2,
+  cacheWrite5m: 2.5,
+  cacheWrite1h: 4,
+} as const;
+
+export function estimateCostUsd(usage: AgentUsage): number {
+  const write5m = usage.cacheWriteTokens - usage.cacheWrite1hTokens;
+
+  return (
+    (usage.inputTokens * PRICE_PER_MTOK.input +
+      usage.outputTokens * PRICE_PER_MTOK.output +
+      usage.cacheReadTokens * PRICE_PER_MTOK.cacheRead +
+      write5m * PRICE_PER_MTOK.cacheWrite5m +
+      usage.cacheWrite1hTokens * PRICE_PER_MTOK.cacheWrite1h) /
+    1_000_000
+  );
 }

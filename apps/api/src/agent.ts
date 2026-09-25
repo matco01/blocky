@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { runAgentTurn, type AgentTools, type AgentTurn } from '@blocky/agent';
+import { estimateCostUsd, runAgentTurn, type AgentTools, type AgentTurn } from '@blocky/agent';
 import { buildPlan } from '@blocky/planner';
 import {
   AddressSchema,
@@ -232,6 +232,8 @@ export function createAgentHandler(
       history: history.map((entry) => ({ role: entry.role, content: entry.content })),
     });
 
+    logUsage(turn);
+
     const empty = { plan: null, decision: null, usage: turn.usage };
 
     switch (turn.kind) {
@@ -312,4 +314,18 @@ function statusFor(decision: PolicyDecision): string {
        */
       return 'Within your limits — one tap to send.';
   }
+}
+
+/**
+ * One line per chat message: what it cost and where the tokens went. The
+ * model is the product's main running cost, so this is the number to watch —
+ * a turn with no cache reads, or one that suddenly writes the whole prefix
+ * again, shows up here first.
+ */
+function logUsage(turn: AgentTurn): void {
+  const u = turn.usage;
+  console.log(
+    `agent ${turn.kind}: $${estimateCostUsd(u).toFixed(4)} · ${u.steps} step(s) · ` +
+      `in ${u.inputTokens} · out ${u.outputTokens} · cache read ${u.cacheReadTokens} · cache write ${u.cacheWriteTokens}`,
+  );
 }

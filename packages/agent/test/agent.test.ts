@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
-import { runAgentTurn, type AgentTools } from '../src/agent';
+import { estimateCostUsd, runAgentTurn, type AgentTools } from '../src/agent';
 import { PROPOSE_INTENT } from '../src/tools';
 
 /**
@@ -264,15 +264,18 @@ describe('proposing an intent', () => {
 });
 
 describe('cost controls', () => {
-  it('caches the stable prefix on every request', async () => {
+  it('caches the stable prefix on every request, for an hour', async () => {
     const { client, calls } = fakeClient([{ content: [text('hi')] }]);
 
     await runAgentTurn('hi', { client, tools });
 
     const system = calls[0]?.system;
     expect(Array.isArray(system)).toBe(true);
+    // An hour: with gaps between messages a five-minute entry expires, and the
+    // next message pays to re-write the whole ~7k-token prefix.
     expect((system as Anthropic.TextBlockParam[])[0]?.cache_control).toEqual({
       type: 'ephemeral',
+      ttl: '1h',
     });
   });
 
@@ -306,5 +309,21 @@ describe('cost controls', () => {
 
     expect(turn.usage.inputTokens).toBe(20);
     expect(turn.usage.outputTokens).toBe(10);
+  });
+});
+
+describe('estimateCostUsd', () => {
+  it('prices each kind of token at its own Sonnet 5 rate', () => {
+    // 1M of each: $2 in + $10 out + $0.20 cache read + $2.50 (5m write) + $4 (1h write).
+    expect(
+      estimateCostUsd({
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheWriteTokens: 2_000_000,
+        cacheWrite1hTokens: 1_000_000,
+        steps: 1,
+      }),
+    ).toBeCloseTo(18.7, 6);
   });
 });
