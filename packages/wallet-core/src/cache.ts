@@ -11,6 +11,11 @@ type Entry = { at: number; value: Promise<unknown> };
 
 const caches = new WeakMap<typeof fetch, Map<string, Entry>>();
 
+/** Drop one entry, so the next read goes to the source. */
+export function uncache(fetchImpl: typeof fetch, key: string): void {
+  caches.get(fetchImpl)?.delete(key);
+}
+
 export function cached<T>(fetchImpl: typeof fetch, key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   let cache = caches.get(fetchImpl);
   if (!cache) {

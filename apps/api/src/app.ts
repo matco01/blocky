@@ -59,6 +59,8 @@ export interface AppDeps {
   gatewayBalances: (address: Address) => Promise<GatewayBalances>;
   /** Holdings on other chains: gas tokens, and USDC moved there — never throws; a dead chain reports nothing found. */
   walletHoldings: (address: Address) => Promise<TokenHolding[]>;
+  /** Drop a wallet's cached holdings, so the next read is fresh. */
+  forgetHoldings?: (address: Address) => void;
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>;
   /** How long to wait for a just-submitted transaction to become visible. */
   receiptPolling?: { attempts: number; delayMs: number };
@@ -207,6 +209,12 @@ export function createApp(deps: AppDeps) {
     return c.json({
       chainId: chain.id,
       totalUsd: display,
+      /**
+       * Everything the wallet holds, in dollars: Arc USDC, Gateway deposits,
+       * and every priced holding on other chains. The headline number on
+       * Home. `totalUsd` stays the Arc-only figure a send can spend.
+       */
+      portfolioUsd: formatUsd(spendableUsd + investmentsUsd),
       usdc: { amount: amount.toString(), displayAmount: display },
       gateway: gatewayValue,
       otherHoldings: holdings,
@@ -512,6 +520,10 @@ export function createApp(deps: AppDeps) {
 
       // Verified against the receipt above, so it settles immediately.
       await store.settleExecution(execution.id, 'success');
+
+      // Money just moved: the next balance read should see it, not a cached
+      // scan from before.
+      deps.forgetHoldings?.(wallet);
 
       /*
        * A recipient becomes "known" only here: after a send the user approved

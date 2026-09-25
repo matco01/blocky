@@ -41,7 +41,7 @@ type BalanceState =
   | { state: 'error'; message: string; lastBalance: string | null };
 
 /** How often the balance refreshes while Home is on screen, so incoming money shows up. */
-const BALANCE_POLL_MS = 20_000;
+const BALANCE_POLL_MS = 10_000;
 
 /**
  * Home — the first page of the pager.
@@ -124,12 +124,13 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const fetchBalance = useCallback(async () => {
     try {
       const result = await api.balance();
-      lastBalance.current = result.totalUsd;
+      // The headline is everything the user owns, on every chain — not just
+      // the Arc USDC a send can spend.
+      const headline = result.portfolioUsd ?? result.totalUsd;
+      lastBalance.current = headline;
       // Same number as last poll: keep the same state object, so nothing re-renders.
       setBalance((current) =>
-        current.state === 'ready' && current.balance === result.totalUsd
-          ? current
-          : { state: 'ready', balance: result.totalUsd },
+        current.state === 'ready' && current.balance === headline ? current : { state: 'ready', balance: headline },
       );
     } catch (error) {
       if (error instanceof ApiError && error.code === 'wallet_not_ready') {

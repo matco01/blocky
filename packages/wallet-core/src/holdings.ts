@@ -1,5 +1,5 @@
 import { formatUsd, usdValueOf, type Address, type ChainId } from '@blocky/shared';
-import { cached } from './cache';
+import { cached, uncache } from './cache';
 import { chainsOnNetwork } from './chains';
 import { getPriceSnapshot, priceAsDecimal, type PriceSnapshot } from './prices';
 import type { ChainReader } from './rpc';
@@ -27,8 +27,8 @@ export interface TokenHolding {
   stable: boolean;
 }
 
-/** Long enough to absorb the balance poll, short enough that money moved in shows up within a refresh or two. */
-const HOLDINGS_TTL_MS = 30_000;
+/** Long enough to absorb the balance poll, short enough that money moved in shows up within a refresh. */
+const HOLDINGS_TTL_MS = 15_000;
 
 /**
  * Scan every chain on this network that the reader supports. Arc is skipped:
@@ -47,6 +47,11 @@ export function fetchWalletHoldings(
   fetchImpl: typeof fetch = fetch,
 ): Promise<TokenHolding[]> {
   return cached(fetchImpl, `holdings:${owner.toLowerCase()}`, HOLDINGS_TTL_MS, () => scan(reader, owner, fetchImpl));
+}
+
+/** Forget a wallet's cached scan — after money moves, so the next read sees it. */
+export function forgetWalletHoldings(owner: Address, fetchImpl: typeof fetch = fetch): void {
+  uncache(fetchImpl, `holdings:${owner.toLowerCase()}`);
 }
 
 async function scan(reader: ChainReader, owner: Address, fetchImpl: typeof fetch): Promise<TokenHolding[]> {

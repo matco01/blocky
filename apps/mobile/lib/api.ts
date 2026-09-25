@@ -38,7 +38,10 @@ export function setTokenGetter(getter: TokenGetter) {
 
 const BalanceSchema = z.object({
   chainId: z.number(),
+  /** Arc USDC only: what a send can spend. */
   totalUsd: z.string(),
+  /** Everything the wallet holds, on every chain. Absent from older servers. */
+  portfolioUsd: z.string().optional(),
   usdc: z.object({ amount: z.string(), displayAmount: z.string() }),
   gateway: z
     .object({

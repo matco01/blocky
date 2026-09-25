@@ -10,6 +10,7 @@ import {
   createChainReader,
   fetchGatewayBalances,
   fetchWalletHoldings,
+  forgetWalletHoldings,
   getChain,
   rpcConfigFromEnv,
 } from '@blocky/wallet-core';
@@ -66,6 +67,7 @@ const app = createApp({
     : null,
   gatewayBalances: (address) => fetchGatewayBalances(address, { testnet: IS_TESTNET }),
   walletHoldings: (address) => fetchWalletHoldings(reader, address),
+  forgetHoldings: (address) => forgetWalletHoldings(address),
   explorerTransfers,
   logRequests: true,
 });
