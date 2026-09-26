@@ -11,7 +11,7 @@ export interface Capability {
 export const STARTER_CAPABILITIES: Capability[] = [
   { title: 'What can you do?', action: { kind: 'capabilities' } },
   { title: 'Send $', action: { kind: 'prefill', text: 'Send $' } },
-  { title: 'Buy crypto', action: { kind: 'prefill', text: 'Buy HYPE with $' } },
+  { title: 'Buy a stock', action: { kind: 'prefill', text: 'Buy Apple for $' } },
 ];
 
 /**
@@ -26,6 +26,7 @@ export const ALL_CAPABILITIES: Capability[] = [
   { title: 'Send USDC', action: { kind: 'prefill', text: 'Send $' } },
   { title: 'Buy ETH', action: { kind: 'prefill', text: 'Get ETH on Arbitrum for $' } },
   { title: 'Buy HYPE', action: { kind: 'prefill', text: 'Buy HYPE with $' } },
+  { title: 'Buy a stock', action: { kind: 'prefill', text: 'Buy Apple for $' } },
   { title: 'Move to another chain', action: { kind: 'prefill', text: 'Move to Base, with a bit of gas: $' } },
   { title: 'My balance', action: { kind: 'send', text: "What's my balance?" } },
   { title: 'Token prices', action: { kind: 'send', text: "What are ETH and HYPE worth right now?" } },

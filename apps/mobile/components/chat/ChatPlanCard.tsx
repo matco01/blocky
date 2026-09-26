@@ -8,6 +8,7 @@ import {
   planFeeLabel,
   planFeeName,
   planGasTopUpLabel,
+  planGasTopUpReason,
   planVerb,
 } from '../../lib/planLabels';
 import { useTheme } from '../../theme';
@@ -81,7 +82,7 @@ export function ChatPlanCard({
           {amount}
         </Text>
         <Text variant="body" tone="secondary">
-          to {planDestinationLabel(plan)}
+          {planDestinationLabel(plan)}
         </Text>
         {planArrivalLabel(plan) ? (
           <Text variant="caption" tone="tertiary">
@@ -90,7 +91,7 @@ export function ChatPlanCard({
         ) : null}
         {planGasTopUpLabel(plan) ? (
           <Text variant="caption" tone="tertiary">
-            {planGasTopUpLabel(plan)}
+            {planGasTopUpLabel(plan)}. {planGasTopUpReason(plan)}
           </Text>
         ) : null}
       </View>

@@ -28,7 +28,15 @@ const IntentBase = {
    * Shown in the confirmation card *alongside* — never instead of — the
    * planner's computed summary, so a mismatch is visible to the user.
    */
-  rationale: z.string().min(1).max(280),
+  rationale: z
+    .string()
+    .min(1)
+    .max(280)
+    // The user sees this beside the planner's own summary, as a check on it. A
+    // stand-in checks nothing, and has come with careless proposals — send it back.
+    .refine((text) => !/^\s*(placeholder|todo|tbd|n\/a|none|test|\.+|-+)\s*$/i.test(text), {
+      message: 'Write what you actually mean to do, in a sentence — not a placeholder.',
+    }),
 };
 
 export const TransferIntentSchema = z.object({
@@ -37,9 +45,9 @@ export const TransferIntentSchema = z.object({
   amount: AmountSpecSchema,
   recipient: RecipientRefSchema,
   /**
-   * Normally omitted. The unified USDC balance means the planner picks the
-   * cheapest chain; the model should only pin this if the user explicitly asked
-   * for a specific network.
+   * The chain the money leaves from, and the recipient receives it on.
+   * Omitted for Arc, where the user's dollars live; set when paying from a
+   * balance on another chain.
    */
   chainId: ChainIdSchema.optional(),
   ...IntentBase,
@@ -69,14 +77,16 @@ export const BridgeIntentSchema = z.object({
   fromChainId: ChainIdSchema.optional(),
   /**
    * Arrive as a different token than the one sent — e.g. send USDC, receive
-   * ETH on Base. Omit to arrive as the same token. What can be received is
-   * the planner's call: an unsupported token is refused, never guessed at.
+   * ETH on Base, or a stock ("AAPL") on Robinhood Chain. Omit to arrive as the
+   * same token. What can be received is the planner's call: an unsupported
+   * token is refused, never guessed at.
    */
   receive: TokenRefSchema.optional(),
   /**
-   * Also deliver a little of the destination chain's gas token, so the money
-   * can be moved again once it lands. Paid on top of `amount`, and skipped
-   * when the user already holds enough there.
+   * A little of the destination chain's gas token, so what lands can be moved
+   * or sold again. On by default for anything leaving Arc: added when the user
+   * holds none there, paid on top of `amount`. `false` only when they said
+   * they don't want it.
    */
   includeGas: z.boolean().optional(),
   ...IntentBase,

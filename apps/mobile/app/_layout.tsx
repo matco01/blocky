@@ -102,6 +102,7 @@ function Gate() {
           <Stack.Screen name="activity" options={{ presentation: 'modal' }} />
           <Stack.Screen name="limits" options={{ presentation: 'modal' }} />
           <Stack.Screen name="send" options={{ presentation: 'modal', gestureEnabled: false }} />
+          <Stack.Screen name="send-all" options={{ presentation: 'modal', gestureEnabled: false }} />
         </Stack.Protected>
       </Stack>
     </>

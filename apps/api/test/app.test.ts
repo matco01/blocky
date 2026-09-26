@@ -501,7 +501,7 @@ describe('agent chat', () => {
     const calls: Array<{ message: string; history: readonly { role: string; content: string }[] }> = [];
     agent = async (_user, message, history) => {
       calls.push({ message, history });
-      return { kind: 'reply', reply: 'ok', plan: null, decision: null, status: 'ok', usage: {} as never };
+      return { kind: 'reply', reply: 'ok', plan: null, decision: null, plans: [], status: 'ok', usage: {} as never };
     };
     return calls;
   }

@@ -1,7 +1,9 @@
 import type { Plan, PolicyDecision } from '@blocky/shared';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, type AgentResponse, type ChatTurn } from './api';
 import { ALL_CAPABILITIES, type Capability } from './capabilities';
+import { clearChat, loadChat, saveChat } from './chatStore';
+import { restoreSentPlans, sentPlanIds, useSentVersion, wasPlanSent } from './handoff';
 /**
  * Chat state for the home screen.
  *
@@ -15,9 +17,11 @@ export type ChatMessage =
       id: string;
       role: 'assistant';
       text: string;
-      /** A proposed send. Never executed from here — the card hands it to Send. */
-      plan: Plan | null;
-      decision: PolicyDecision | null;
+      /**
+       * Proposed sends, in order — one card each. Never executed from here:
+       * a card hands its plan to Send, and "Approve all" hands them all over.
+       */
+      plans: Array<{ plan: Plan; decision: PolicyDecision }>;
       /** Why a request could not become a plan, in words the user can act on. */
       note: string | null;
       /** Tappable actions, shown under the text. Set only by `showCapabilities`. */
@@ -35,10 +39,22 @@ export type ChatMessage =
 const HISTORY_LIMIT = 20;
 
 let nextId = 0;
-const id = () => `m${++nextId}`;
+// Unique across launches too: saved messages come back with their ids.
+const launch = Date.now().toString(36);
+const id = () => `m${launch}-${++nextId}`;
 
 export function useChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // The conversation picks up where it left off, cards and all.
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const saved = loadChat();
+    restoreSentPlans(saved?.sentPlanIds ?? []);
+    return saved?.messages ?? [];
+  });
+  const sentVersion = useSentVersion();
+
+  useEffect(() => {
+    saveChat(messages, sentPlanIds());
+  }, [messages, sentVersion]);
   const [busy, setBusy] = useState(false);
 
   // The latest messages without re-creating `send` on every change.
@@ -140,6 +156,7 @@ export function useChat() {
     busyRef.current = false;
     setBusy(false);
     setMessages([]);
+    clearChat();
   }, []);
 
   return { messages, busy, send, retry, showCapabilities, reset, sayLocally };
@@ -149,9 +166,9 @@ type AssistantMessage = Extract<ChatMessage, { role: 'assistant' }>;
 
 function assistantMessage(
   text: string,
-  extra: Partial<Pick<AssistantMessage, 'plan' | 'decision' | 'note' | 'capabilities'>> = {},
+  extra: Partial<Pick<AssistantMessage, 'plans' | 'note' | 'capabilities'>> = {},
 ): AssistantMessage {
-  return { id: id(), role: 'assistant', text, plan: null, decision: null, note: null, capabilities: null, ...extra };
+  return { id: id(), role: 'assistant', text, plans: [], note: null, capabilities: null, ...extra };
 }
 
 function fromResponse(response: AgentResponse): ChatMessage {
@@ -167,7 +184,14 @@ function fromResponse(response: AgentResponse): ChatMessage {
         : null;
 
   return response.kind === 'plan'
-    ? assistantMessage(response.reply, { plan: response.plan, decision: response.decision, note })
+    ? assistantMessage(response.reply, {
+        plans: response.plans.length
+          ? response.plans
+          : response.plan && response.decision
+            ? [{ plan: response.plan, decision: response.decision }]
+            : [],
+        note,
+      })
     : assistantMessage(response.reply, { note });
 }
 
@@ -184,7 +208,19 @@ function toHistory(messages: readonly ChatMessage[]): ChatTurn[] {
     if (message.role === 'user') {
       turns.push({ role: 'user', content: message.text });
     } else if (message.role === 'assistant') {
-      const content = [message.text, message.plan ? `Proposed: ${message.plan.summary}` : null, message.note]
+      // What became of each card, not just that it was proposed: "now do the
+      // rest" only makes sense if Blocky knows which ones went.
+      const content = [
+        message.text,
+        ...message.plans.map(({ plan, decision }) =>
+          wasPlanSent(plan.id)
+            ? `Approved by the user and sent: ${plan.summary}`
+            : decision.outcome === 'deny'
+              ? `Proposed, but blocked by their settings: ${plan.summary}`
+              : `Proposed, not approved (yet): ${plan.summary}`,
+        ),
+        message.note,
+      ]
         .filter(Boolean)
         .join('\n');
       if (content) turns.push({ role: 'assistant', content: content.slice(0, 4000) });

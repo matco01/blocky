@@ -38,6 +38,26 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
+/** Put back what a saved conversation had sent — quietly: it runs while the chat first renders. */
+export function restoreSentPlans(planIds: readonly string[]): void {
+  for (const planId of planIds) sent.add(planId);
+}
+
+/** Every chat plan sent so far, by id — saved with the conversation. */
+export function sentPlanIds(): string[] {
+  return [...sent];
+}
+
+/** A number that changes whenever a plan is marked sent. */
+export function useSentVersion(): number {
+  return useSyncExternalStore(subscribe, () => version);
+}
+
+/** Whether a chat plan was approved and sent — read outside React, for the agent's history. */
+export function wasPlanSent(planId: string): boolean {
+  return sent.has(planId);
+}
+
 /** Re-renders when any plan is marked sent. */
 export function useSentPlans(): (planId: string) => boolean {
   useSyncExternalStore(subscribe, () => version);

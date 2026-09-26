@@ -16,6 +16,7 @@
  */
 
 import { cached } from './cache';
+import { STOCKS } from './stocks';
 
 const API = 'https://coins.llama.fi/prices/current';
 
@@ -88,7 +89,7 @@ export async function getTokenPriceUsd(
   fetchImpl: typeof fetch = fetch,
 ): Promise<PriceQuote | null> {
   const key = symbol.trim().toUpperCase();
-  if (!KNOWN_SYMBOLS[key]) return null;
+  if (!KNOWN_SYMBOLS[key] && !STOCKS.some((s) => s.symbol === key)) return null;
 
   return (await getPriceSnapshot(fetchImpl)).get(key) ?? null;
 }
@@ -108,9 +109,18 @@ export function priceAsDecimal(quote: PriceQuote | null): string | null {
   return /^0\.0+$/.test(decimal) ? null : decimal;
 }
 
+/**
+ * DefiLlama's key for each symbol: a CoinGecko slug for crypto, the token
+ * itself for a stock — its price is the market price of that exact token.
+ */
+const PRICE_KEYS: ReadonlyArray<[symbol: string, key: string]> = [
+  ...Object.entries(KNOWN_SYMBOLS).map(([symbol, slug]): [string, string] => [symbol, `coingecko:${slug}`]),
+  ...STOCKS.map((s): [string, string] => [s.symbol, `robinhood:${s.address}`]),
+];
+
 async function fetchSnapshot(fetchImpl: typeof fetch): Promise<PriceSnapshot> {
-  const slugs = [...new Set(Object.values(KNOWN_SYMBOLS))];
-  const response = await fetchImpl(`${API}/${slugs.map((slug) => `coingecko:${slug}`).join(',')}`);
+  const keys = [...new Set(PRICE_KEYS.map(([, key]) => key))];
+  const response = await fetchImpl(`${API}/${keys.join(',')}`);
 
   if (!response.ok) {
     throw new Error(`Price request failed with ${response.status}`);
@@ -122,8 +132,9 @@ async function fetchSnapshot(fetchImpl: typeof fetch): Promise<PriceSnapshot> {
 
   const snapshot = new Map<string, PriceQuote>();
 
-  for (const [symbol, slug] of Object.entries(KNOWN_SYMBOLS)) {
-    const coin = body.coins?.[`coingecko:${slug}`];
+  for (const [symbol, key] of PRICE_KEYS) {
+    // DefiLlama may echo an address key in its own case.
+    const coin = body.coins?.[key] ?? Object.entries(body.coins ?? {}).find(([k]) => k.toLowerCase() === key)?.[1];
     if (!coin) continue;
 
     snapshot.set(symbol, {

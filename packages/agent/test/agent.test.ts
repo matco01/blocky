@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
 import { estimateCostUsd, runAgentTurn, type AgentTools } from '../src/agent';
-import { PROPOSE_INTENT } from '../src/tools';
+import { PROPOSE_INTENT, TOOLS } from '../src/tools';
 
 /**
  * Loop tests against a scripted client. No network, no spend.
@@ -56,6 +56,8 @@ const tools: AgentTools = {
   getRecentActivity: async () => ({ items: [], complete: true }),
   getArcEcosystem: async () => ({ protocols: [] }),
   getMarketOverview: async () => ({ totalMarketCapUsd: 2.9e12 }),
+  remember: async (note) => ({ saved: true, note }),
+  forgetMemory: async (id) => ({ forgotten: id === 'abc' }),
 };
 
 const text = (value: string): Anthropic.TextBlock => ({
@@ -278,7 +280,7 @@ describe('proposing an intent', () => {
 
     expect(turn.kind).toBe('intent');
     if (turn.kind === 'intent') {
-      expect(turn.intent).not.toHaveProperty('calldata');
+      expect(turn.proposals[0]?.intent).not.toHaveProperty('calldata');
     }
   });
 });
@@ -363,7 +365,7 @@ describe('planning inside the turn', () => {
     });
 
     expect(turn.kind).toBe('intent');
-    if (turn.kind === 'intent') expect(turn.plan).toBe('the plan');
+    if (turn.kind === 'intent') expect(turn.proposals.map((p) => p.plan)).toEqual(['the plan']);
     // A plan that builds costs nothing extra: no second model call.
     expect(calls).toHaveLength(1);
   });
@@ -477,5 +479,138 @@ describe('searching the web', () => {
 
     expect(turn.usage.webSearches).toBe(2);
     expect(estimateCostUsd(turn.usage)).toBeCloseTo(0.02);
+  });
+});
+
+describe('several proposals in one reply', () => {
+  const HOME_FROM = (fromChainId: number) => ({
+    type: 'bridge',
+    token: { kind: 'symbol', symbol: 'ETH' },
+    amount: { kind: 'max' },
+    fromChainId,
+    toChainId: 5042,
+    rationale: 'Bring this chain home to Arc.',
+  });
+
+  it('plans every one, not just the first', async () => {
+    const { client, calls } = fakeClient([
+      {
+        content: [
+          text('Bringing both home.'),
+          toolUse(PROPOSE_INTENT, { intent: HOME_FROM(42161) }, 'a'),
+          toolUse(PROPOSE_INTENT, { intent: HOME_FROM(4663) }, 'b'),
+        ],
+      },
+    ]);
+
+    const turn = await runAgentTurn('bring everything home', {
+      client,
+      tools,
+      plan: async (intent) => ({ ok: true, plan: intent.type === 'bridge' ? intent.fromChainId : null }),
+    });
+
+    expect(turn.kind).toBe('intent');
+    if (turn.kind === 'intent') expect(turn.proposals.map((p) => p.plan)).toEqual([42161, 4663]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('keeps what planned, and hands back only what did not', async () => {
+    const { client, calls } = fakeClient([
+      {
+        content: [
+          toolUse(PROPOSE_INTENT, { intent: HOME_FROM(42161) }, 'a'),
+          toolUse(PROPOSE_INTENT, { intent: { ...HOME_FROM(4663), toChainId: 42161 } }, 'b'),
+        ],
+      },
+      { content: [text('Here they are.'), toolUse(PROPOSE_INTENT, { intent: HOME_FROM(4663) }, 'c')] },
+    ]);
+
+    const turn = await runAgentTurn('bring everything home', {
+      client,
+      tools,
+      plan: async (intent) =>
+        intent.type === 'bridge' && intent.toChainId !== 5042
+          ? { ok: false, message: 'Home is Arc.' }
+          : { ok: true, plan: intent.type === 'bridge' ? intent.fromChainId : null },
+    });
+
+    expect(turn.kind).toBe('intent');
+    if (turn.kind === 'intent') expect(turn.proposals.map((p) => p.plan)).toEqual([42161, 4663]);
+    const handedBack = JSON.stringify(calls[1]?.messages.at(-1));
+    expect(handedBack).toContain('do not propose it again');
+    expect(handedBack).toContain('Home is Arc.');
+  });
+
+  it('sends back a placeholder rationale instead of planning it', async () => {
+    let planned = 0;
+    const { client, calls } = fakeClient([
+      { content: [toolUse(PROPOSE_INTENT, { intent: { ...HOME_FROM(4663), rationale: 'placeholder' } })] },
+      { content: [toolUse(PROPOSE_INTENT, { intent: HOME_FROM(4663) })] },
+    ]);
+
+    const turn = await runAgentTurn('bring it home', {
+      client,
+      tools,
+      plan: async () => ((planned += 1), { ok: true, plan: 'x' }),
+    });
+
+    expect(turn.kind).toBe('intent');
+    expect(planned).toBe(1);
+    expect(JSON.stringify(calls[1]?.messages.at(-1))).toContain('not a placeholder');
+  });
+});
+
+describe('chains by name', () => {
+  it('asks the model for a chain name, never a number', () => {
+    const schema = JSON.stringify(TOOLS.find((tool) => tool.name === PROPOSE_INTENT)!.input_schema);
+
+    expect(schema).toContain('"toChainId":{"type":"string","enum":["arc"');
+    expect(schema).not.toContain('"toChainId":{"type":"integer"');
+  });
+
+  it('turns the name into the id for this network', async () => {
+    const intent = { type: 'bridge', token: { kind: 'symbol', symbol: 'USDC' }, amount: { kind: 'max' }, fromChainId: 'arbitrum', toChainId: 'arc', rationale: 'Bring Arbitrum home to Arc.' };
+    let seen: unknown = null;
+
+    for (const [testnet, arc] of [[false, 5042], [true, 5042002]] as const) {
+      const { client } = fakeClient([{ content: [toolUse(PROPOSE_INTENT, { intent })] }]);
+      await runAgentTurn('home', { client, tools, testnet, plan: async (parsed) => ((seen = parsed), { ok: true, plan: 1 }) });
+      expect(seen).toMatchObject({ toChainId: arc });
+    }
+  });
+});
+
+describe('memory', () => {
+  it('puts what it remembers in front of the message, fenced as data', async () => {
+    const { client, calls } = fakeClient([{ content: [text('Sending to Maria.')] }]);
+
+    await runAgentTurn('send mum $20', { client, tools, memories: [{ id: 'abc', note: 'Mum is the contact Maria.' }] });
+
+    const sent = JSON.stringify(calls[0]?.messages.at(-1));
+    expect(sent).toContain('What you remember about this user');
+    expect(sent).toContain('[abc] Mum is the contact Maria.');
+    expect(sent).toContain('untrusted-data');
+    expect(sent).toContain('send mum $20');
+  });
+
+  it('sends the plain message when there is nothing to remember', async () => {
+    const { client, calls } = fakeClient([{ content: [text('hi')] }]);
+
+    await runAgentTurn('hi', { client, tools });
+
+    expect(calls[0]?.messages.at(-1)).toEqual({ role: 'user', content: 'hi' });
+  });
+
+  it('remembers and forgets through its tools', async () => {
+    const { client, calls } = fakeClient([
+      { content: [toolUse('remember', { note: 'Keeps about $50 on Arc.' }, 'r'), toolUse('forget_memory', { id: 'abc' }, 'f')] },
+      { content: [text("Got it, I'll remember that.")] },
+    ]);
+
+    await runAgentTurn('always keep 50 on arc', { client, tools });
+
+    const results = JSON.stringify(calls[1]?.messages.at(-1));
+    expect(results).toContain('Keeps about $50 on Arc.');
+    expect(results).toContain('forgotten');
   });
 });

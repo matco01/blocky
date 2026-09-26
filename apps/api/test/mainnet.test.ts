@@ -10,7 +10,9 @@ import { buildPlan, type PlannerContext } from '@blocky/planner';
 import { CHAIN, IntentSchema, type Address, type Plan } from '@blocky/shared';
 import {
   NATIVE_TOKEN,
+  acrossPeriphery,
   acrossSpokePool,
+  stockBySymbol,
   gasZipDepositContract,
   groupCalls,
   transactionFor,
@@ -105,7 +107,7 @@ function context(over: Partial<PlannerContext> = {}): PlannerContext {
 
 async function stored(intent: Record<string, unknown>, ctx: PlannerContext): Promise<Plan> {
   const outcome = await buildPlan(
-    IntentSchema.parse({ type: 'bridge', token: { kind: 'symbol', symbol: 'USDC' }, amount: { kind: 'token', value: '20' }, rationale: 'test', ...intent }),
+    IntentSchema.parse({ type: 'bridge', token: { kind: 'symbol', symbol: 'USDC' }, amount: { kind: 'token', value: '20' }, rationale: 'Move it as the user asked.', ...intent }),
     ctx,
   );
   if (!outcome.ok) throw new Error(outcome.failure.message);
@@ -300,6 +302,7 @@ describe('coming home from another chain', () => {
       onArbitrum({
         acrossNativeSwapQuote: async (_f, _t, input) => ({
           periphery: '0x97ccdbea4632140639ad5ea9b944aa034eb15fd4',
+          inputToken: NATIVE_TOKEN,
           inputAmount: input,
           data: '0x110560addeadbeef',
           outputToken: USDC,
@@ -412,5 +415,112 @@ describe("Blocky's fee", () => {
       expect((await report(p.id, [hash('c'), hash('d')])).status).toBe(201);
       expect((await store.listExecutions('did:privy:alice'))[0]?.txHash).toBe(hash('c'));
     });
+  });
+});
+
+describe('stocks', () => {
+  const APPLE = stockBySymbol('AAPL')!;
+  const PERIPHERY = acrossPeriphery(CHAIN.robinhood)!;
+  const appleToken = { chainId: CHAIN.robinhood, address: APPLE.address, symbol: 'AAPL', name: 'Apple', decimals: 18, logoUrl: null, verified: true } as const;
+  const priceOf: PlannerContext['priceOf'] = async (token) => (token.address === APPLE.address ? '340' : token.address === NATIVE_TOKEN ? '2600' : '1');
+
+  it('records a buy — approve and Across’s deposit from Arc, exactly as planned', async () => {
+    const p = await stored(
+      { toChainId: CHAIN.robinhood, receive: { kind: 'symbol', symbol: 'AAPL' } },
+      context({
+        resolveToken: async (_ref, chainId) =>
+          chainId === CHAIN.robinhood ? appleToken : { chainId: CHAIN.arc, address: USDC, symbol: 'USDC', name: 'USD Coin', decimals: 6, logoUrl: null, verified: true },
+        priceOf,
+        acrossSwapQuote: async (_f, _t, input) => ({
+          spokePool: SPOKE,
+          inputAmount: input,
+          depositData: '0xad5425c6deadbeef',
+          outputToken: APPLE.address,
+          expectedOut: (input * 10n ** 12n * 998n) / 340_000n,
+          minOut: (input * 10n ** 12n * 950n) / 340_000n,
+          etaSeconds: 2,
+        }),
+      }),
+    );
+    receipts.set(hash('a'), sent(p.calls));
+
+    expect(p.summary).toMatch(/^Buy \$20\.00 of Apple/);
+    expect((await report(p.id, [hash('a')])).status).toBe(201);
+  });
+
+  const selling = (token = appleToken) =>
+    stored(
+      { fromChainId: CHAIN.robinhood, toChainId: CHAIN.arc, token: { kind: 'symbol', symbol: 'AAPL' }, amount: { kind: 'max' } },
+      context({
+        resolveToken: async (_ref, chainId) =>
+          chainId === CHAIN.robinhood ? token : { chainId: CHAIN.arc, address: USDC, symbol: 'USDC', name: 'USD Coin', decimals: 6, logoUrl: null, verified: true },
+        priceOf,
+        balanceOf: async () => 500_000_000_000_000_000n,
+        nativeBalanceUsd: async () => '1',
+        acrossNativeSwapQuote: async (_f, _t, input, _r, inputToken) => ({
+          periphery: PERIPHERY,
+          inputToken: inputToken!,
+          inputAmount: input,
+          data: '0x110560addeadbeef',
+          outputToken: USDC,
+          expectedOut: 169_800_000n,
+          minOut: 166_000_000n,
+          etaSeconds: 1,
+        }),
+      }),
+    );
+
+  it('records a sale — the approval, then the sale, each exactly as planned', async () => {
+    const p = await selling();
+    const [approve, sell] = groupCalls(p.calls);
+    receipts.set(hash('b'), sent(approve!));
+    receipts.set(hash('c'), sent(sell!));
+
+    expect(approve![0]!.to).toBe(APPLE.address);
+    expect((await report(p.id, [hash('b')])).status).toBe(422);
+    expect((await report(p.id, [hash('b'), hash('c')])).status).toBe(201);
+  });
+});
+
+describe('sending from another chain', () => {
+  const ETH_ON_ARBITRUM = { chainId: CHAIN.arbitrum, address: NATIVE_TOKEN, symbol: 'ETH', name: 'ETH', decimals: 18, logoUrl: null, verified: true } as const;
+  const FRIEND = '0x73ecf78d0ef70b850a76774cd3a20b59d4236d8d' as Address;
+
+  async function storedSend(): Promise<Plan> {
+    const outcome = await buildPlan(
+      IntentSchema.parse({
+        type: 'transfer',
+        token: { kind: 'symbol', symbol: 'ETH' },
+        amount: { kind: 'token', value: '0.001' },
+        recipient: { kind: 'address', address: FRIEND },
+        chainId: CHAIN.arbitrum,
+        rationale: 'Send ETH from Arbitrum to that address.',
+      }),
+      context({
+        resolveToken: async () => ETH_ON_ARBITRUM,
+        resolveRecipient: async () => ({ address: FRIEND, display: '0x73ec…6d8d', ensName: null, contactLabel: null, known: false, isContract: false }),
+        balanceOf: async () => 10_000_000_000_000_000n,
+        nativeBalanceUsd: async () => '26',
+      }),
+    );
+    if (!outcome.ok) throw new Error(outcome.failure.message);
+    await store.upsertUser({ id: 'did:privy:alice', walletAddress: WALLET });
+    await store.putPlan('did:privy:alice', outcome.plan, 'agent');
+    return outcome.plan;
+  }
+
+  it('records ETH sent on Arbitrum — the exact transaction, since ETH leaves no Transfer log', async () => {
+    const p = await storedSend();
+    receipts.set(hash('a'), sent(p.calls));
+
+    expect(p.calls[0]).toMatchObject({ chainId: CHAIN.arbitrum, to: FRIEND, value: '1000000000000000', data: '0x' });
+    expect((await report(p.id, [hash('a')])).status).toBe(201);
+  });
+
+  it('refuses one that sent a different amount', async () => {
+    const p = await storedSend();
+    receipts.set(hash('b'), sent([{ ...p.calls[0]!, value: '2000000000000000' }]));
+
+    expect((await report(p.id, [hash('b')])).status).toBe(422);
   });
 });

@@ -157,4 +157,22 @@ export const balanceSnapshots = pgTable(
   (table) => [index('balance_snapshots_user_taken_idx').on(table.userId, table.takenAt)],
 );
 
-export const schema = { users, policies, plans, executions, contacts, sessions, balanceSnapshots };
+/**
+ * What Blocky remembers about a user between conversations: short notes it
+ * wrote itself from what they said — "keeps $50 on Arc", "Mum is the contact
+ * Maria". Loaded into every conversation; the user can have any one forgotten.
+ */
+export const memories = pgTable(
+  'memories',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    note: text('note').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [index('memories_user_idx').on(table.userId)],
+);
+
+export const schema = { users, policies, plans, executions, contacts, sessions, balanceSnapshots, memories };

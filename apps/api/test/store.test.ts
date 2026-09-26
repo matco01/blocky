@@ -327,3 +327,28 @@ describe('surviving a restart', () => {
     }
   });
 });
+
+describe('memories', () => {
+  it('remembers notes, refuses repeats, and forgets on request', async () => {
+    await store.upsertUser({ id: 'did:privy:mem', walletAddress: '0x000000000000000000000000000000000000beef' });
+
+    expect(await store.addMemory('did:privy:mem', '  Keeps about $50 on Arc. ')).toEqual({ saved: true });
+    expect((await store.addMemory('did:privy:mem', 'keeps about $50 on arc.')).saved).toBe(false);
+
+    const [memory] = await store.listMemories('did:privy:mem');
+    expect(memory?.note).toBe('Keeps about $50 on Arc.');
+
+    expect(await store.forgetMemory('did:privy:mem', memory!.id)).toBe(true);
+    expect(await store.listMemories('did:privy:mem')).toEqual([]);
+  });
+
+  it('keeps each user’s notes to themselves', async () => {
+    await store.upsertUser({ id: 'did:privy:a', walletAddress: '0x000000000000000000000000000000000000000a' });
+    await store.upsertUser({ id: 'did:privy:b', walletAddress: '0x000000000000000000000000000000000000000b' });
+    await store.addMemory('did:privy:a', 'Likes Apple.');
+    const [note] = await store.listMemories('did:privy:a');
+
+    expect(await store.listMemories('did:privy:b')).toEqual([]);
+    expect(await store.forgetMemory('did:privy:b', note!.id)).toBe(false);
+  });
+});

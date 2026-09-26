@@ -22,3 +22,4 @@ export * from './prices';
 export * from './ecosystem';
 export * from './holdings';
 export * from './market';
+export * from './stocks';

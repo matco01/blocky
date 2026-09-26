@@ -1,5 +1,5 @@
 import { displayUsd, formatUnits, parseUsd } from '@blocky/shared';
-import { CHAINS } from '@blocky/wallet-core';
+import { CHAINS, STOCK_CHAIN, stockBySymbol } from '@blocky/wallet-core';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -139,7 +139,9 @@ export default function PortfolioScreen() {
         .filter((holding) => !(holding.stable && holding.usd))
         .map((holding) => {
           const key = `token-${holding.chainId}-${holding.symbol}`;
-          const label = `${holding.symbol} · ${chainName(holding.chainId)}`;
+          // A stock reads as the company — "Apple" — not a ticker on a chain.
+          const stock = holding.chainId === STOCK_CHAIN ? stockBySymbol(holding.symbol) : null;
+          const label = stock ? stock.name : `${holding.symbol} · ${chainName(holding.chainId)}`;
           return holding.usd
             ? { key, label, usdCents: parseUsd(holding.usd) }
             : { key, label, usdCents: null, amountText: formatTokenAmount(holding.amount, holding.decimals) };

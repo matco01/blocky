@@ -240,20 +240,46 @@ describe('warnings', () => {
 
 describe('where a send can come from', () => {
   /**
-   * The app signs on Arc and nowhere else. A plan for another chain would pass
-   * planning and then fail at the fingerprint, having looked fine on the card.
+   * From wherever the money is: someone holding USDC on Base Sepolia can pay
+   * from there, and the recipient receives it there — with gas paid in that
+   * chain's own token, which they have to hold.
    */
-  it('refuses to send from another chain, and says which one', async () => {
+  it('sends from another chain, where the money is, and says so', async () => {
+    const plan = await planOk(
+      { chainId: CHAIN.baseSepolia },
+      fakeContext({ resolveToken: async () => tokenOn(CHAIN.baseSepolia), nativeBalanceUsd: async () => '5' }),
+    );
+
+    expect(plan.calls).toEqual([expect.objectContaining({ chainId: CHAIN.baseSepolia, to: tokenOn(CHAIN.baseSepolia).address, value: '0' })]);
+    expect(plan.summary).toMatch(/ on Base Sepolia\./);
+  });
+
+  it("sends a chain's own gas token as plain value, keeping back what the fee could be", async () => {
+    const ETH = { ...USDC_ARC, chainId: CHAIN.baseSepolia, address: '0x0000000000000000000000000000000000000000' as const, symbol: 'ETH', name: 'ETH', decimals: 18 };
+    const plan = await planOk(
+      { chainId: CHAIN.baseSepolia, token: { kind: 'symbol', symbol: 'ETH' }, amount: { kind: 'max' } },
+      fakeContext({
+        resolveToken: async () => ETH,
+        priceOf: async () => '2600',
+        balanceOf: async () => 10_000_000_000_000_000n,
+        nativeBalanceUsd: async () => '26',
+      }),
+    );
+    const [call] = plan.calls;
+
+    expect(call).toMatchObject({ chainId: CHAIN.baseSepolia, to: ALICE, data: '0x' });
+    // 0.01 ETH, less three times the $0.10 fee at $2,600.
+    expect(10_000_000_000_000_000n - BigInt(call!.value)).toBe(38_461_538_461_539n * 3n);
+  });
+
+  it("refuses to send off Arc without that chain's gas token", async () => {
     const result = await buildPlan(
       intent({ chainId: CHAIN.baseSepolia }),
-      fakeContext({ resolveToken: async () => tokenOn(CHAIN.baseSepolia) }),
+      fakeContext({ resolveToken: async () => tokenOn(CHAIN.baseSepolia), nativeBalanceUsd: async () => '0' }),
     );
 
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.failure.code).toBe('not_implemented');
-      expect(result.failure.message).toContain('Base Sepolia');
-    }
+    if (!result.ok) expect(result.failure.code).toBe('no_gas_route');
   });
 
   it('refuses when Arc USDC cannot cover the fee', async () => {

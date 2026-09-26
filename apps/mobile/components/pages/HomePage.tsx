@@ -19,6 +19,7 @@ import { ActionButton } from '../ActionButton';
 import { BalanceDisplay } from '../BalanceDisplay';
 import { CapabilityChips } from '../chat/CapabilityChips';
 import { ChatInput } from '../chat/ChatInput';
+import { Button } from '../Button';
 import { ChatPlanCard } from '../chat/ChatPlanCard';
 import { AssistantMessage, ErrorMessage, ThinkingRow, UserMessage } from '../chat/Messages';
 import { Icon } from '../Icon';
@@ -305,23 +306,39 @@ export function HomePage({ page, onPageChange }: PageProps) {
                   return <ErrorMessage key={message.id} text={message.text} onRetry={() => retry(message.id)} />;
 
                 case 'assistant': {
-                  const plan = message.plan;
                   // Blocky rides beside his newest reply only — the one still
                   // last in the whole thread, not every reply he's ever sent.
                   const isLatest = index === messages.length - 1;
+                  // Several cards in one reply can go together: one review, one fingerprint.
+                  const waiting = message.plans.filter(
+                    ({ plan, decision }) => !isSent(plan.id) && decision.outcome !== 'deny',
+                  );
 
                   return (
                     <AssistantMessage key={message.id} text={message.text} note={message.note} avatar={isLatest}>
-                      {plan ? (
+                      {message.plans.map(({ plan, decision }) => (
                         <ChatPlanCard
+                          key={plan.id}
                           plan={plan}
-                          decision={message.decision}
+                          decision={decision}
                           sent={isSent(plan.id)}
                           onApprove={(fast) => {
                             handOffPlan(plan);
                             router.push({
                               pathname: '/send',
                               params: { planId: plan.id, ...(fast ? { autosend: '1' } : {}) },
+                            });
+                          }}
+                        />
+                      ))}
+                      {waiting.length > 1 ? (
+                        <Button
+                          label={`Approve all ${waiting.length}`}
+                          onPress={() => {
+                            for (const { plan } of waiting) handOffPlan(plan);
+                            router.push({
+                              pathname: '/send-all',
+                              params: { planIds: waiting.map(({ plan }) => plan.id).join(',') },
                             });
                           }}
                         />

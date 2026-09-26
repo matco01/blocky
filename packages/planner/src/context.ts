@@ -113,6 +113,8 @@ export interface PlannerContext {
     to: ChainId,
     inputAmount: bigint,
     recipient: Address,
+    /** An ERC-20 to sell instead of the gas token — a stock. */
+    inputToken?: Address,
   ): Promise<AcrossNativeSwapQuote | null>;
 
   /** Sanctions and known-scam screening. True means flagged. */
@@ -147,6 +149,8 @@ export type PlanFailureCode =
   | 'insufficient_balance'
   | 'no_gas_route'
   | 'no_bridge_route'
+  /** A swap that would lose too much to a thin market at this size. */
+  | 'price_impact'
   | 'not_implemented';
 
 export interface PlanFailure {

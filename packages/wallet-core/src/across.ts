@@ -39,6 +39,8 @@ const SPOKE_POOLS: Partial<Record<ChainId, Address>> = {
   [CHAIN.arbitrum]: '0xe35e9842fceaca96570b734083f4a58e8f7c5f2a',
   [CHAIN.avalanche]: '0xfe9d541c92e4e90437c7152a00244886de37a658',
   [CHAIN.hyperevm]: '0x35e63ea3eb0fb7a3bc543c71fb66412e1f6b0e04',
+  // From a live sell quote's swapAndBridge, and checked to have code.
+  [CHAIN.robinhood]: '0xd29c85f15df544ba632c9e25829fd29d767d7978',
 };
 
 /**
@@ -84,6 +86,7 @@ export async function fetchAcrossQuote(
 
   const inputToken = getChain(args.from).usdc;
   const outputToken = getChain(args.to).usdc;
+  if (!inputToken || !outputToken) return null;
 
   const params = new URLSearchParams({
     inputToken,
@@ -231,6 +234,8 @@ const SWAP_HANDLERS: Partial<Record<ChainId, Address>> = {
   [CHAIN.arbitrum]: '0x0f7ae28de1c8532170ad4ee566b5801485c13a0e',
   [CHAIN.avalanche]: '0x9610954acdca5ff7905f051a040ce33fe613c60e',
   [CHAIN.hyperevm]: '0x5e7840e06faccb6d1c3b5f5e0d1d3d07f2829bba',
+  // From a live Arc → stock quote's deposit recipient, and checked to have code.
+  [CHAIN.robinhood]: '0xa8ad2e87e2043711d8bec77e8bc3e2683c0ab6bd',
   [CHAIN.arc]: '0xa07480456c4ebad7626e4fdf4a180709e238547b',
 };
 
@@ -309,6 +314,7 @@ export async function fetchAcrossSwapQuote(
   if (!spokePool || !handler || args.from === args.to) return null;
 
   const inputToken = getChain(args.from).usdc;
+  if (!inputToken) return null;
   const wallet = args.recipient.toLowerCase();
 
   const params = new URLSearchParams({
@@ -379,7 +385,7 @@ function bytes32Address(word: Hex): string | null {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Selling a chain's gas token for USDC on another chain                      */
+/*  Selling a token on another chain for USDC — a gas token, or a stock        */
 /* -------------------------------------------------------------------------- */
 
 const SWAP_AND_BRIDGE_ABI = parseAbi([
@@ -388,7 +394,9 @@ const SWAP_AND_BRIDGE_ABI = parseAbi([
 
 export interface AcrossNativeSwapQuote {
   periphery: Address;
-  /** The gas token sold, in its base units — also the value the transaction carries. */
+  /** What is sold: {@link NATIVE_TOKEN} for the gas token, else an ERC-20 the Periphery is approved to take. */
+  inputToken: Address;
+  /** What is sold, in its base units — the value the transaction carries when that is the gas token. */
   inputAmount: bigint;
   /** The call exactly as Across built it, after every check below. */
   data: Hex;
@@ -419,7 +427,7 @@ export interface AcrossNativeSwapQuote {
  * produce is fixed in the call, so a worse swap reverts instead of landing.
  */
 export async function fetchAcrossNativeSwapQuote(
-  args: { from: ChainId; to: ChainId; inputAmount: bigint; recipient: Address },
+  args: { from: ChainId; to: ChainId; inputAmount: bigint; recipient: Address; inputToken?: Address },
   fetchImpl: typeof fetch = fetch,
 ): Promise<AcrossNativeSwapQuote | null> {
   const periphery = acrossPeriphery(args.from);
@@ -427,12 +435,15 @@ export async function fetchAcrossNativeSwapQuote(
   if (!periphery || !spokePool || args.from === args.to || args.inputAmount <= 0n) return null;
 
   const outputToken = getChain(args.to).usdc;
+  if (!outputToken) return null;
   const wallet = args.recipient.toLowerCase();
+  const inputToken = (args.inputToken ?? NATIVE_TOKEN).toLowerCase() as Address;
+  const sellsNative = inputToken === NATIVE_TOKEN;
 
   const params = new URLSearchParams({
     tradeType: 'exactInput',
     amount: args.inputAmount.toString(),
-    inputToken: NATIVE_TOKEN,
+    inputToken,
     originChainId: String(args.from),
     outputToken,
     destinationChainId: String(args.to),
@@ -454,7 +465,8 @@ export async function fetchAcrossNativeSwapQuote(
   const tx = body.swapTx;
   if (!tx?.data || tx.to?.toLowerCase() !== periphery) return refuse('not the pinned Periphery');
   if (tx.chainId !== undefined && tx.chainId !== args.from) return refuse('wrong chain');
-  if (!tx.value || BigInt(tx.value) !== args.inputAmount) return refuse('carries the wrong value');
+  // The gas token rides as value; a token is pulled by the Periphery, so nothing does.
+  if (BigInt(tx.value || '0') !== (sellsNative ? args.inputAmount : 0n)) return refuse('carries the wrong value');
 
   let decoded;
   try {
@@ -468,6 +480,7 @@ export async function fetchAcrossNativeSwapQuote(
 
   if (data.spokePool.toLowerCase() !== spokePool) return refuse('not the pinned SpokePool');
   if (data.swapTokenAmount !== args.inputAmount) return refuse('swaps a different amount');
+  if (!sellsNative && data.swapToken.toLowerCase() !== inputToken) return refuse('sells a different token');
   if (data.submissionFees.amount !== 0n) return refuse('pays a submission fee');
   if (deposit.depositor.toLowerCase() !== wallet) return refuse('deposits for someone else');
   if (bytes32Address(deposit.outputToken) !== outputToken) return refuse('arrives as the wrong token');
@@ -490,6 +503,7 @@ export async function fetchAcrossNativeSwapQuote(
 
   return {
     periphery,
+    inputToken,
     inputAmount: args.inputAmount,
     data: tx.data as Hex,
     outputToken,

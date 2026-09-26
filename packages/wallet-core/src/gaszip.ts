@@ -44,6 +44,8 @@ const SHORT_IDS: Partial<Record<ChainId, number>> = {
   [CHAIN.arbitrum]: 57,
   [CHAIN.avalanche]: 15,
   [CHAIN.hyperevm]: 430,
+  // Gas.zip's /v2/chains lists Robinhood Chain (4663) as short id 526.
+  [CHAIN.robinhood]: 526,
 };
 
 export function gasZipDepositContract(chainId: ChainId): Address | null {

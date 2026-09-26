@@ -15,7 +15,7 @@ export const USDC_ARC: ResolvedToken = {
 };
 
 export function tokenOn(chainId: keyof typeof CHAINS): ResolvedToken {
-  return { ...USDC_ARC, chainId: CHAINS[chainId].id, address: CHAINS[chainId].usdc };
+  return { ...USDC_ARC, chainId: CHAINS[chainId].id, address: CHAINS[chainId].usdc! };
 }
 
 export const ME = '0x1111111111111111111111111111111111111111' as Address;

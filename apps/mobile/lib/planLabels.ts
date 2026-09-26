@@ -1,5 +1,5 @@
 import { displayUsd, formatUnits, parseUsd, type Plan } from '@blocky/shared';
-import { NATIVE_TOKEN, getChain } from '@blocky/wallet-core';
+import { DEFAULT_CHAIN, NATIVE_TOKEN, getChain, stockByAddress } from '@blocky/wallet-core';
 
 /** What a plan sends, as the user would say it: "$25.00", or "12.5 EURC" when unpriced. */
 export function planAmountLabel(plan: Plan): string {
@@ -53,12 +53,26 @@ export function planArrivalLabel(plan: Plan): string | null {
   return `${plan.route?.feeIsCeiling ? 'At least ' : ''}${amount} on ${where}${when}`;
 }
 
-/** "+ $2.00 of ETH for gas", when a gas top-up rides along. */
+/** "+ $0.25 of ETH for fees there", when a gas top-up rides along. */
 export function planGasTopUpLabel(plan: Plan): string | null {
   const paid = plan.outflow[1];
   const gas = plan.inflow[1];
   if (!plan.route?.gasTopUp || !paid || !gas) return null;
-  return `+ ${displayUsd(paid.usdValue ?? '0')} of ${gas.token.symbol} for gas`;
+  return `+ ${displayUsd(paid.usdValue ?? '0')} of ${gas.token.symbol} for fees there`;
+}
+
+/**
+ * Why the top-up is there, said before the user approves — nothing leaves
+ * their wallet unexplained, least of all on a small balance: "Robinhood Chain
+ * charges its fees in ETH, and you have none there. This covers selling it
+ * later; whatever isn't used stays yours."
+ */
+export function planGasTopUpReason(plan: Plan): string | null {
+  const gas = plan.inflow[1];
+  if (!planGasTopUpLabel(plan) || !gas) return null;
+  const chain = getChain(gas.token.chainId).name;
+  const later = planVerb(plan) === 'Buy' ? 'selling it later' : 'moving it again later';
+  return `${chain} charges its fees in ${gas.token.symbol}, and you have none there. This covers ${later}; whatever isn't used stays yours.`;
 }
 
 /** A token amount trimmed for reading: a few significant digits, never a wall of decimals. */
@@ -79,21 +93,51 @@ function describeEta(seconds: number): string {
 
 /** A move between chains that arrives as a different token — USDC in, ETH out. */
 function isSwap(plan: Plan): boolean {
-  return plan.intentType === 'bridge' && plan.inflow[0]?.token.address === NATIVE_TOKEN;
+  const landing = plan.inflow[0]?.token;
+  return plan.intentType === 'bridge' && landing !== undefined && (landing.address === NATIVE_TOKEN || isStock(landing));
 }
 
-/** "Send" pays someone; "Move" is the user's own money changing chains; "Swap" changes what it is, too. */
-export function planVerb(plan: Plan): 'Send' | 'Move' | 'Swap' {
+function isStock(token: Plan['inflow'][number]['token'] | undefined): boolean {
+  return token !== undefined && stockByAddress(token.chainId, token.address) !== null;
+}
+
+/**
+ * "Send" pays someone; "Move" is the user's own money changing chains; "Swap"
+ * changes what it is, too; "Buy" and "Sell" are stocks, said the way people
+ * say them.
+ */
+export function planVerb(plan: Plan): 'Send' | 'Move' | 'Swap' | 'Buy' | 'Sell' {
   if (plan.intentType !== 'bridge') return 'Send';
+  if (isStock(plan.inflow[0]?.token)) return 'Buy';
+  if (isStock(plan.outflow[0]?.token)) return 'Sell';
   return isSwap(plan) ? 'Swap' : 'Move';
 }
 
-/** Where it goes, finishing "… to ___": a person, or the user's own wallet on another chain. */
+/** The stock a plan buys or sells, by name — "Apple" — or null. */
+export function planStockName(plan: Plan): string | null {
+  const token = plan.inflow[0]?.token ?? null;
+  const sold = plan.outflow[0]?.token ?? null;
+  return (token && stockByAddress(token.chainId, token.address)?.name) ?? (sold && stockByAddress(sold.chainId, sold.address)?.name) ?? null;
+}
+
+/**
+ * The line under the amount, finishing "You're sending $20 ___": "to Sam",
+ * "to your wallet on Base" — or, for stocks, "of Apple" and "for USDC on Arc".
+ */
 export function planDestinationLabel(plan: Plan): string {
-  if (plan.recipient) return plan.recipient.display;
+  if (plan.recipient) {
+    // Off Arc, where it lands matters: the recipient receives it on that chain.
+    const chainId = plan.calls[0]?.chainId;
+    const where = chainId !== undefined && chainId !== DEFAULT_CHAIN ? ` on ${getChain(chainId).name}` : '';
+    return `to ${plan.recipient.display}${where}`;
+  }
+
+  const verb = planVerb(plan);
+  if (verb === 'Buy') return `of ${planStockName(plan) ?? 'stocks'}`;
+  if (verb === 'Sell') return `for USDC on ${getChain(plan.inflow[0]!.token.chainId).name}`;
 
   const landing = plan.inflow[0];
-  if (plan.intentType === 'bridge' && landing) return `your wallet on ${getChain(landing.token.chainId).name}`;
+  if (plan.intentType === 'bridge' && landing) return `to your wallet on ${getChain(landing.token.chainId).name}`;
 
-  return 'yourself';
+  return 'to yourself';
 }

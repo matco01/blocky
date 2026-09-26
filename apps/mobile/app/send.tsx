@@ -13,6 +13,7 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { api } from '../lib/api';
+import { reportWithRetry } from '../lib/report';
 import { useModalTopPadding } from '../lib/screenInsets';
 import { confirmWithBiometrics } from '../lib/biometrics';
 import { getHandedOffPlan, markPlanSent } from '../lib/handoff';
@@ -210,7 +211,7 @@ export default function SendScreen() {
           <View style={styles.status}>
             <Text variant="heading">{STAGE_COPY[step.stage]}</Text>
             <Text variant="body" tone="secondary">
-              {planAmountLabel(step.plan)} to {planDestinationLabel(step.plan)}
+              {planAmountLabel(step.plan)} {planDestinationLabel(step.plan)}
             </Text>
           </View>
         ) : null}
@@ -222,7 +223,7 @@ export default function SendScreen() {
             </View>
             <Text variant="title">{planVerb(step.plan) === 'Send' ? 'Sent' : 'On its way'}</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
-              {planAmountLabel(step.plan)} to {planDestinationLabel(step.plan)}
+              {planAmountLabel(step.plan)} {planDestinationLabel(step.plan)}
             </Text>
             {planArrivalLabel(step.plan) ? (
               <Text variant="caption" tone="tertiary" style={styles.center}>
@@ -419,23 +420,6 @@ function parseAmount(input: string): string | null {
 
 function secondsUntil(iso: string): number {
   return Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 1000));
-}
-
-/**
- * Tell the server about the transaction, retrying while it isn't visible yet.
- * Returns whether it was recorded. Never throws: the send already happened.
- */
-async function reportWithRetry(planId: string, txHashes: readonly string[]): Promise<boolean> {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    try {
-      const result = await api.reportExecution(planId, txHashes);
-      if (result.confirmed) return true;
-    } catch {
-      return false;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
-  return false;
 }
 
 const styles = StyleSheet.create({

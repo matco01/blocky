@@ -12,6 +12,7 @@ import {
   mainnet,
   optimism,
   polygon,
+  robinhood,
   unichain,
 } from 'viem/chains';
 
@@ -45,6 +46,7 @@ const VIEM_CHAINS: Record<number, Chain> = {
   [arbitrum.id]: arbitrum,
   [avalanche.id]: avalanche,
   [hyperEvm.id]: hyperEvm,
+  [robinhood.id]: robinhood,
   [baseSepolia.id]: baseSepolia,
   [arbitrumSepolia.id]: arbitrumSepolia,
 };

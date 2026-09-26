@@ -13,6 +13,7 @@ import {
   forgetWalletHoldings,
   getChain,
   rpcConfigFromEnv,
+  usdcAddress,
 } from '@blocky/wallet-core';
 import { fetchExplorerTransfers } from './activity';
 import { createAgentHandler } from './agent';
@@ -49,11 +50,11 @@ const home = getChain(DEFAULT_CHAIN);
  */
 const explorerTransfers = (address: Parameters<typeof fetchExplorerTransfers>[0]) =>
   IS_TESTNET
-    ? fetchExplorerTransfers(address, { apiBase: `${home.explorerUrl}/api/v2`, token: home.usdc })
+    ? fetchExplorerTransfers(address, { apiBase: `${home.explorerUrl}/api/v2`, token: usdcAddress(home.id) })
     : env.BLOCKSCOUT_API_KEY
       ? fetchExplorerTransfers(address, {
           apiBase: `https://api.blockscout.com/${home.id}/api/v2`,
-          token: home.usdc,
+          token: usdcAddress(home.id),
           apiKey: env.BLOCKSCOUT_API_KEY,
         })
       : Promise.reject(new Error('No BLOCKSCOUT_API_KEY configured for mainnet activity.'));

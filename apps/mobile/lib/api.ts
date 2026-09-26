@@ -94,6 +94,8 @@ const AgentResponseSchema = z.object({
   reply: z.string(),
   plan: PlanSchema.nullable(),
   decision: PolicyDecisionSchema.nullable(),
+  /** Every plan in the reply. Older servers send only `plan`. */
+  plans: z.array(z.object({ plan: PlanSchema, decision: PolicyDecisionSchema })).default([]),
   status: z.string(),
 });
 

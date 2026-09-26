@@ -35,6 +35,7 @@ import {
   type GatewayBalances,
   type TokenHolding,
   readUsdcBalance,
+  stockByAddress,
 } from '@blocky/wallet-core';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
@@ -459,7 +460,9 @@ export function createApp(deps: AppDeps) {
         );
       }
 
-      const exactly = index > 0 || shape.kind === 'exact';
+      // A send of a chain's own token (ETH on Arbitrum) leaves no Transfer log
+      // to read: it is checked as the exact transaction instead.
+      const exactly = index > 0 || shape.kind === 'exact' || (shape.kind === 'transfer' && BigInt(shape.call.value) > 0n);
       const matches =
         exactly
           ? isExactTransaction(receipt.transaction, receipt.status, { from: wallet, calls: group })
@@ -845,10 +848,13 @@ function planShape(plan: Plan): PlanShape | null {
     );
     // Blocky charges nothing from other chains; a fee here is not a plan we made.
     if (blockyFee) return null;
+    // What may be approved before the last call: that chain's USDC, or a
+    // listed stock being sold. The approval itself is verified byte for byte.
     const usdc = getChain(chainId).usdc;
+    const approvable = (to: Address) => to === usdc || stockByAddress(chainId, to) !== null;
     const last = plan.calls[plan.calls.length - 1]!;
     const allowed = plan.calls.every(
-      (call) => call.chainId === chainId && (pinned.has(call.to) || (call.to === usdc && call !== last)),
+      (call) => call.chainId === chainId && (pinned.has(call.to) || (approvable(call.to) && call !== last)),
     );
     if (!allowed || !pinned.has(last.to)) return null;
 

@@ -298,13 +298,13 @@ describe('a gas top-up alongside a move', () => {
       priced({ ...acrossOnly, gasZipQuote: async (_f, _t, input) => gasZipQuote(input, 384_000_000_000_000n) }),
     );
 
-    // 20 transactions at the fake $0.10 fee: a $2 top-up.
-    expect(plan.outflow.map((d) => d.amount)).toEqual(['20000000', '2000000']);
+    // Two sales at the fake $0.10 fee, with 3× max-fee headroom: a $0.60 top-up.
+    expect(plan.outflow.map((d) => d.amount)).toEqual(['20000000', '600000']);
     expect(plan.inflow.map((d) => d.token.symbol)).toEqual(['USDC', 'ETH']);
     expect(plan.calls.map((call) => call.to)).toEqual([USDC_ARC.address, SPOKE, GAS_ZIP]);
-    expect(plan.calls[2]?.value).toBe('2000000000000000000');
+    expect(plan.calls[2]?.value).toBe('600000000000000000');
     expect(plan.route?.gasTopUp).toEqual({ provider: 'gas.zip' });
-    expect(plan.summary).toMatch(/^Move \$20\.00 to your wallet on Base, plus \$2\.00 of ETH for gas\./);
+    expect(plan.summary).toMatch(/^Move \$20\.00 to your wallet on Base, plus \$0\.60 of ETH for gas\./);
     expect(plan.warnings.map((w) => w.code)).not.toContain('destination_no_gas_route');
   });
 
@@ -318,9 +318,19 @@ describe('a gas top-up alongside a move', () => {
     expect(plan.route?.gasTopUp).toBeUndefined();
   });
 
-  it('never adds one unasked', async () => {
+  it('adds one on its own when the user has no gas there — Blocky thinks about it for them', async () => {
     const plan = await planFor(
       { toChainId: CHAIN.base },
+      priced({ ...acrossOnly, gasZipQuote: async (_f, _t, input) => gasZipQuote(input, 1n) }),
+    );
+
+    expect(plan.calls).toHaveLength(3);
+    expect(plan.route?.gasTopUp).toEqual({ provider: 'gas.zip' });
+  });
+
+  it('never adds one when told not to', async () => {
+    const plan = await planFor(
+      { toChainId: CHAIN.base, includeGas: false },
       priced({ ...acrossOnly, gasZipQuote: async (_f, _t, input) => gasZipQuote(input, 1n) }),
     );
 
@@ -334,19 +344,34 @@ describe('a gas top-up alongside a move', () => {
     expect(plan.warnings.map((w) => w.code)).toContain('destination_no_gas_route');
   });
 
-  it('sizes the top-up to the destination, within $1–$5', async () => {
+  it('never buys more than $5, even where selling is expensive', async () => {
     let asked = 0n;
     await planFor(
       { toChainId: CHAIN.ethereum, includeGas: true },
       priced({
-        estimateNetworkFeeUsd: async (chainId) => (chainId === CHAIN.ethereum ? '0.60' : '0.10'),
+        estimateNetworkFeeUsd: async (chainId) => (chainId === CHAIN.ethereum ? '1.00' : '0.10'),
         acrossQuote: async () => acrossQuote(19_800_000n, { destinationChainId: CHAIN.ethereum }),
         gasZipQuote: async (_f, _t, input) => ((asked = input), gasZipQuote(input, 1n)),
       }),
     );
 
-    // 20 transactions × $0.60 = $12, capped at $5.
+    // Two sales × $1.00 × 3 = $6, capped at $5.
     expect(asked).toBe(5_000_000n);
+  });
+
+  it('buys only cents where gas costs cents — a dollar is noticed on a small portfolio', async () => {
+    let asked = 0n;
+    await planFor(
+      { toChainId: CHAIN.base, includeGas: true },
+      priced({
+        ...acrossOnly,
+        estimateNetworkFeeUsd: async (chainId) => (chainId === CHAIN.base ? '0.004' : '0.10'),
+        gasZipQuote: async (_f, _t, input) => ((asked = input), gasZipQuote(input, 1n)),
+      }),
+    );
+
+    // Two sales × $0.004 × 3 = $0.024, raised to the $0.10 floor.
+    expect(asked).toBe(100_000n);
   });
 });
 
@@ -371,6 +396,7 @@ const PERIPHERY = acrossPeriphery(CHAIN.arbitrum)!;
 function nativeSwapQuote(inputAmount: bigint): AcrossNativeSwapQuote {
   return {
     periphery: PERIPHERY,
+    inputToken: NATIVE_TOKEN,
     inputAmount,
     data: '0x110560addeadbeef',
     outputToken: USDC_ARC.address,
@@ -425,7 +451,12 @@ describe('bringing ETH home as USDC', () => {
     let sold = 0n;
     await planFor(
       home({ token: { kind: 'symbol', symbol: 'ETH' }, amount: { kind: 'max' } }),
-      onArbitrum({ acrossNativeSwapQuote: async (_f, _t, input) => ((sold = input), nativeSwapQuote(input)) }),
+      onArbitrum({
+        // Priced at market ($2,600 an ETH, USDC at 6 decimals), so the sale is sane.
+        acrossNativeSwapQuote: async (_f, _t, input) => (
+          (sold = input), { ...nativeSwapQuote(input), expectedOut: (input * 2_600n) / 10n ** 12n, minOut: (input * 2_590n) / 10n ** 12n }
+        ),
+      }),
     );
 
     // 0.01 ETH, less three times the $0.10 fee at $2,600 — the wallet has to

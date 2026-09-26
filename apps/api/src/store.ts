@@ -11,7 +11,7 @@ import {
 import type { SessionPermissions } from '@blocky/wallet-core';
 import { and, desc, eq, gte, inArray, isNull, gt, sql } from 'drizzle-orm';
 import type { Db } from './db/client';
-import { balanceSnapshots, contacts, executions, plans, policies, sessions, users } from './db/schema';
+import { balanceSnapshots, contacts, executions, memories, plans, policies, sessions, users } from './db/schema';
 
 /**
  * Persistence, behind an interface.
@@ -78,6 +78,14 @@ export class DuplicateExecutionError extends Error {
   }
 }
 
+/**
+ * Notes Blocky keeps about one user. Short on purpose: they ride along with
+ * every message, so thirty short notes cost a few hundred tokens — cheap —
+ * where an unbounded list would quietly become most of every bill.
+ */
+export const MAX_MEMORIES = 30;
+const MAX_MEMORY_CHARS = 200;
+
 export interface Store {
   /** Create or refresh a user. The wallet address comes from Privy, never the client. */
   upsertUser(user: UserRecord): Promise<void>;
@@ -139,6 +147,17 @@ export interface Store {
   listContacts(userId: string): Promise<Contact[]>;
   deleteContact(userId: string, label: string): Promise<boolean>;
 
+  /** What Blocky remembers about the user, oldest first. */
+  listMemories(userId: string): Promise<Array<{ id: string; note: string }>>;
+  /**
+   * Remember a note. Refused when it repeats one already kept, or when the
+   * user already has {@link MAX_MEMORIES} — old notes are forgotten on purpose,
+   * never silently pushed out.
+   */
+  addMemory(userId: string, note: string): Promise<{ saved: boolean; reason?: string }>;
+  /** Forget the note with this id. */
+  forgetMemory(userId: string, id: string): Promise<boolean>;
+
   /**
    * Record a balance snapshot, throttled to at most one per `minIntervalMs`
    * (default one hour) per user. Called opportunistically off a real
@@ -183,14 +202,14 @@ export function createStore(db: Db): Store {
      * limits the user did choose. Read it as today's default. A list anyone
      * actually narrowed would not look like this one.
      */
-    // The same for `tokenAllowlist`: no screen edits it, so a stored
-    // `['USDC']` is the old default rather than a choice.
+    // The same for `tokenAllowlist`: no screen edits it, so a stored list is
+    // an old default rather than a choice — today's default is any verified token.
     const actions = parsed.data.allowedActions;
     const tokens = parsed.data.tokenAllowlist;
     return {
       ...parsed.data,
       ...(actions.length === 1 && actions[0] === 'transfer' ? { allowedActions: DEFAULT_POLICY.allowedActions } : {}),
-      ...(tokens?.length === 1 && tokens[0] === 'USDC' ? { tokenAllowlist: DEFAULT_POLICY.tokenAllowlist } : {}),
+      ...(tokens !== null ? { tokenAllowlist: DEFAULT_POLICY.tokenAllowlist } : {}),
     };
   }
 
@@ -420,6 +439,39 @@ export function createStore(db: Db): Store {
         .orderBy(contacts.label);
 
       return rows.map((row) => ({ label: row.label, address: row.address as Address }));
+    },
+
+    async listMemories(userId) {
+      const rows = await db
+        .select({ id: memories.id, note: memories.note })
+        .from(memories)
+        .where(eq(memories.userId, userId))
+        .orderBy(memories.createdAt);
+      return rows;
+    },
+
+    async addMemory(userId, note) {
+      const text = note.trim().replace(/\s+/g, ' ').slice(0, MAX_MEMORY_CHARS);
+      if (!text) return { saved: false, reason: 'Nothing to remember.' };
+
+      const existing = await db.select({ note: memories.note }).from(memories).where(eq(memories.userId, userId));
+      if (existing.some((row) => row.note.toLowerCase() === text.toLowerCase())) {
+        return { saved: false, reason: 'Already remembered.' };
+      }
+      if (existing.length >= MAX_MEMORIES) {
+        return { saved: false, reason: `Memory is full (${MAX_MEMORIES} notes). Forget an old one first.` };
+      }
+
+      await db.insert(memories).values({ id: crypto.randomUUID(), userId, note: text });
+      return { saved: true };
+    },
+
+    async forgetMemory(userId, id) {
+      const removed = await db
+        .delete(memories)
+        .where(and(eq(memories.userId, userId), eq(memories.id, id)))
+        .returning({ id: memories.id });
+      return removed.length > 0;
     },
 
     async deleteContact(userId, label) {

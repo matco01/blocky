@@ -21,6 +21,11 @@ export const CHAIN = {
   /** Hyperliquid's EVM chain, where HYPE is the native token. */
   hyperevm: 999,
   /**
+   * Robinhood Chain, an Arbitrum L2 where tokenized US stocks live. Gas is
+   * ETH; there is no USDC — its dollar is Robinhood's USDG.
+   */
+  robinhood: 4663,
+  /**
    * Arc — Circle's L1, where USDC is the native gas token. The home chain: a
    * user holding only USDC can pay gas here and needs nothing else.
    */
@@ -40,6 +45,49 @@ const CHAIN_IDS = new Set<number>(Object.values(CHAIN));
 
 export function isChainId(value: number): value is ChainId {
   return CHAIN_IDS.has(value);
+}
+
+/**
+ * Chains as the agent names them. A model is good with names and bad at
+ * recalling that Arc is 5042 — twice it meant Arc and wrote Ethereum's 1 or
+ * Arbitrum's 42161, and money went to the wrong chain. So it writes a name,
+ * and code turns the name into an id. "arc" is always home.
+ */
+export const AGENT_CHAIN_NAMES = [
+  'arc',
+  'ethereum',
+  'base',
+  'arbitrum',
+  'optimism',
+  'polygon',
+  'unichain',
+  'avalanche',
+  'hyperevm',
+  'robinhood',
+] as const;
+
+export type AgentChainName = (typeof AGENT_CHAIN_NAMES)[number];
+
+/** On testnet, the names that exist there point at their testnet chains. */
+const TESTNET_NAMES: Partial<Record<AgentChainName, ChainId>> = {
+  arc: CHAIN.arcTestnet,
+  base: CHAIN.baseSepolia,
+  arbitrum: CHAIN.arbitrumSepolia,
+};
+
+/** The chain id for a name the agent wrote, on this network — or null. */
+export function chainIdForName(name: string, testnet: boolean): ChainId | null {
+  const key = name.trim().toLowerCase() as AgentChainName;
+  if (!(AGENT_CHAIN_NAMES as readonly string[]).includes(key)) return null;
+  return testnet ? (TESTNET_NAMES[key] ?? null) : CHAIN[key];
+}
+
+/** The name the agent uses for a chain id, on either network. */
+export function agentChainName(id: ChainId): AgentChainName | null {
+  for (const name of AGENT_CHAIN_NAMES) {
+    if (CHAIN[name] === id || TESTNET_NAMES[name] === id) return name;
+  }
+  return null;
 }
 
 export const ChainIdSchema = z

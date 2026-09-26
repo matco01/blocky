@@ -17,6 +17,8 @@ const PERMISSIVE: Policy = {
   autoExecuteThresholdUsd: '50',
   perTxCapUsd: '500',
   dailyCapUsd: '1000',
+  // A list the user chose: the default is any token, but a set list is still enforced.
+  tokenAllowlist: ['USDC'],
   recipientAllowlist: ['0x1111111111111111111111111111111111111111'],
 };
 

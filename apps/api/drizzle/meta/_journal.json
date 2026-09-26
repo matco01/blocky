@@ -15,6 +15,13 @@
       "when": 1790074933058,
       "tag": "0001_melted_kang",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790438542913,
+      "tag": "0002_thankful_marvel_apes",
+      "breakpoints": true
     }
   ]
 }

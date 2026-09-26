@@ -8,6 +8,7 @@ import {
   planFeeLabel,
   planFeeName,
   planGasTopUpLabel,
+  planGasTopUpReason,
   planVerb,
 } from '../lib/planLabels';
 import { useTheme } from '../theme';
@@ -34,13 +35,21 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
     <View style={{ gap: theme.space.xl }}>
       <View style={styles.hero}>
         <Text variant="label" tone="secondary">
-          {planVerb(plan) === 'Move' ? "You're moving" : planVerb(plan) === 'Swap' ? "You're swapping" : "You're sending"}
+          {
+            {
+              Move: "You're moving",
+              Swap: "You're swapping",
+              Buy: "You're buying",
+              Sell: "You're selling",
+              Send: "You're sending",
+            }[planVerb(plan)]
+          }
         </Text>
         <Text variant="balance">
           {planAmountLabel(plan)}
         </Text>
         <Text variant="body" tone="secondary">
-          to {planDestinationLabel(plan)}
+          {planDestinationLabel(plan)}
         </Text>
       </View>
 
@@ -50,6 +59,11 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
         {planBlockyFeeLabel(plan) ? <Row label="Includes Blocky's fee" value={planBlockyFeeLabel(plan)!} /> : null}
         {arrival ? <Row label="Arrives" value={arrival} /> : null}
         {planGasTopUpLabel(plan) ? <Row label="Gas" value={planGasTopUpLabel(plan)!.replace(/^\+ /, '')} /> : null}
+        {planGasTopUpReason(plan) ? (
+          <Text variant="caption" tone="tertiary">
+            {planGasTopUpReason(plan)}
+          </Text>
+        ) : null}
         {plan.recipient && plan.recipient.display !== plan.recipient.address ? (
           <Row label="Address" value={shortAddress(plan.recipient.address, 10, 8)} />
         ) : null}

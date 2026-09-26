@@ -10,6 +10,9 @@ import {
   type Address,
   type Plan,
   type PolicyDecision,
+  agentChainName,
+  type AgentChainName,
+  type Intent,
 } from '@blocky/shared';
 import {
   DEFAULT_CHAIN,
@@ -22,6 +25,9 @@ import {
   getTokenPriceUsd,
   readUsdcBalance,
   type ChainReader,
+  STOCKS,
+  STOCK_CHAIN,
+  IS_TESTNET,
 } from '@blocky/wallet-core';
 import { mergeActivity, type ExplorerTransfer } from './activity';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
@@ -119,11 +125,16 @@ export function agentToolsFor(
      */
     async getSupportedChains() {
       return chainsOnNetwork().map((chain) => ({
-        chainId: chain.id,
+        // What a proposal names it by. Ids stay out of the agent's hands.
+        key: agentChainName(chain.id),
         name: chain.name,
         testnet: chain.testnet,
         canMoveUsdcHere: canMoveUsdcBetween(DEFAULT_CHAIN, chain.id),
         gasToken: chain.nativeCurrency.symbol,
+        // Where stocks can be bought: every listed ticker, as a person says it.
+        ...(chain.id === STOCK_CHAIN
+          ? { stocks: STOCKS.map((stock) => ({ ticker: stock.symbol, name: stock.name, fund: stock.fund })) }
+          : {}),
       }));
     },
 
@@ -186,6 +197,19 @@ export function agentToolsFor(
       }
     },
 
+    async remember(note) {
+      return store.addMemory(userId, note);
+    },
+
+    /** By the short id the agent sees — the first characters of the stored one. */
+    async forgetMemory(id) {
+      const wanted = id.trim().toLowerCase();
+      const match = (await store.listMemories(userId)).find((memory) => memory.id.startsWith(wanted));
+      return match && wanted.length >= 4
+        ? { forgotten: await store.forgetMemory(userId, match.id) }
+        : { forgotten: false, reason: 'No note with that id.' };
+    },
+
     async getMarketOverview() {
       try {
         return await fetchMarketOverview();
@@ -234,10 +258,15 @@ export interface ChatTurn {
 export interface AgentResponse {
   kind: AgentTurn['kind'] | 'plan';
   reply: string;
-  /** The planner's output. Proposed, priced and checked — but not signed. */
+  /** The first plan — kept for clients that show one. Proposed, priced and checked, but not signed. */
   plan: Plan | null;
   /** What the policy engine says should happen to it. */
   decision: PolicyDecision | null;
+  /**
+   * Every plan in this reply, in order, each with its own decision: "bring
+   * everything home" is one card per chain, approved together or one by one.
+   */
+  plans: Array<{ plan: Plan; decision: PolicyDecision }>;
   /** Plain-language note about what has and has not happened. */
   status: string;
   usage: AgentTurn['usage'];
@@ -266,12 +295,22 @@ export function createAgentHandler(
     // fix or explain — the user never reads a planner one-liner under a reply
     // that promised a card.
     const context = createPlannerContext({ reader, store, userId, account, blockyFee });
+    // What Blocky remembers about them, with short ids to forget by.
+    const memories = (await store.listMemories(userId).catch(() => [])).map((memory) => ({
+      id: memory.id.slice(0, 8),
+      note: memory.note,
+    }));
+
     const turn = await runAgentTurn<Plan>(message, {
+      memories,
       client,
       tools: agentToolsFor(store, userId, reader, account, explorerTransfers),
       // News and "why did it move" need the web; a turn that searches can't propose.
       webSearch: true,
+      testnet: IS_TESTNET,
       plan: async (intent) => {
+        const mismatch = destinationMismatch(intent);
+        if (mismatch) return { ok: false, message: mismatch };
         const outcome = await buildPlan(intent, context);
         return outcome.ok ? { ok: true, plan: outcome.plan } : { ok: false, message: outcome.failure.message };
       },
@@ -280,7 +319,7 @@ export function createAgentHandler(
 
     logUsage(turn);
 
-    const empty = { plan: null, decision: null, usage: turn.usage };
+    const empty = { plan: null, decision: null, plans: [], usage: turn.usage };
 
     switch (turn.kind) {
       case 'reply':
@@ -311,25 +350,34 @@ export function createAgentHandler(
         break;
     }
 
-    /* --- Planned. Judge it against the user's limits. ---------------------- */
+    /* --- Planned. Judge each against the user's limits. ------------------- */
 
-    const plan = turn.plan!;
-    const decision = evaluatePolicy({
-      policy: await store.getPolicy(userId),
-      plan,
-      spentTodayUsd: await store.spentTodayUsd(userId),
-    });
+    const [policy, spentToday] = await Promise.all([store.getPolicy(userId), store.spentTodayUsd(userId)]);
 
-    // Held so the client can approve it by id rather than posting a plan back —
-    // a plan that arrives from a client is a plan an attacker can edit.
-    await store.putPlan(userId, plan, 'agent');
+    // Judged as if the ones before it were sent too: two sends that each fit
+    // today's limit may not fit it together.
+    const plans: AgentResponse['plans'] = [];
+    let spent = parseUsd(spentToday);
+    for (const { plan } of turn.proposals) {
+      const decision = evaluatePolicy({ policy, plan: plan!, spentTodayUsd: formatUsd(spent) });
+      plans.push({ plan: plan!, decision });
+      spent += plan!.outflow.reduce((sum, delta) => sum + (delta.usdValue ? parseUsd(delta.usdValue) : 0n), 0n);
+
+      // Held so the client can approve it by id rather than posting a plan back —
+      // a plan that arrives from a client is a plan an attacker can edit.
+      await store.putPlan(userId, plan!, 'agent');
+    }
+
+    const first = plans[0]!;
+    const unplanned = turn.unplanned.length ? ` Not included: ${turn.unplanned.join(' ')}` : '';
 
     return {
       kind: 'plan',
       reply: turn.text,
-      plan,
-      decision,
-      status: statusFor(decision),
+      plan: first.plan,
+      decision: first.decision,
+      plans,
+      status: (plans.length > 1 ? `${plans.length} to approve.` : statusFor(first.decision)) + unplanned,
       usage: turn.usage,
     };
   };
@@ -367,4 +415,38 @@ function logUsage(turn: AgentTurn): void {
       `in ${u.inputTokens} · out ${u.outputTokens} · cache read ${u.cacheReadTokens} · cache write ${u.cacheWriteTokens}` +
       (u.webSearches > 0 ? ` · ${u.webSearches} web search(es)` : ''),
   );
+}
+
+/**
+ * How a rationale may name each chain. "home" is Arc; "Base" only capitalised,
+ * since "base" is an ordinary word.
+ */
+const CHAIN_MENTIONS: ReadonlyArray<[AgentChainName, RegExp]> = [
+  ['arc', /\b(arc|home)\b/i],
+  ['ethereum', /\b(ethereum|mainnet)\b/i],
+  ['base', /\bBase\b/],
+  ['arbitrum', /\barbitrum\b/i],
+  ['optimism', /\b(optimism|OP mainnet)\b/i],
+  ['polygon', /\bpolygon\b/i],
+  ['unichain', /\bunichain\b/i],
+  ['avalanche', /\b(avalanche|avax c-chain)\b/i],
+  ['hyperevm', /\b(hyperevm|hyperliquid)\b/i],
+  ['robinhood', /\brobinhood\b/i],
+];
+
+/**
+ * The rationale is the agent's own account of what it means to do. When it
+ * names chains and the destination it wrote isn't one of them, one of the two
+ * is wrong — and it has been the number: "back to Arc" with Ethereum's id, and
+ * money went to Ethereum. Refused before planning, so the agent fixes it and
+ * the user never sees the wrong card.
+ */
+export function destinationMismatch(intent: Intent): string | null {
+  if (intent.type !== 'bridge') return null;
+
+  const named = CHAIN_MENTIONS.filter(([, pattern]) => pattern.test(intent.rationale)).map(([name]) => name);
+  const destination = agentChainName(intent.toChainId);
+  if (named.length === 0 || !destination || named.includes(destination)) return null;
+
+  return `Your rationale names ${named.join(' and ')}, but the destination you set is ${destination}. One of them is wrong — fix it before proposing again.`;
 }

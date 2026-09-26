@@ -67,9 +67,10 @@ export const DEFAULT_POLICY: Policy = {
   // Moving money to your own wallet on another chain sits beside sending: the
   // same limits apply to it, and it has no third party to vet.
   allowedActions: ['transfer', 'bridge'],
-  // USDC, and the gas tokens of the chains Blocky reaches — money swapped out
-  // to another chain has to be able to come home.
-  tokenAllowlist: ['USDC', 'ETH', 'HYPE', 'POL', 'AVAX'],
+  // Any token. Every move needs the user's fingerprint anyway, and a token we
+  // don't vouch for carries a danger warning that always forces a full review
+  // — a narrower list only ever blocked things they meant to do.
+  tokenAllowlist: null,
   recipientAllowlist: [],
 };
 
@@ -175,6 +176,7 @@ export function evaluatePolicy({ policy, plan, spentTodayUsd, now }: PolicyInput
     });
   }
 
+  // No list means any token; an unverified one is still gated, by its danger warning.
   const disallowedToken = plan.outflow.find(
     (delta) => policy.tokenAllowlist !== null && !policy.tokenAllowlist.includes(delta.token.symbol),
   );

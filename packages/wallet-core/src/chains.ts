@@ -27,8 +27,11 @@ export interface ChainConfig {
    * 18 decimals — see {@link nativeToUsdcUnits} before doing anything with it.
    */
   nativeCurrency: { symbol: string; decimals: number };
-  /** Canonical (native, not bridged) USDC, as an ERC-20 at 6 decimals. */
-  usdc: Address;
+  /**
+   * Canonical (native, not bridged) USDC, as an ERC-20 at 6 decimals. Null on
+   * a chain with none (Robinhood Chain): money reaches it only as a swap.
+   */
+  usdc: Address | null;
   explorerUrl: string;
   /** Whether Circle Gateway supports a unified balance here. */
   gateway: boolean;
@@ -150,6 +153,24 @@ export const CHAINS = {
   },
 
   /**
+   * Robinhood Chain — where tokenized US stocks live, as ordinary ERC-20s
+   * (see `stocks.ts`). No USDC: its dollar is USDG, so money arrives here only
+   * as a swap into a stock. Checked live: chain id 4663, gas in ETH.
+   */
+  [CHAIN.robinhood]: {
+    id: CHAIN.robinhood,
+    name: 'Robinhood Chain',
+    shortName: 'RH',
+    testnet: false,
+    nativeCurrency: { symbol: 'ETH', decimals: 18 },
+    usdc: null,
+    explorerUrl: 'https://robinhoodchain.blockscout.com',
+    gateway: false,
+    circleDomain: null,
+    gasPaidInUsdc: false,
+  },
+
+  /**
    * Arc — the home chain on mainnet.
    *
    * Verified against the live network: chain id 5042, USDC at the same 0x3600…
@@ -233,8 +254,11 @@ export function getChain(id: ChainId): ChainConfig {
   return CHAINS[id];
 }
 
+/** A chain's USDC. Throws on a chain with none — ask `getChain(id).usdc` where that is possible. */
 export function usdcAddress(id: ChainId): Address {
-  return CHAINS[id].usdc;
+  const usdc = CHAINS[id].usdc;
+  if (!usdc) throw new Error(`${CHAINS[id].name} has no USDC.`);
+  return usdc;
 }
 
 /**

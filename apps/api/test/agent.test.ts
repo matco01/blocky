@@ -1,5 +1,6 @@
+import { IntentSchema } from '@blocky/shared';
 import type { ExplorerTransfer } from '../src/activity';
-import { agentToolsFor } from '../src/agent';
+import { agentToolsFor, destinationMismatch } from '../src/agent';
 import { openDatabase, type Database } from '../src/db/client';
 import { createStore, type Store } from '../src/store';
 import type { ChainReader } from '@blocky/wallet-core';
@@ -266,5 +267,27 @@ describe('get_recent_activity', () => {
     const result = (await tools().getRecentActivity()) as { complete: boolean };
 
     expect(result.complete).toBe(false);
+  });
+});
+
+describe('destination sanity', () => {
+  const bridge = (toChainId: number, rationale: string) =>
+    IntentSchema.parse({ type: 'bridge', token: { kind: 'symbol', symbol: 'USDC' }, amount: { kind: 'max' }, toChainId, rationale });
+
+  it.each([
+    ['says Arc, set Ethereum', 1, 'Sell Apple shares on Robinhood Chain back to USDC on Arc'],
+    ['says home, set Ethereum', 1, 'Bring USDC on Arbitrum home'],
+    ['says Arc, set Arbitrum', 42161, 'Move the Robinhood ETH back to Arc'],
+  ])('refuses a proposal that %s', (_, toChainId, rationale) => {
+    expect(destinationMismatch(bridge(toChainId, rationale))).toMatch(/One of them is wrong/);
+  });
+
+  it.each([
+    ['the destination it names', 5042, 'Move all ETH on Arbitrum back to Arc as USDC'],
+    ['a buy on the chain it names', 4663, 'Buy $1 of Apple stock on Robinhood Chain'],
+    ['a rationale that names no chain', 8453, 'Move my dollars as asked'],
+    ['"base" as an ordinary word', 42161, 'Move the base amount to Arbitrum'],
+  ])('lets through %s', (_, toChainId, rationale) => {
+    expect(destinationMismatch(bridge(toChainId, rationale))).toBeNull();
   });
 });

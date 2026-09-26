@@ -1,6 +1,7 @@
 import { formatUsd, usdValueOf, type Address, type ChainId } from '@blocky/shared';
 import { cached, uncache } from './cache';
 import { chainsOnNetwork } from './chains';
+import { STOCKS } from './stocks';
 import { getPriceSnapshot, priceAsDecimal, type PriceSnapshot } from './prices';
 import type { ChainReader } from './rpc';
 
@@ -61,9 +62,11 @@ async function scan(reader: ChainReader, owner: Address, fetchImpl: typeof fetch
 
   const perChain = await Promise.all(
     chains.map(async (chain): Promise<TokenHolding[]> => {
-      const [native, usdc] = await Promise.all([
+      const stocks = STOCKS.filter((s) => s.chainId === chain.id);
+      const [native, usdc, stockBalances] = await Promise.all([
         reader.nativeBalance(chain.id, owner).catch(() => 0n),
-        reader.erc20Balance(chain.id, chain.usdc, owner).catch(() => 0n),
+        chain.usdc ? reader.erc20Balance(chain.id, chain.usdc, owner).catch(() => 0n) : Promise.resolve(0n),
+        Promise.all(stocks.map((s) => reader.erc20Balance(chain.id, s.address, owner).catch(() => 0n))),
       ]);
 
       const holdings: TokenHolding[] = [];
@@ -85,6 +88,21 @@ async function scan(reader: ChainReader, owner: Address, fetchImpl: typeof fetch
         // USDC's six decimals are the dollar scale: the amount is its own value.
         holdings.push({ chainId: chain.id, symbol: 'USDC', amount: usdc.toString(), decimals: 6, usd: formatUsd(usdc), stable: true });
       }
+
+      // Stocks, from the pinned list only — the same addresses a buy pays into.
+      stocks.forEach((s, i) => {
+        const amount = stockBalances[i]!;
+        if (amount === 0n) return;
+        const price = priceAsDecimal(prices?.get(s.symbol) ?? null);
+        holdings.push({
+          chainId: chain.id,
+          symbol: s.symbol,
+          amount: amount.toString(),
+          decimals: s.decimals,
+          usd: price === null ? null : formatUsd(usdValueOf(amount, s.decimals, price)),
+          stable: false,
+        });
+      });
 
       return holdings;
     }),

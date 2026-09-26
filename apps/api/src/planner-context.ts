@@ -23,6 +23,9 @@ import {
   getTokenPriceUsd,
   nativeToUsdcUnits,
   priceAsDecimal,
+  stockByAddress,
+  stockBySymbol,
+  type Stock,
   type ChainReader,
 } from '@blocky/wallet-core';
 import type { Store } from './store';
@@ -122,10 +125,14 @@ export function createPlannerContext({
           };
         }
 
+        // A stock, on the chain stocks live on — from the pinned list only.
+        const stock = stockBySymbol(symbol);
+        if (stock && stock.chainId === chainId) return stockToken(stock);
+
         // Otherwise the curated list is USDC alone. That is honest: a symbol we
         // cannot vouch for should come back as a clarifying question rather
         // than a lookup against arbitrary chain data.
-        if (symbol !== 'USDC') return null;
+        if (symbol !== 'USDC' || !chain.usdc) return null;
 
         return {
           chainId,
@@ -137,6 +144,10 @@ export function createPlannerContext({
           verified: true,
         };
       }
+
+      // A listed stock named by its address is still the listed stock.
+      const listed = stockByAddress(ref.chainId, ref.address);
+      if (listed) return stockToken(listed);
 
       // An explicit address is read from the contract and always unverified —
       // it is not on our curated list by definition.
@@ -187,6 +198,9 @@ export function createPlannerContext({
       // the planner refuse USD-denominated amounts rather than guess at them.
       if (token.address === getChain(token.chainId).usdc) return '1';
       if (token.address === NATIVE_TOKEN) return gasTokenPrice(token.chainId);
+      // A stock: the market price of that exact token, from the same snapshot.
+      const stock = stockByAddress(token.chainId, token.address);
+      if (stock) return priceAsDecimal(await getTokenPriceUsd(stock.symbol));
       return null;
     },
 
@@ -196,7 +210,8 @@ export function createPlannerContext({
     },
 
     async usdcBalanceUsd(chainId: ChainId) {
-      return formatUsd(await balance(chainId, getChain(chainId).usdc));
+      const usdc = getChain(chainId).usdc;
+      return formatUsd(usdc ? await balance(chainId, usdc) : 0n);
     },
 
     async nativeBalanceUsd(chainId: ChainId) {
@@ -251,8 +266,8 @@ export function createPlannerContext({
       return fetchGasZipQuote({ from, to, inputAmount, recipient });
     },
 
-    async acrossNativeSwapQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address) {
-      return fetchAcrossNativeSwapQuote({ from, to, inputAmount, recipient });
+    async acrossNativeSwapQuote(from: ChainId, to: ChainId, inputAmount: bigint, recipient: Address, inputToken?: Address) {
+      return fetchAcrossNativeSwapQuote({ from, to, inputAmount, recipient, ...(inputToken ? { inputToken } : {}) });
     },
 
     async isAddressFlagged() {
@@ -342,3 +357,15 @@ async function addressFor(
   }
 }
 
+/** A listed stock as a resolved token: verified, because its address is pinned. */
+function stockToken(stock: Stock): ResolvedToken {
+  return {
+    chainId: stock.chainId,
+    address: stock.address,
+    symbol: stock.symbol,
+    name: stock.name,
+    decimals: stock.decimals,
+    logoUrl: null,
+    verified: true,
+  };
+}

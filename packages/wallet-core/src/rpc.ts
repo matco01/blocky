@@ -18,6 +18,7 @@ import {
   mainnet,
   optimism,
   polygon,
+  robinhood,
   unichain,
 } from 'viem/chains';
 import { normalize } from 'viem/ens';
@@ -42,6 +43,7 @@ const VIEM_CHAINS: Record<ChainId, Chain> = {
   [CHAIN.arbitrum]: arbitrum,
   [CHAIN.avalanche]: avalanche,
   [CHAIN.hyperevm]: hyperEvm,
+  [CHAIN.robinhood]: robinhood,
   [CHAIN.arc]: arc,
   [CHAIN.arcTestnet]: arcTestnet,
   [CHAIN.baseSepolia]: baseSepolia,
@@ -301,6 +303,7 @@ export interface RpcEnv {
   UNICHAIN_RPC_URL?: string | undefined;
   AVALANCHE_RPC_URL?: string | undefined;
   HYPEREVM_RPC_URL?: string | undefined;
+  ROBINHOOD_RPC_URL?: string | undefined;
   /** Both networks: ENS always resolves on Ethereum mainnet. */
   ETHEREUM_RPC_URL?: string | undefined;
 }
@@ -347,6 +350,7 @@ export function rpcConfigFromEnv(env: RpcEnv, network: Network = NETWORK): RpcCo
   wire(CHAIN.unichain, env.UNICHAIN_RPC_URL);
   wire(CHAIN.avalanche, env.AVALANCHE_RPC_URL);
   wire(CHAIN.hyperevm, env.HYPEREVM_RPC_URL);
+  wire(CHAIN.robinhood, env.ROBINHOOD_RPC_URL);
 
   return { urls };
 }
@@ -368,6 +372,7 @@ export async function readUsdcBalance(
   chainId: ChainId,
   owner: Address,
 ): Promise<{ amount: bigint; usd: string }> {
-  const amount = await reader.erc20Balance(chainId, CHAINS[chainId].usdc, owner);
+  const usdc = CHAINS[chainId].usdc;
+  const amount = usdc ? await reader.erc20Balance(chainId, usdc, owner) : 0n;
   return { amount, usd: formatUsd(amount) };
 }
