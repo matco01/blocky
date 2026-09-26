@@ -77,6 +77,7 @@ export interface AgentTools {
   getArcEcosystem(): Promise<unknown>;
   getMarketOverview(): Promise<unknown>;
   remember(note: string): Promise<unknown>;
+  lookupToken(address: string): Promise<unknown>;
   forgetMemory(id: string): Promise<unknown>;
 }
 
@@ -412,6 +413,8 @@ async function callTool(name: string, input: unknown, tools: AgentTools): Promis
       return tools.getMarketOverview();
     case 'remember':
       return tools.remember(stringArg(input, 'note'));
+    case 'lookup_token':
+      return tools.lookupToken(stringArg(input, 'address'));
     case 'forget_memory':
       return tools.forgetMemory(stringArg(input, 'id'));
     default:

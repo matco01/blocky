@@ -40,6 +40,8 @@ interface Tamper {
   calls?: Array<{ target: Address; callData: `0x${string}`; value: bigint }>;
   to?: Address;
   min?: string;
+  /** The token that arrives before the swap — the destination's USDC. */
+  bridged?: Address;
 }
 
 function swapResponse(t: Tamper = {}) {
@@ -70,7 +72,7 @@ function swapResponse(t: Tamper = {}) {
       pad(t.depositor ?? ME, { size: 32 }),
       pad(t.recipient ?? HANDLER, { size: 32 }),
       pad(t.inputToken ?? ARC_USDC, { size: 32 }),
-      pad(HYPER_USDC, { size: 32 }),
+      pad(t.bridged ?? HYPER_USDC, { size: 32 }),
       t.inputAmount ?? 20_000_000n,
       19_988_045n,
       BigInt(t.destination ?? CHAIN.hyperevm),
@@ -134,5 +136,40 @@ describe('a tampered swap quote is refused', () => {
     ['promising a minimum above the expected amount', { min: '999999999999999999999' }],
   ])('%s', async (_, tamper) => {
     await expect(fetchAcrossSwapQuote(args, fetchWith(swapResponse(tamper)))).rejects.toThrow(/refused/);
+  });
+});
+
+describe('a Uniswap route, where the swap is funded through the router', () => {
+  const BASE_HANDLER = acrossSwapHandler(CHAIN.base)!;
+  const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913' as Address;
+  const UNISWAP_ON_BASE = '0x6ff5693b99212da76ad316178a184ab56d299b43' as Address;
+  const DEGEN = '0x4ed4e862860bed51a9570b96d89af5e1b0efefed' as Address;
+  const onBase = { ...args, to: CHAIN.base, outputToken: DEGEN } as const;
+
+  const route = (fund: ReturnType<typeof drain>, over: Tamper = {}) =>
+    swapResponse({
+      destination: CHAIN.base,
+      recipient: BASE_HANDLER,
+      bridged: BASE_USDC,
+      calls: [fund, { target: UNISWAP_ON_BASE, callData: '0x24856bc3', value: 0n }, drain(DEGEN, ME, BASE_HANDLER), drain(BASE_USDC, ME, BASE_HANDLER)],
+      ...over,
+    });
+
+  it("passes when only the bridged USDC goes to that chain's pinned Uniswap router", async () => {
+    const quote = await fetchAcrossSwapQuote(onBase, fetchWith(route(drain(BASE_USDC, UNISWAP_ON_BASE, BASE_HANDLER))));
+
+    expect(quote?.outputToken).toBe(DEGEN);
+  });
+
+  it.each<[string, ReturnType<typeof drain>]>([
+    ['funds a router that is not pinned', drain(BASE_USDC, THIEF, BASE_HANDLER)],
+    ['sends the router something other than the bridged USDC', drain(DEGEN, UNISWAP_ON_BASE, BASE_HANDLER)],
+  ])('is refused when it %s', async (_, fund) => {
+    await expect(fetchAcrossSwapQuote(onBase, fetchWith(route(fund)))).rejects.toThrow(/refused/);
+  });
+
+  it('allows no router at all on a chain where none is pinned', async () => {
+    const fund = drain(HYPER_USDC, UNISWAP_ON_BASE);
+    await expect(fetchAcrossSwapQuote(args, fetchWith(swapResponse({ calls: [fund, drain(NATIVE_TOKEN, ME)] })))).rejects.toThrow(/refused/);
   });
 });

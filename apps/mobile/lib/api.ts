@@ -176,10 +176,11 @@ export const api = {
     request('/v1/policy', PolicySchema, { method: 'PUT', body: JSON.stringify(policy) }),
 
   /** Ask the server to plan a send. It resolves, prices and checks it; nothing is signed. */
-  planSend: (recipient: RecipientRef, amount: AmountSpec) =>
+  /** A manual send. `asset` picks what and from which chain; omitted, it's USDC on Arc. */
+  planSend: (recipient: RecipientRef, amount: AmountSpec, asset?: { symbol: string; chainId: number }) =>
     request('/v1/plans', z.object({ plan: PlanSchema }), {
       method: 'POST',
-      body: JSON.stringify({ recipient, amount }),
+      body: JSON.stringify({ recipient, amount, ...(asset ? { asset } : {}) }),
     }).then((r): Plan => r.plan),
 
   /** Talk to the agent. History is the recent conversation, oldest first. */

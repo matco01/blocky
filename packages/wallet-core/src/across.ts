@@ -239,6 +239,21 @@ const SWAP_HANDLERS: Partial<Record<ChainId, Address>> = {
   [CHAIN.arc]: '0xa07480456c4ebad7626e4fdf4a180709e238547b',
 };
 
+/**
+ * Uniswap's Universal Router 2.0 on each chain. On Uniswap routes, Across's
+ * handler pays the bridged USDC *to the router*, which swaps it and the
+ * handler then pays the bought token to the user. That one payment is the
+ * only one allowed to go anywhere but the user's wallet — and only the
+ * bridged token, only to these. Each address came from a live quote and is
+ * Uniswap's published deployment for that chain.
+ */
+const UNISWAP_ROUTERS: Partial<Record<ChainId, string>> = {
+  [CHAIN.ethereum]: '0x66a9893cc07d91d95644aedd05d03f95e1dba8af',
+  [CHAIN.base]: '0x6ff5693b99212da76ad316178a184ab56d299b43',
+  [CHAIN.arbitrum]: '0xa51afafe0263b40edaef0df8781ea9aa03e381a3',
+  [CHAIN.optimism]: '0x851116d9223fabed8e56c0e6b8ad0c31d98b3507',
+};
+
 export function acrossSwapHandler(chainId: ChainId): Address | null {
   return SWAP_HANDLERS[chainId] ?? null;
 }
@@ -351,7 +366,7 @@ export async function fetchAcrossSwapQuote(
     return refuse('not a deposit');
   }
 
-  const [depositor, recipient, depositInputToken, , inputAmount, , destinationChainId, , , , , message] = decoded.args;
+  const [depositor, recipient, depositInputToken, bridgedToken, inputAmount, , destinationChainId, , , , , message] = decoded.args;
 
   if (bytes32Address(depositor) !== wallet) return refuse('deposits from someone else');
   if (bytes32Address(depositInputToken) !== inputToken) return refuse('not Arc USDC');
@@ -359,7 +374,17 @@ export async function fetchAcrossSwapQuote(
   if (destinationChainId !== BigInt(args.to)) return refuse('wrong destination');
   if (bytes32Address(recipient) !== handler) return refuse('not the pinned handler');
 
-  checkInstructions(message, { handler, wallet, payoutToken: args.outputToken, swapsOnArrival: true });
+  // What arrives on the destination before the swap (its USDC, usually) —
+  // the one token the handler may pass to a pinned DEX router to swap.
+  const bridged = bytes32Address(bridgedToken);
+  const router = UNISWAP_ROUTERS[args.to];
+  checkInstructions(message, {
+    handler,
+    wallet,
+    payoutToken: args.outputToken,
+    swapsOnArrival: true,
+    funding: bridged && router ? { token: bridged, router } : null,
+  });
 
   const expectedOut = BigInt(body.expectedOutputAmount ?? '0');
   const minOut = BigInt(body.minOutputAmount ?? '0');
@@ -521,7 +546,9 @@ const MOVES_TOKENS = new Set(['0x095ea7b3', '0xa9059cbb', '0x23b872dd']);
  *
  *  - a refund goes to the user, or nowhere (with no fallback, a failed
  *    payout makes the fill fail, and the deposit is refunded on the origin);
- *  - every payout goes through the pinned handler, to the user;
+ *  - every payout goes through the pinned handler, to the user — except,
+ *    on a Uniswap route, the bridged token funding the swap, paid to that
+ *    chain's pinned Uniswap router;
  *  - one payout is the token asked for;
  *  - where nothing is swapped on arrival, no other call may carry value,
  *    approve, or transfer anything — it can only be a call that cannot touch
@@ -529,7 +556,14 @@ const MOVES_TOKENS = new Set(['0x095ea7b3', '0xa9059cbb', '0x23b872dd']);
  */
 function checkInstructions(
   message: Hex,
-  rules: { handler: Address; wallet: string; payoutToken: Address; swapsOnArrival: boolean },
+  rules: {
+    handler: Address;
+    wallet: string;
+    payoutToken: Address;
+    swapsOnArrival: boolean;
+    /** The swap's funding: the bridged token may go to this router, and nothing else may. */
+    funding?: { token: string; router: string } | null;
+  },
 ): void {
   let instructions;
   try {
@@ -548,7 +582,14 @@ function checkInstructions(
     if (selector === DRAIN_SELECTOR) {
       if (call.target.toLowerCase() !== rules.handler) refuse('pays out through another contract');
       const { args: drain } = decodeFunctionData({ abi: HANDLER_ABI, data: call.callData });
-      if (drain[1].toLowerCase() !== rules.wallet) refuse('pays out to someone else');
+      const to = drain[1].toLowerCase();
+      const funds =
+        rules.funding !== null &&
+        rules.funding !== undefined &&
+        to === rules.funding.router &&
+        drain[0].toLowerCase() === rules.funding.token;
+      if (funds) continue;
+      if (to !== rules.wallet) refuse('pays out to someone else');
       if (drain[0].toLowerCase() === rules.payoutToken.toLowerCase()) paysOutWanted = true;
       continue;
     }

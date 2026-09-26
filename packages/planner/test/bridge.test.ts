@@ -178,8 +178,8 @@ describe('what it refuses', () => {
     expect((await failure({ toChainId: CHAIN.base })).code).toBe('no_bridge_route');
   });
 
-  it('only moves money out of Arc, where the app can sign', async () => {
-    expect((await failure({ fromChainId: CHAIN.baseSepolia, toChainId: CHAIN.arbitrumSepolia })).code).toBe('not_implemented');
+  it('refuses a move between two chains with no route between them', async () => {
+    expect((await failure({ fromChainId: CHAIN.baseSepolia, toChainId: CHAIN.arbitrumSepolia })).code).toBe('no_bridge_route');
   });
 
   it('says it is unavailable, rather than guessing, when Circle cannot quote the fee', async () => {

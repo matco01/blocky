@@ -65,7 +65,10 @@ function formatTokenAmount(amountBase: string, decimals: number): string {
 
 interface Holding {
   key: string;
+  /** What it is — "USDC", "ETH", "Apple". */
   label: string;
+  /** Where it is — "on Ethereum" — on the line beneath. Absent for "Other". */
+  where?: string;
   /** null when we have no price for this asset — real money, just not priceable right now. */
   usdCents: bigint | null;
   /** Shown instead of a dollar amount when `usdCents` is null. */
@@ -116,13 +119,15 @@ export default function PortfolioScreen() {
       const spendableHoldings: Holding[] = [];
       const arcCents = parseUsd(balance.usdc.displayAmount);
       if (arcCents > 0n) {
-        spendableHoldings.push({ key: `chain-${balance.chainId}`, label: chainName(balance.chainId), usdCents: arcCents });
+        spendableHoldings.push({ key: `chain-${balance.chainId}`, label: 'USDC', where: `on ${chainName(balance.chainId)}`, usdCents: arcCents });
       }
 
       const gatewayChains = [...(balance.gateway?.perChain ?? [])].sort((a, b) => a.chainId - b.chainId);
       for (const entry of gatewayChains) {
         const cents = parseUsd(entry.balanceUsd);
-        if (cents > 0n) spendableHoldings.push({ key: `chain-${entry.chainId}`, label: chainName(entry.chainId), usdCents: cents });
+        if (cents > 0n) {
+          spendableHoldings.push({ key: `chain-${entry.chainId}`, label: 'USDC', where: `on ${chainName(entry.chainId)}`, usdCents: cents });
+        }
       }
 
       // USDC moved to another chain is still cash; it sits with the rest of
@@ -130,7 +135,8 @@ export default function PortfolioScreen() {
       for (const holding of balance.otherHoldings.filter((h) => h.stable && h.usd)) {
         spendableHoldings.push({
           key: `token-${holding.chainId}-${holding.symbol}`,
-          label: `${holding.symbol} · ${chainName(holding.chainId)}`,
+          label: holding.symbol,
+          where: `on ${chainName(holding.chainId)}`,
           usdCents: parseUsd(holding.usd!),
         });
       }
@@ -139,12 +145,13 @@ export default function PortfolioScreen() {
         .filter((holding) => !(holding.stable && holding.usd))
         .map((holding) => {
           const key = `token-${holding.chainId}-${holding.symbol}`;
-          // A stock reads as the company — "Apple" — not a ticker on a chain.
+          // A stock reads as the company — "Apple" — with its ticker beneath.
           const stock = holding.chainId === STOCK_CHAIN ? stockBySymbol(holding.symbol) : null;
-          const label = stock ? stock.name : `${holding.symbol} · ${chainName(holding.chainId)}`;
+          const label = stock ? stock.name : holding.symbol;
+          const where = stock ? `${stock.symbol} ${stock.fund ? 'fund' : 'stock'} · on ${chainName(holding.chainId)}` : `on ${chainName(holding.chainId)}`;
           return holding.usd
-            ? { key, label, usdCents: parseUsd(holding.usd) }
-            : { key, label, usdCents: null, amountText: formatTokenAmount(holding.amount, holding.decimals) };
+            ? { key, label, where, usdCents: parseUsd(holding.usd) }
+            : { key, label, where, usdCents: null, amountText: formatTokenAmount(holding.amount, holding.decimals) };
         });
 
       const spendableTotal = spendableHoldings.reduce((sum, h) => sum + (h.usdCents ?? 0n), 0n);
@@ -418,16 +425,24 @@ function HoldingsSection({
         </View>
       ) : null}
 
-      <View style={{ marginTop: theme.space.xl, gap: theme.space.sm }}>
+      <View style={{ marginTop: theme.space.xl, gap: theme.space.md }}>
+        {/* Column names for the numbers; the two-line names explain themselves. */}
+        <View style={styles.legendRow}>
+          <View style={{ flex: 1 }} />
+          <Text variant="caption" tone="tertiary">
+            Value
+          </Text>
+          <Text variant="caption" tone="tertiary" style={styles.pct}>
+            Share
+          </Text>
+        </View>
         {shaped.map((holding, i) => {
           const pct = data.totalCents > 0n ? (Number(holding.usdCents) / Number(data.totalCents)) * 100 : 0;
           const color = holding.key === 'other' ? theme.colors.borderStrong : slotColor(i, colors);
           return (
             <View key={holding.key} style={styles.legendRow}>
               <View style={[styles.swatch, { backgroundColor: color, borderRadius: theme.radius.pill }]} />
-              <Text variant="bodyStrong" style={{ flex: 1 }}>
-                {holding.label}
-              </Text>
+              <AssetName label={holding.label} where={'where' in holding ? holding.where : undefined} />
               <Text variant="body" tone="secondary">
                 {displayUsd(holding.usdCents)}
               </Text>
@@ -442,9 +457,7 @@ function HoldingsSection({
         {unpriced.map((holding) => (
           <View key={holding.key} style={styles.legendRow}>
             <View style={[styles.swatch, { backgroundColor: theme.colors.borderStrong, borderRadius: theme.radius.pill }]} />
-            <Text variant="bodyStrong" style={{ flex: 1 }}>
-              {holding.label}
-            </Text>
+            <AssetName label={holding.label} where={holding.where} />
             <Text variant="body" tone="secondary">
               {holding.amountText}
             </Text>
@@ -455,6 +468,20 @@ function HoldingsSection({
         ))}
       </View>
     </>
+  );
+}
+
+/** A holding named in two lines: what it is, and beneath it, where it is. */
+function AssetName({ label, where }: { label: string; where?: string | undefined }) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text variant="bodyStrong">{label}</Text>
+      {where ? (
+        <Text variant="caption" tone="tertiary">
+          {where}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 

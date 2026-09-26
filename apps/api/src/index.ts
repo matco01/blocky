@@ -70,7 +70,7 @@ const app = createApp({
     ? createAgentHandler(store, env.ANTHROPIC_API_KEY, reader, explorerTransfers, blockyFee)
     : null,
   gatewayBalances: (address) => fetchGatewayBalances(address, { testnet: IS_TESTNET }),
-  walletHoldings: (address) => fetchWalletHoldings(reader, address),
+  walletHoldings: (address, tracked) => fetchWalletHoldings(reader, address, fetch, tracked),
   forgetHoldings: (address) => forgetWalletHoldings(address),
   explorerTransfers,
   logRequests: true,

@@ -2,7 +2,7 @@ import { formatUsd, usdValueOf, type Address, type ChainId } from '@blocky/share
 import { cached, uncache } from './cache';
 import { chainsOnNetwork } from './chains';
 import { STOCKS } from './stocks';
-import { getPriceSnapshot, priceAsDecimal, type PriceSnapshot } from './prices';
+import { getPriceSnapshot, getTokenPricesByAddress, priceAsDecimal, type PriceSnapshot } from './prices';
 import type { ChainReader } from './rpc';
 
 /**
@@ -26,6 +26,19 @@ export interface TokenHolding {
   usd: string | null;
   /** A dollar stablecoin: counted with the user's cash, not their investments. */
   stable: boolean;
+  /** The token's contract, for one bought by address — what a sale has to name it by. */
+  address?: Address;
+}
+
+/**
+ * A token the user holds that no list knows about — a memecoin they bought by
+ * its contract. The server remembers it once bought, so it shows up here.
+ */
+export interface TrackedToken {
+  chainId: ChainId;
+  address: Address;
+  symbol: string;
+  decimals: number;
 }
 
 /** Long enough to absorb the balance poll, short enough that money moved in shows up within a refresh. */
@@ -46,8 +59,9 @@ export function fetchWalletHoldings(
   reader: ChainReader,
   owner: Address,
   fetchImpl: typeof fetch = fetch,
+  tracked: readonly TrackedToken[] = [],
 ): Promise<TokenHolding[]> {
-  return cached(fetchImpl, `holdings:${owner.toLowerCase()}`, HOLDINGS_TTL_MS, () => scan(reader, owner, fetchImpl));
+  return cached(fetchImpl, `holdings:${owner.toLowerCase()}`, HOLDINGS_TTL_MS, () => scan(reader, owner, fetchImpl, tracked));
 }
 
 /** Forget a wallet's cached scan — after money moves, so the next read sees it. */
@@ -55,7 +69,12 @@ export function forgetWalletHoldings(owner: Address, fetchImpl: typeof fetch = f
   uncache(fetchImpl, `holdings:${owner.toLowerCase()}`);
 }
 
-async function scan(reader: ChainReader, owner: Address, fetchImpl: typeof fetch): Promise<TokenHolding[]> {
+async function scan(
+  reader: ChainReader,
+  owner: Address,
+  fetchImpl: typeof fetch,
+  tracked: readonly TrackedToken[],
+): Promise<TokenHolding[]> {
   const chains = chainsOnNetwork().filter((chain) => !chain.gasPaidInUsdc && reader.supports(chain.id));
 
   const prices: PriceSnapshot | null = await getPriceSnapshot(fetchImpl).catch(() => null);
@@ -108,5 +127,39 @@ async function scan(reader: ChainReader, owner: Address, fetchImpl: typeof fetch
     }),
   );
 
-  return perChain.flat();
+  return [...perChain.flat(), ...(await scanTracked(reader, owner, fetchImpl, tracked, chains.map((c) => c.id)))];
+}
+
+/** Tokens bought by contract: balance and a price by address, on chains we can read. */
+async function scanTracked(
+  reader: ChainReader,
+  owner: Address,
+  fetchImpl: typeof fetch,
+  tracked: readonly TrackedToken[],
+  readable: readonly ChainId[],
+): Promise<TokenHolding[]> {
+  const tokens = tracked.filter((token) => readable.includes(token.chainId));
+  if (tokens.length === 0) return [];
+
+  const [balances, prices] = await Promise.all([
+    Promise.all(tokens.map((token) => reader.erc20Balance(token.chainId, token.address, owner).catch(() => 0n))),
+    getTokenPricesByAddress(tokens, fetchImpl).catch(() => new Map()),
+  ]);
+
+  return tokens.flatMap((token, i): TokenHolding[] => {
+    const amount = balances[i]!;
+    if (amount === 0n) return [];
+    const price = priceAsDecimal(prices.get(`${token.chainId}:${token.address.toLowerCase()}`) ?? null);
+    return [
+      {
+        chainId: token.chainId,
+        symbol: token.symbol,
+        amount: amount.toString(),
+        decimals: token.decimals,
+        usd: price === null ? null : formatUsd(usdValueOf(amount, token.decimals, price)),
+        stable: false,
+        address: token.address,
+      },
+    ];
+  });
 }

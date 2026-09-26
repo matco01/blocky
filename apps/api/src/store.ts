@@ -8,10 +8,10 @@ import {
   type Plan,
   type Policy,
 } from '@blocky/shared';
-import type { SessionPermissions } from '@blocky/wallet-core';
+import type { SessionPermissions, TrackedToken } from '@blocky/wallet-core';
 import { and, desc, eq, gte, inArray, isNull, gt, sql } from 'drizzle-orm';
 import type { Db } from './db/client';
-import { balanceSnapshots, contacts, executions, memories, plans, policies, sessions, users } from './db/schema';
+import { balanceSnapshots, contacts, executions, memories, plans, policies, sessions, trackedTokens, users } from './db/schema';
 
 /**
  * Persistence, behind an interface.
@@ -157,6 +157,10 @@ export interface Store {
   addMemory(userId: string, note: string): Promise<{ saved: boolean; reason?: string }>;
   /** Forget the note with this id. */
   forgetMemory(userId: string, id: string): Promise<boolean>;
+
+  /** Remember a token the user bought by contract, so their portfolio shows it. Idempotent. */
+  trackToken(userId: string, token: TrackedToken): Promise<void>;
+  listTrackedTokens(userId: string): Promise<TrackedToken[]>;
 
   /**
    * Record a balance snapshot, throttled to at most one per `minIntervalMs`
@@ -439,6 +443,23 @@ export function createStore(db: Db): Store {
         .orderBy(contacts.label);
 
       return rows.map((row) => ({ label: row.label, address: row.address as Address }));
+    },
+
+    async trackToken(userId, token) {
+      await db
+        .insert(trackedTokens)
+        .values({ userId, chainId: token.chainId, address: token.address.toLowerCase(), symbol: token.symbol.slice(0, 20), decimals: token.decimals })
+        .onConflictDoNothing();
+    },
+
+    async listTrackedTokens(userId) {
+      const rows = await db.select().from(trackedTokens).where(eq(trackedTokens.userId, userId));
+      return rows.map((row) => ({
+        chainId: row.chainId as ChainId,
+        address: row.address as Address,
+        symbol: row.symbol,
+        decimals: row.decimals,
+      }));
     },
 
     async listMemories(userId) {

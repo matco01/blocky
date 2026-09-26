@@ -23,6 +23,7 @@ import {
   getChain,
   fetchMarketOverview,
   getTokenPriceUsd,
+  getTokenPricesByAddress,
   readUsdcBalance,
   type ChainReader,
   STOCKS,
@@ -88,13 +89,19 @@ export function agentToolsFor(
       try {
         const [{ amount, usd }, holdings] = await Promise.all([
           readUsdcBalance(reader, DEFAULT_CHAIN, account),
-          fetchWalletHoldings(reader, account).catch(() => null),
+          store
+            .listTrackedTokens(userId)
+            .then((tracked) => fetchWalletHoldings(reader, account, fetch, tracked))
+            .catch(() => null),
         ]);
 
         const elsewhere = (holdings ?? []).map((holding) => ({
           chain: getChain(holding.chainId).name,
-          chainId: holding.chainId,
+          // The name a proposal uses for it.
+          key: agentChainName(holding.chainId),
           token: holding.symbol,
+          // Bought by contract: what a sale has to name it by.
+          ...(holding.address ? { contract: holding.address } : {}),
           amount: formatUnits(BigInt(holding.amount), holding.decimals),
           usdValue: holding.usd,
         }));
@@ -195,6 +202,41 @@ export function agentToolsFor(
       } catch {
         return { error: 'Ecosystem data is temporarily unavailable.' };
       }
+    },
+
+    /**
+     * A pasted contract, checked on every chain we can read at once: where it
+     * exists, what it calls itself, and its price. Read-only; the names are
+     * the deployer's and reach the agent fenced as untrusted.
+     */
+    async lookupToken(input) {
+      const parsed = AddressSchema.safeParse(input.trim());
+      if (!parsed.success) return { error: 'That is not a 0x contract address.' };
+      const address = parsed.data;
+
+      const chains = chainsOnNetwork().filter((chain) => !chain.gasPaidInUsdc && reader.supports(chain.id));
+      const found = (
+        await Promise.all(
+          chains.map(async (chain) => {
+            const metadata = await reader.tokenMetadata(chain.id, address).catch(() => null);
+            return metadata ? { chain, metadata } : null;
+          }),
+        )
+      ).filter((hit): hit is NonNullable<typeof hit> => hit !== null);
+
+      if (found.length === 0) return { matches: [], note: 'No token at that address on any chain Blocky supports.' };
+
+      const prices = await getTokenPricesByAddress(found.map(({ chain }) => ({ chainId: chain.id, address }))).catch(() => null);
+      return {
+        matches: found.map(({ chain, metadata }) => ({
+          chain: agentChainName(chain.id),
+          chainName: chain.name,
+          symbol: metadata.symbol,
+          name: metadata.name,
+          decimals: metadata.decimals,
+          priceUsd: prices?.get(`${chain.id}:${address}`)?.usd ?? null,
+        })),
+      };
     },
 
     async remember(note) {

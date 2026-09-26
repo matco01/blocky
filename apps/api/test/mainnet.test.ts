@@ -524,3 +524,33 @@ describe('sending from another chain', () => {
     expect((await report(p.id, [hash('b')])).status).toBe(422);
   });
 });
+
+describe('a token bought by its contract', () => {
+  const DEGEN = '0x4ed4e862860bed51a9570b96d89af5e1b0efefed' as Address;
+  const degen = { chainId: CHAIN.base, address: DEGEN, symbol: 'DEGEN', name: 'Degen', decimals: 18, logoUrl: null, verified: false } as const;
+
+  it('is remembered once bought, so the portfolio keeps showing it', async () => {
+    const p = await stored(
+      { toChainId: CHAIN.base, receive: { kind: 'address', address: DEGEN, chainId: CHAIN.base }, rationale: 'Buy DEGEN on Base.' },
+      context({
+        resolveToken: async (ref) => (ref.kind === 'address' ? degen : { chainId: CHAIN.arc, address: USDC, symbol: 'USDC', name: 'USD Coin', decimals: 6, logoUrl: null, verified: true }),
+        priceOf: async (token) => (token.address === DEGEN ? '0.001' : '1'),
+        acrossSwapQuote: async (_f, _t, input) => ({
+          spokePool: SPOKE,
+          inputAmount: input,
+          depositData: '0xad5425c6deadbeef',
+          outputToken: DEGEN,
+          expectedOut: input * 10n ** 15n,
+          minOut: input * 95n * 10n ** 13n,
+          etaSeconds: 2,
+        }),
+        acrossNativeSwapQuote: async () => null,
+      }),
+    );
+    receipts.set(hash('a'), sent(p.calls));
+
+    expect(p.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(['unverified_token', 'unsellable']));
+    expect((await report(p.id, [hash('a')])).status).toBe(201);
+    expect(await store.listTrackedTokens('did:privy:alice')).toEqual([{ chainId: CHAIN.base, address: DEGEN, symbol: 'DEGEN', decimals: 18 }]);
+  });
+});

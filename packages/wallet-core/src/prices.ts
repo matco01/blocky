@@ -95,6 +95,66 @@ export async function getTokenPriceUsd(
 }
 
 /**
+ * DefiLlama's name for each chain, for pricing a token by its address — any
+ * token, not only the curated symbols: a memecoin the user bought by contract.
+ */
+const LLAMA_CHAINS: Partial<Record<number, string>> = {
+  1: 'ethereum',
+  10: 'optimism',
+  130: 'unichain',
+  137: 'polygon',
+  8453: 'base',
+  42161: 'arbitrum',
+  43114: 'avax',
+  999: 'hyperliquid',
+  4663: 'robinhood',
+};
+
+/** A minute: a token priced by address is for valuing holdings and swaps, not trading on. */
+const ADDRESS_PRICE_TTL_MS = 60_000;
+
+/**
+ * Prices for tokens named by chain and address, in one request. Keyed
+ * `chainId:address` (lower case); a token DefiLlama has nothing for is simply
+ * absent — unpriced, never zero.
+ */
+export async function getTokenPricesByAddress(
+  tokens: ReadonlyArray<{ chainId: number; address: string }>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ReadonlyMap<string, PriceQuote>> {
+  const wanted = [
+    ...new Set(
+      tokens
+        .map(({ chainId, address }) => (LLAMA_CHAINS[chainId] ? `${LLAMA_CHAINS[chainId]}:${address.toLowerCase()}` : null))
+        .filter((key): key is string => key !== null),
+    ),
+  ].sort();
+  if (wanted.length === 0) return new Map();
+
+  return cached(fetchImpl, `address-prices:${wanted.join(',')}`, ADDRESS_PRICE_TTL_MS, async () => {
+    const response = await fetchImpl(`${API}/${wanted.join(',')}`);
+    if (!response.ok) throw new Error(`Price request failed with ${response.status}`);
+    const body = (await response.json()) as {
+      coins?: Record<string, { price: number; symbol: string; timestamp: number; confidence: number }>;
+    };
+
+    const prices = new Map<string, PriceQuote>();
+    for (const [key, coin] of Object.entries(body.coins ?? {})) {
+      const [llama, address] = key.split(':');
+      const chainId = Object.entries(LLAMA_CHAINS).find(([, name]) => name === llama)?.[0];
+      if (!chainId || !address) continue;
+      prices.set(`${chainId}:${address.toLowerCase()}`, {
+        symbol: coin.symbol,
+        usd: coin.price,
+        confidence: coin.confidence,
+        asOf: new Date(coin.timestamp * 1000).toISOString(),
+      });
+    }
+    return prices;
+  });
+}
+
+/**
  * A quote as a USD decimal string, for fee estimates and display values only.
  *
  * Six places, matching the USD scale everything else uses. Null for anything

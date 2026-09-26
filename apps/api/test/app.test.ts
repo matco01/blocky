@@ -632,3 +632,19 @@ describe('activity', () => {
     expect(body.complete).toBe(false);
   });
 });
+
+describe('choosing what to send', () => {
+  it('rejects an asset on a chain Blocky does not know, before planning anything', async () => {
+    const response = await call('/v1/plans', {
+      token: 'alice-token',
+      method: 'POST',
+      body: {
+        recipient: { kind: 'address', address: '0x1111111111111111111111111111111111111111' },
+        amount: { kind: 'usd', value: '5' },
+        asset: { symbol: 'ETH', chainId: 999999 },
+      },
+    });
+
+    expect(response.status).toBe(400);
+  });
+});

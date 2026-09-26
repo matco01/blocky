@@ -1,4 +1,5 @@
-import { isDecimalString, isPlanExpired, type Plan, type RecipientRef } from '@blocky/shared';
+import { displayUsd, isDecimalString, isPlanExpired, type ChainId, type Plan, type RecipientRef } from '@blocky/shared';
+import { DEFAULT_CHAIN, STOCK_CHAIN, getChain, stockBySymbol } from '@blocky/wallet-core';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -12,6 +13,7 @@ import { PressableScale } from '../components/PressableScale';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
+import { Tile } from '../components/Tile';
 import { api } from '../lib/api';
 import { reportWithRetry } from '../lib/report';
 import { useModalTopPadding } from '../lib/screenInsets';
@@ -77,6 +79,12 @@ export default function SendScreen() {
   );
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
+  // "Max" sends all of it, fees netted out by the planner — not a typed number
+  // that goes stale or leaves dust behind.
+  const [sendMax, setSendMax] = useState(false);
+  const assets = useSendAssets(step.name === 'form');
+  const [assetKey, setAssetKey] = useState<string | null>(null);
+  const asset = assets?.find((a) => a.key === assetKey) ?? assets?.[0] ?? null;
   const [planning, setPlanning] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [approvalError, setApprovalError] = useState<string | null>(null);
@@ -84,7 +92,7 @@ export default function SendScreen() {
   const secondsLeft = useSecondsLeft(step.name === 'review' ? step.plan.expiresAt : null);
 
   const recipient = parseRecipient(to);
-  const amountValue = parseAmount(amount);
+  const amountValue = sendMax ? 'max' : parseAmount(amount);
 
   /** A fresh quote for the plan on screen. Keeps agent plans counted as agent plans. */
   async function requote(plan: Plan) {
@@ -105,7 +113,13 @@ export default function SendScreen() {
     setPlanning(true);
     setFormError(null);
     try {
-      const plan = await api.planSend(recipient, { kind: 'token', value: amountValue });
+      // In dollars whatever the asset: "$20 of ETH" is how people think. The
+      // planner converts at a real price, at the moment it plans.
+      const plan = await api.planSend(
+        recipient,
+        amountValue === 'max' ? { kind: 'max' } : { kind: 'usd', value: amountValue },
+        asset ? { symbol: asset.symbol, chainId: asset.chainId } : undefined,
+      );
       setStep({ name: 'review', plan });
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Could not prepare that send.');
@@ -190,7 +204,23 @@ export default function SendScreen() {
             to={to}
             setTo={setTo}
             amount={amount}
-            setAmount={setAmount}
+            setAmount={(value) => {
+              setSendMax(false);
+              setAmount(value);
+            }}
+            sendMax={sendMax}
+            onMax={() => {
+              if (!asset?.usd) return;
+              setSendMax(true);
+              // What shows; "max" is what's sent, so rounding here costs nothing.
+              setAmount(Number(asset.usd).toFixed(2));
+            }}
+            assets={assets}
+            asset={asset}
+            onPickAsset={(key) => {
+              setAssetKey(key);
+              setSendMax(false);
+            }}
             toError={to.length > 0 && !recipient ? 'Enter a 0x address, an ENS name, or a saved contact.' : null}
             formError={formError}
           />
@@ -319,10 +349,16 @@ function SendForm(props: {
   setTo: (v: string) => void;
   amount: string;
   setAmount: (v: string) => void;
+  sendMax: boolean;
+  onMax: () => void;
+  assets: SendAsset[] | null;
+  asset: SendAsset | null;
+  onPickAsset: (key: string) => void;
   toError: string | null;
   formError: string | null;
 }) {
   const theme = useTheme();
+  const [picking, setPicking] = useState(false);
 
   return (
     <View style={{ gap: theme.space.xl }}>
@@ -342,6 +378,71 @@ function SendForm(props: {
           style={[styles.amountInput, { color: theme.colors.textPrimary }]}
         />
       </View>
+
+      {/* What to send: everything the wallet holds, on every chain. */}
+      {props.asset ? (
+        <View style={{ gap: theme.space.sm }}>
+          <Tile style={{ padding: theme.space.md }}>
+            <View style={styles.assetRow}>
+              <PressableScale
+                onPress={() => setPicking((open) => !open)}
+                accessibilityLabel="Choose what to send"
+                style={[styles.assetRow, { flex: 1 }]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text variant="bodyStrong">{props.asset.name}</Text>
+                  <Text variant="caption" tone="tertiary">
+                    {props.asset.where}
+                    {props.asset.usd ? ` · ${displayUsd(props.asset.usd)} available` : ''}
+                  </Text>
+                </View>
+                <Icon name={picking ? 'chevron-up' : 'chevron-down'} size={18} tone="secondary" />
+              </PressableScale>
+              {props.asset.usd ? (
+                <PressableScale onPress={props.onMax} accessibilityLabel="Send all of it" style={styles.maxChip}>
+                  <Text variant="label" tone={props.sendMax ? 'primary' : 'accent'}>
+                    Max
+                  </Text>
+                </PressableScale>
+              ) : null}
+            </View>
+          </Tile>
+
+          {picking
+            ? (props.assets ?? []).map((choice) => (
+                <PressableScale
+                  key={choice.key}
+                  onPress={() => {
+                    props.onPickAsset(choice.key);
+                    setPicking(false);
+                  }}
+                  accessibilityLabel={`Send ${choice.name} ${choice.where}`}
+                >
+                  <View style={[styles.assetRow, styles.assetChoice]}>
+                    <View style={{ flex: 1 }}>
+                      <Text variant="body" tone={choice.key === props.asset?.key ? 'accent' : 'primary'}>
+                        {choice.name}
+                      </Text>
+                      <Text variant="caption" tone="tertiary">
+                        {choice.where}
+                      </Text>
+                    </View>
+                    <Text variant="body" tone="secondary">
+                      {choice.usd ? displayUsd(choice.usd) : '—'}
+                    </Text>
+                  </View>
+                </PressableScale>
+              ))
+            : null}
+
+          {props.asset.chainId !== DEFAULT_CHAIN ? (
+            <Text variant="caption" tone="tertiary">
+              Sent on {getChain(props.asset.chainId as ChainId).name}: the person receives it there, and the fee is paid in{' '}
+              {getChain(props.asset.chainId as ChainId).nativeCurrency.symbol}.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       <TextField
         label="To"
@@ -366,6 +467,67 @@ function SendForm(props: {
       />
     </View>
   );
+}
+
+/** Something the wallet can send: what it is, where it is, and what it's worth. */
+interface SendAsset {
+  key: string;
+  symbol: string;
+  chainId: number;
+  /** "USDC", "ETH", "Apple". */
+  name: string;
+  /** "on Arc". */
+  where: string;
+  usd: string | null;
+}
+
+/**
+ * What the wallet holds, as send choices: USDC on Arc first (what most sends
+ * spend), then everything else by value. Null while loading, or if it can't be
+ * read — the form still sends Arc USDC without it.
+ */
+function useSendAssets(active: boolean): SendAsset[] | null {
+  const [assets, setAssets] = useState<SendAsset[] | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    let live = true;
+    api
+      .balance()
+      .then((balance) => {
+        if (!live) return;
+        const home: SendAsset = {
+          key: `${balance.chainId}-USDC`,
+          symbol: 'USDC',
+          chainId: balance.chainId,
+          name: 'USDC',
+          where: `on ${getChain(balance.chainId as ChainId).name}`,
+          usd: balance.usdc.displayAmount,
+        };
+        const others = balance.otherHoldings
+          .map((holding): SendAsset => {
+            const stock = holding.chainId === STOCK_CHAIN ? stockBySymbol(holding.symbol) : null;
+            return {
+              key: `${holding.chainId}-${holding.symbol}`,
+              symbol: holding.symbol,
+              chainId: holding.chainId,
+              name: stock ? stock.name : holding.symbol,
+              where: `on ${getChain(holding.chainId as ChainId).name}`,
+              usd: holding.usd,
+            };
+          })
+          .sort((a, b) => Number(b.usd ?? 0) - Number(a.usd ?? 0));
+        setAssets([home, ...others]);
+      })
+      .catch(() => {
+        if (live) setAssets(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [active]);
+
+  return assets;
 }
 
 /**
@@ -432,6 +594,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 96,
+  },
+  assetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  assetChoice: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  maxChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   amountInput: {
     fontFamily: font.extrabold,

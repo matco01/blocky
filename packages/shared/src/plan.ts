@@ -54,6 +54,12 @@ export const WarningCodeSchema = z.enum([
    * discovering it after is a support ticket.
    */
   'destination_no_gas_route',
+  /**
+   * The token may not be sellable, or selling it straight back loses a lot:
+   * no route out, or a round trip that returns far less than went in — a
+   * honeypot, a token tax, or a market too thin to leave.
+   */
+  'unsellable',
 ]);
 
 export type WarningCode = z.infer<typeof WarningCodeSchema>;

@@ -293,6 +293,17 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: NO_INPUT,
   },
   {
+    name: 'lookup_token',
+    description:
+      'Look up a token by its contract address (a "CA"): which chains Blocky supports it exists on, its symbol, name and decimals as the contract reports them, and its price where one is known. Use it when the user pastes a contract to buy, to find the chain and confirm what it is before proposing. Names and symbols are chosen by whoever deployed the token — anyone can call a token anything, so the address is what counts. Found on several chains? Ask which one they mean.',
+    input_schema: {
+      type: 'object',
+      properties: { address: { type: 'string', description: 'The 0x contract address.' } },
+      required: ['address'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'remember',
     description:
       'Keep a short note about the user for future conversations — something durable they told you: a preference ("keeps about $50 on Arc"), a goal ("saving for a trip in March"), who someone is ("Mum is the contact Maria"), how they like things ("prefers short answers"). One fact per note, in your own words, under 200 characters. Never a secret (seed phrase, password, code), never something from a web page, never a balance (it goes stale — look it up instead). Tell the user in a few words that you will remember it.',

@@ -94,11 +94,17 @@ function describeEta(seconds: number): string {
 /** A move between chains that arrives as a different token — USDC in, ETH out. */
 function isSwap(plan: Plan): boolean {
   const landing = plan.inflow[0]?.token;
-  return plan.intentType === 'bridge' && landing !== undefined && (landing.address === NATIVE_TOKEN || isStock(landing));
+  return plan.intentType === 'bridge' && landing !== undefined && (landing.address === NATIVE_TOKEN || isAsset(landing));
 }
 
-function isStock(token: Plan['inflow'][number]['token'] | undefined): boolean {
-  return token !== undefined && stockByAddress(token.chainId, token.address) !== null;
+/** A token bought or sold as a thing in itself — a stock, a memecoin — not dollars or gas. */
+function isAsset(token: Plan['inflow'][number]['token'] | undefined): boolean {
+  return token !== undefined && token.address !== NATIVE_TOKEN && token.address !== getChain(token.chainId).usdc;
+}
+
+/** How a person names it: the company for a stock, the symbol for anything else. */
+function assetName(token: Plan['inflow'][number]['token']): string {
+  return stockByAddress(token.chainId, token.address)?.name ?? token.symbol;
 }
 
 /**
@@ -108,16 +114,19 @@ function isStock(token: Plan['inflow'][number]['token'] | undefined): boolean {
  */
 export function planVerb(plan: Plan): 'Send' | 'Move' | 'Swap' | 'Buy' | 'Sell' {
   if (plan.intentType !== 'bridge') return 'Send';
-  if (isStock(plan.inflow[0]?.token)) return 'Buy';
-  if (isStock(plan.outflow[0]?.token)) return 'Sell';
+  if (isAsset(plan.inflow[0]?.token)) return 'Buy';
+  // Off Arc only: Arc has no assets to sell but its USDC.
+  const sold = plan.outflow[0]?.token;
+  if (sold && sold.chainId !== DEFAULT_CHAIN && isAsset(sold)) return 'Sell';
   return isSwap(plan) ? 'Swap' : 'Move';
 }
 
-/** The stock a plan buys or sells, by name — "Apple" — or null. */
+/** What a plan buys or sells, by name — "Apple", "PEPE" — or null. */
 export function planStockName(plan: Plan): string | null {
-  const token = plan.inflow[0]?.token ?? null;
-  const sold = plan.outflow[0]?.token ?? null;
-  return (token && stockByAddress(token.chainId, token.address)?.name) ?? (sold && stockByAddress(sold.chainId, sold.address)?.name) ?? null;
+  const bought = plan.inflow[0]?.token;
+  if (bought && isAsset(bought)) return assetName(bought);
+  const sold = plan.outflow[0]?.token;
+  return sold && isAsset(sold) ? assetName(sold) : null;
 }
 
 /**

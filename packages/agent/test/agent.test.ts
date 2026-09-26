@@ -58,6 +58,7 @@ const tools: AgentTools = {
   getMarketOverview: async () => ({ totalMarketCapUsd: 2.9e12 }),
   remember: async (note) => ({ saved: true, note }),
   forgetMemory: async (id) => ({ forgotten: id === 'abc' }),
+  lookupToken: async (address) => ({ matches: [{ chain: 'base', symbol: 'DEGEN', address }] }),
 };
 
 const text = (value: string): Anthropic.TextBlock => ({

@@ -3,6 +3,7 @@ import {
   AddressSchema,
   AmountSpecSchema,
   BridgeIntentSchema,
+  ChainIdSchema,
   PolicySchema,
   RecipientRefSchema,
   TransferIntentSchema,
@@ -34,6 +35,7 @@ import {
   type ChainReader,
   type GatewayBalances,
   type TokenHolding,
+  type TrackedToken,
   readUsdcBalance,
   stockByAddress,
 } from '@blocky/wallet-core';
@@ -61,7 +63,7 @@ export interface AppDeps {
     | null;
   gatewayBalances: (address: Address) => Promise<GatewayBalances>;
   /** Holdings on other chains: gas tokens, and USDC moved there — never throws; a dead chain reports nothing found. */
-  walletHoldings: (address: Address) => Promise<TokenHolding[]>;
+  walletHoldings: (address: Address, tracked: readonly TrackedToken[]) => Promise<TokenHolding[]>;
   /** Drop a wallet's cached holdings, so the next read is fresh. */
   forgetHoldings?: (address: Address) => void;
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>;
@@ -187,7 +189,7 @@ export function createApp(deps: AppDeps) {
     const [spendable, gateway, otherHoldings] = await Promise.allSettled([
       readUsdcBalance(reader, chain.id, wallet),
       deps.gatewayBalances(wallet),
-      deps.walletHoldings(wallet),
+      store.listTrackedTokens(c.get('user').id).then((tracked) => deps.walletHoldings(wallet, tracked)),
     ]);
 
     if (spendable.status === 'rejected') {
@@ -278,6 +280,12 @@ export function createApp(deps: AppDeps) {
   const ManualSendSchema = z.object({
     recipient: RecipientRefSchema,
     amount: AmountSpecSchema,
+    /**
+     * What to send, and from which chain — as the asset picker names it.
+     * Omitted: USDC on Arc. Resolved by the planner like any symbol the agent
+     * names, so nothing here can point it at an arbitrary contract.
+     */
+    asset: z.object({ symbol: z.string().min(1).max(20), chainId: ChainIdSchema }).optional(),
   });
 
   app.post('/v1/plans', async (c) => {
@@ -289,11 +297,13 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: 'Invalid send', issues: parsed.error.issues }, 400);
     }
 
+    const { asset } = parsed.data;
     const intent = TransferIntentSchema.parse({
       type: 'transfer',
-      token: { kind: 'symbol', symbol: 'USDC' },
+      token: { kind: 'symbol', symbol: asset?.symbol ?? 'USDC' },
       amount: parsed.data.amount,
       recipient: parsed.data.recipient,
+      ...(asset ? { chainId: asset.chainId } : {}),
       rationale: 'Sent manually from the Send screen.',
     });
 
@@ -548,6 +558,15 @@ export function createApp(deps: AppDeps) {
 
       // Verified against the receipt above, so it settles immediately.
       await store.settleExecution(execution.id, 'success');
+
+      // A token bought by contract — no list knows it — is remembered, so the
+      // portfolio keeps showing it. Best effort: the purchase stands either way.
+      const bought = plan.intentType === 'bridge' ? plan.inflow[0]?.token : undefined;
+      if (bought && !bought.verified) {
+        await store
+          .trackToken(userId, { chainId: bought.chainId, address: bought.address, symbol: bought.symbol, decimals: bought.decimals })
+          .catch((error: unknown) => console.error('trackToken failed', error));
+      }
 
       // Money just moved: the next balance read should see it, not a cached
       // scan from before.
@@ -848,10 +867,10 @@ function planShape(plan: Plan): PlanShape | null {
     );
     // Blocky charges nothing from other chains; a fee here is not a plan we made.
     if (blockyFee) return null;
-    // What may be approved before the last call: that chain's USDC, or a
-    // listed stock being sold. The approval itself is verified byte for byte.
+    // What may be approved before the last call: that chain's USDC, or the
+    // token this plan sells. The approval itself is verified byte for byte.
     const usdc = getChain(chainId).usdc;
-    const approvable = (to: Address) => to === usdc || stockByAddress(chainId, to) !== null;
+    const approvable = (to: Address) => to === usdc || to === outflow.token.address || stockByAddress(chainId, to) !== null;
     const last = plan.calls[plan.calls.length - 1]!;
     const allowed = plan.calls.every(
       (call) => call.chainId === chainId && (pinned.has(call.to) || (approvable(call.to) && call !== last)),

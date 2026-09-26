@@ -21,6 +21,7 @@ import {
   fetchGasZipQuote,
   getChain,
   getTokenPriceUsd,
+  getTokenPricesByAddress,
   nativeToUsdcUnits,
   priceAsDecimal,
   stockByAddress,
@@ -201,7 +202,9 @@ export function createPlannerContext({
       // A stock: the market price of that exact token, from the same snapshot.
       const stock = stockByAddress(token.chainId, token.address);
       if (stock) return priceAsDecimal(await getTokenPriceUsd(stock.symbol));
-      return null;
+      // Anything else — a token named by its contract — by that contract.
+      const prices = await getTokenPricesByAddress([token]).catch(() => null);
+      return priceAsDecimal(prices?.get(`${token.chainId}:${token.address.toLowerCase()}`) ?? null);
     },
 
     async balanceOf(token: ResolvedToken) {

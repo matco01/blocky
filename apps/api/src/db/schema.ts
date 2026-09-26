@@ -175,4 +175,24 @@ export const memories = pgTable(
   (table) => [index('memories_user_idx').on(table.userId)],
 );
 
-export const schema = { users, policies, plans, executions, contacts, sessions, balanceSnapshots, memories };
+/**
+ * Tokens a user bought by contract address — memecoins and the like — so the
+ * portfolio keeps showing them. No list knows them, and scanning every token
+ * on every chain would need an indexer; remembering what they bought doesn't.
+ */
+export const trackedTokens = pgTable(
+  'tracked_tokens',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chainId: integer('chain_id').notNull(),
+    address: text('address').notNull(),
+    symbol: text('symbol').notNull(),
+    decimals: integer('decimals').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.chainId, table.address] })],
+);
+
+export const schema = { users, policies, plans, executions, contacts, sessions, balanceSnapshots, memories, trackedTokens };

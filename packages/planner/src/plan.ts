@@ -250,6 +250,9 @@ const NATIVE_GAS_HEADROOM = 3n;
 const WARN_IMPACT_BPS = 200n; // 2%
 const MAX_IMPACT_BPS = 1_000n; // 10%
 
+/** A buy that would lose more than this if sold straight back is flagged. */
+const ROUND_TRIP_WARN_BPS = 1_500n; // 15%
+
 /** The small trade a big one is measured against: $1,000, where fees are a rounding error and the market barely moves. */
 const IMPACT_REFERENCE_UNITS = 1_000_000_000n;
 
@@ -303,10 +306,12 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   // What can leave: USDC, or the source chain's own gas token (ETH on
   // Arbitrum, say — how money that was swapped out comes home).
   const sendsNative = token.address === NATIVE_TOKEN && !source.gasPaidInUsdc;
-  // A stock, sold back for USDC. Only a listed one: the same pinned address a buy pays into.
-  const soldStock = source.gasPaidInUsdc ? null : stockByAddress(from, token.address);
+  // Any other token off Arc — a stock, a memecoin — sold back for USDC.
+  const soldToken = !source.gasPaidInUsdc && token.address !== source.usdc && token.address !== NATIVE_TOKEN ? token : null;
+  // How a person names it: the company for a listed stock, the symbol otherwise.
+  const soldName = soldToken ? (stockByAddress(from, token.address)?.name ?? token.symbol) : null;
   // Selling something that isn't USDC, for USDC somewhere else.
-  const sells = sendsNative || soldStock !== null;
+  const sells = sendsNative || soldToken !== null;
   if (token.address !== source.usdc && !sells) {
     return fail(
       'not_implemented',
@@ -335,8 +340,8 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     return fail(
       'not_implemented',
       sells
-        ? `${soldStock ? soldStock.name : source.nativeCurrency.symbol} on ${source.name} can come back as USDC on ${destination.name} right now.`
-        : `On ${destination.name} Blocky can deliver USDC or ${destination.nativeCurrency.symbol} right now.`,
+        ? `${soldName ?? source.nativeCurrency.symbol} on ${source.name} can come back as USDC on ${destination.name} right now.`
+        : `On ${destination.name} Blocky can deliver USDC, ${destination.nativeCurrency.symbol}, or any token by its contract address.`,
     );
   }
 
@@ -376,7 +381,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   // Selling a gas token is one call, but it swaps on a DEX before it bridges:
   // measured at ~475k gas on Arbitrum, so it is sized as five ordinary calls
   // (~540k) — "all of it" must leave enough behind to pay for itself.
-  const callCount = (sells ? SWAP_AND_BRIDGE_CALLS + (soldStock ? 1 : 0) : 2) + (wantsGas ? 1 : 0) + (feeTerms ? 1 : 0);
+  const callCount = (sells ? SWAP_AND_BRIDGE_CALLS + (soldToken ? 1 : 0) : 2) + (wantsGas ? 1 : 0) + (feeTerms ? 1 : 0);
 
   const [
     balance,
@@ -400,7 +405,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     ctx.estimateNetworkFeeUsd(to, probeCalls(to, gasToken, SWAP_AND_BRIDGE_CALLS)).catch(() => null),
     sells ? ctx.priceOf(token).catch(() => null) : '1',
     ctx.priceOf(gasToken).catch(() => null),
-    received.kind === 'stock' ? ctx.priceOf(received.token).catch(() => null) : null,
+    received.kind === 'token' ? ctx.priceOf(received.token).catch(() => null) : null,
   ]);
 
   const gas = selectGasStrategy({ chainId: from, networkFeeUsd, usdcBalanceUsd, nativeBalanceUsd: sourceGasUsd });
@@ -478,7 +483,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
         token,
         input,
         wallet,
-        description: `${soldStock ? `Sell ${shortAmount(displayAmount)} ${soldStock.name}` : `Swap ${displayAmount} ${token.symbol}`} on ${source.name} into USDC on ${destination.name}`,
+        description: `${soldName ? `Sell ${shortAmount(displayAmount)} ${soldName}` : `Swap ${displayAmount} ${token.symbol}`} on ${source.name} into USDC on ${destination.name}`,
       })
     : received.kind === 'usdc'
       ? await usdcRoutes({ ctx, from, to, token, input: bridged, wallet, cctp, acrossPool, displayAmount })
@@ -489,7 +494,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
           token,
           input: bridged,
           wallet,
-          output: received.kind === 'stock' ? received.token : gasToken,
+          output: received.kind === 'token' ? received.token : gasToken,
           displayAmount,
           useAcross: Boolean(acrossPool && swapHandler),
           useGasZip: gasZip,
@@ -537,8 +542,8 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
 
   /* --- Build the plan ----------------------------------------------------- */
 
-  const receivedAs = received.kind === 'usdc' ? usdcOn(to, token) : received.kind === 'stock' ? received.token : gasToken;
-  const receivedPrice = received.kind === 'usdc' ? '1' : received.kind === 'stock' ? receivedTokenPrice : gasTokenPrice;
+  const receivedAs = received.kind === 'usdc' ? usdcOn(to, token) : received.kind === 'token' ? received.token : gasToken;
+  const receivedPrice = received.kind === 'usdc' ? '1' : received.kind === 'token' ? receivedTokenPrice : gasTokenPrice;
 
   const moved = assetDelta(token, input, unitPrice);
   const landed = assetDelta(receivedAs, route.arrive, receivedPrice);
@@ -576,7 +581,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   if (impactBps > MAX_IMPACT_BPS) {
     return fail(
       'price_impact',
-      `That size would lose about ${bpsAsPercent(impactBps)} to the price — there isn't enough trading in ${received.kind === 'stock' ? received.stock.name : (soldStock?.name ?? receivedAs.symbol)} for it right now. A smaller amount, or a few smaller trades, costs far less.`,
+      `That size would lose about ${bpsAsPercent(impactBps)} to the price — there isn't enough trading in ${received.kind === 'token' ? received.name : (soldName ?? receivedAs.symbol)} for it right now. A smaller amount, or a few smaller trades, costs far less.`,
     );
   }
   const topUpCost = topUpQuote ? lossUnits(formatUsd(topUp), toppedUp?.usdValue ?? null) : 0n;
@@ -606,6 +611,10 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
       : [];
 
   const warnings: Warning[] = [
+    ...(received.kind === 'token' ? tokenWarnings(received.token) : []),
+    ...(received.kind === 'token' && !received.token.verified
+      ? await exitWarnings({ ctx, from, to, wallet, token: received.token, name: received.name, arrive: route.arrive, paidUnits: bridged })
+      : []),
     ...impactWarning,
     // Price impact already says it; the fee warning would say it again.
     ...(impactWarning.length ? [] : feeWarnings(fee.totalUsd, moved.usdValue)),
@@ -619,10 +628,10 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
     plan: stamp({
       intentType: 'bridge',
       summary:
-        received.kind === 'stock'
-          ? summariseBuy(moved, landed, received.stock.name, route, topUpQuote ? topUp : null, gasToken.symbol)
-          : soldStock
-            ? summariseSell(moved, landed, soldStock.name, destination.name, route)
+        received.kind === 'token'
+          ? summariseBuy(moved, landed, received.name, route, topUpQuote ? topUp : null, gasToken.symbol)
+          : soldName
+            ? summariseSell(moved, landed, soldName, destination.name, route)
             : received.kind === 'usdc' && !sells
               ? summariseMove(moved, landed, destination.name, route, topUpQuote ? topUp : null, gasToken.symbol, fromElsewhere)
               : summariseSwap(moved, landed, destination.name, route, fromElsewhere),
@@ -863,8 +872,11 @@ async function swapRoutes(args: {
 type Received =
   | { kind: 'usdc' }
   | { kind: 'native' }
-  /** A listed stock, on the chain stocks live on. */
-  | { kind: 'stock'; token: ResolvedToken; stock: Stock }
+  /**
+   * Any other token: a listed stock (named for the company), or anything the
+   * user names by contract address — a memecoin, say, unverified and warned about.
+   */
+  | { kind: 'token'; token: ResolvedToken; name: string; stock: Stock | null }
   /** A stock, asked for on some other chain — refused with where to find it. */
   | { kind: 'stock_elsewhere'; stock: Stock };
 
@@ -893,9 +905,13 @@ async function receivedToken(intent: BridgeIntent, to: ChainId, ctx: PlannerCont
     if (ref.address === NATIVE_TOKEN) return { kind: 'native' };
   }
 
+  // A listed stock by ticker, or any token by its contract on this chain. A
+  // symbol Blocky doesn't list is never looked up: names are free to copy, so
+  // anything else has to come with its address.
   const token = await ctx.resolveToken(ref, to);
-  const stock = token ? stockByAddress(to, token.address) : null;
-  return token && stock ? { kind: 'stock', token, stock } : null;
+  if (!token || token.address === NATIVE_TOKEN || token.address === destination.usdc) return null;
+  const stock = stockByAddress(to, token.address);
+  return { kind: 'token', token, name: stock?.name ?? token.symbol, stock };
 }
 
 /** A chain's native gas token, as a resolved token named by the zero address. */
@@ -1109,6 +1125,50 @@ async function sizeImpactBps(args: {
   // 10000 × (1 − (arrive / input) ÷ (refOut / refInput)), never below zero.
   const ratio = (arrive * refInput * 10_000n) / (reference.expectedOut * input);
   return ratio >= 10_000n ? 0n : 10_000n - ratio;
+}
+
+/**
+ * Before buying a token Blocky doesn't know, check it can be sold again. Some
+ * can't — a honeypot lets you in and never out — and some tax every sale. So
+ * the sale back to where the money came from is quoted now, for everything
+ * the buy would deliver: no route out at all, or a round trip returning far
+ * less than went in, and the user is told before they approve.
+ */
+async function exitWarnings(args: {
+  ctx: PlannerContext;
+  from: ChainId;
+  to: ChainId;
+  wallet: Address;
+  token: ResolvedToken;
+  name: string;
+  arrive: bigint;
+  /** What was paid into the swap, in USDC base units. */
+  paidUnits: bigint;
+}): Promise<Warning[]> {
+  const back = await args.ctx
+    .acrossNativeSwapQuote(args.to, args.from, args.arrive, args.wallet, args.token.address)
+    .catch(() => null);
+
+  if (!back || back.expectedOut <= 0n) {
+    return [
+      {
+        code: 'unsellable',
+        severity: 'danger',
+        message: `Blocky couldn't find a way to sell ${args.name} back right now. Some tokens can be bought but never sold — only buy it if you're sure.`,
+      },
+    ];
+  }
+
+  const lostBps = back.expectedOut >= args.paidUnits ? 0n : ((args.paidUnits - back.expectedOut) * 10_000n) / args.paidUnits;
+  if (lostBps <= ROUND_TRIP_WARN_BPS) return [];
+
+  return [
+    {
+      code: 'unsellable',
+      severity: 'danger',
+      message: `Selling it straight back would return about ${displayUsd(formatUsd(back.expectedOut))} of ${displayUsd(formatUsd(args.paidUnits))} — ${bpsAsPercent(lostBps)} lost to a wide spread or a token tax.`,
+    },
+  ];
 }
 
 /** 237 basis points as "2.4%". */
