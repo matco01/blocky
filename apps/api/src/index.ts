@@ -10,12 +10,15 @@ import {
   createChainReader,
   fetchGatewayBalances,
   fetchWalletHoldings,
+  getTokenPriceUsd,
+  priceAsDecimal,
   forgetWalletHoldings,
   getChain,
   rpcConfigFromEnv,
   usdcAddress,
 } from '@blocky/wallet-core';
 import { fetchExplorerTransfers } from './activity';
+import { ALERT_CHECK_MS, checkPriceAlerts } from './alerts';
 import { createAgentHandler } from './agent';
 import { createApp } from './app';
 import { createPrivyIdentity } from './auth';
@@ -76,6 +79,14 @@ const app = createApp({
   logRequests: true,
   blockyFee,
 });
+
+// Price alerts: one sweep a minute against the shared price snapshot.
+const alertTimer = setInterval(() => {
+  void checkPriceAlerts(store, async (symbol) => priceAsDecimal(await getTokenPriceUsd(symbol))).catch((error: unknown) =>
+    console.error('price alerts failed', error),
+  );
+}, ALERT_CHECK_MS);
+alertTimer.unref();
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, ({ port }) => {
   console.log(

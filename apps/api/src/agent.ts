@@ -31,6 +31,8 @@ import {
   IS_TESTNET,
 } from '@blocky/wallet-core';
 import { mergeActivity, type ExplorerTransfer } from './activity';
+import { createRequest, insightsFor, linkMatchingRequest, potWarning, who } from './money';
+import { BUDGET_CATEGORIES, monthOf } from './insights';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
 import type { Store } from './store';
 
@@ -239,6 +241,169 @@ export function agentToolsFor(
       };
     },
 
+    async getProfile() {
+      const user = await store.getUser(userId);
+      return {
+        username: await store.getUsername(userId),
+        walletAddress: account,
+        receiveOn: 'Arc — USDC sent to this address on Arc lands straight in their balance',
+        ...(user ? {} : { note: 'Account still being set up.' }),
+      };
+    },
+
+    async getNotifications() {
+      const items = await store.listNotifications(userId, 20);
+      return { unread: items.filter((item) => !item.read).length, items: items.map(({ title, body, read, createdAt }) => ({ title, body, read, at: createdAt })) };
+    },
+
+    async declineRequest(id) {
+      const request = await store.getPaymentRequest(id);
+      if (!request || request.status !== 'open') return { error: 'That request is no longer open.' };
+      const status = request.requesterId === userId ? 'cancelled' : request.payerId === userId ? 'declined' : null;
+      if (!status) return { error: 'That request is for someone else.' };
+      await store.settleRequest(id, status);
+      if (status === 'declined') {
+        await store.notify(request.requesterId, {
+          kind: 'request_declined',
+          title: `${who(await store.getUsername(userId))} declined your request`,
+          body: `${request.amountUsd} dollars${request.note ? ` for ${request.note}` : ''}`,
+          data: { requestId: id },
+        });
+      }
+      return { status };
+    },
+
+    async blockRequester(id) {
+      const request = await store.getPaymentRequest(id);
+      if (!request || request.payerId !== userId) return { error: 'That request was not made of them.' };
+      await store.blockUser(userId, request.requesterId);
+      return { blocked: request.requesterUsername ? `@${request.requesterUsername}` : 'that person' };
+    },
+
+    async deletePot(potName) {
+      const pot = (await store.listPots(userId)).find((candidate) => candidate.name.toLowerCase() === potName.trim().toLowerCase());
+      if (!pot) return { error: `There's no pot called "${potName}".` };
+      await store.deletePot(userId, pot.id);
+      return { deleted: pot.name, stillInWallet: pot.savedUsd };
+    },
+
+    /**
+     * Only ever lower. A limit raised from a chat is a limit a clever message
+     * could raise; raising stays on the Spending limits screen, in their hands.
+     */
+    async lowerSpendingLimits(limits) {
+      const policy = await store.getPolicy(userId);
+      const next = { ...policy };
+      const refused: string[] = [];
+      const read = (value: string | null) => {
+        const clean = value?.trim().replace(/^\$/, '').replace(/,/g, '') ?? null;
+        return clean !== null && /^\d+(\.\d{1,6})?$/.test(clean) ? clean : null;
+      };
+
+      const perSend = read(limits.perSendUsd);
+      if (perSend !== null) {
+        if (parseUsd(perSend) <= parseUsd(policy.perTxCapUsd)) next.perTxCapUsd = perSend;
+        else refused.push('per send');
+      }
+      const perDay = read(limits.perDayUsd);
+      if (perDay !== null) {
+        if (parseUsd(perDay) <= parseUsd(policy.dailyCapUsd)) next.dailyCapUsd = perDay;
+        else refused.push('per day');
+      }
+
+      await store.setPolicy(userId, next);
+      return {
+        perSendUsd: next.perTxCapUsd,
+        perDayUsd: next.dailyCapUsd,
+        ...(refused.length
+          ? { notRaised: `Raising the limit ${refused.join(' and ')} has to be done on the Spending limits screen (Account → Spending limits).` }
+          : {}),
+      };
+    },
+
+    async requestMoney(input) {
+      const result = await createRequest(store, userId, { payer: input.from, amountUsd: input.amountUsd, note: input.note });
+      return result.ok ? { request: result.request, link: result.link, shareText: result.shareText } : { error: result.message };
+    },
+
+    async listRequests() {
+      const { incoming, outgoing } = await store.listPaymentRequests(userId);
+      const brief = (request: (typeof incoming)[number]) => ({
+        id: request.id,
+        from: who(request.requesterUsername),
+        to: request.payerId ? who(request.payerUsername) : 'anyone with the link',
+        amountUsd: request.amountUsd,
+        note: request.note,
+        status: request.status,
+        // Asked by someone they've never dealt with — worth a word of caution.
+        ...(request.fromStranger ? { fromSomeoneTheyDontKnow: true } : {}),
+      });
+      return { incoming: incoming.slice(0, 10).map(brief), outgoing: outgoing.slice(0, 10).map(brief) };
+    },
+
+    async setPriceAlert(alert) {
+      const price = alert.priceUsd.trim().replace(/^\$/, '').replace(/,/g, '');
+      if (!/^\d+(\.\d{1,6})?$/.test(price) || parseUsd(price) <= 0n) return { error: 'Give the price as a number of dollars.' };
+      if (!(await getTokenPriceUsd(alert.symbol).catch(() => null))) {
+        return { error: `There's no live price for ${alert.symbol} to watch.` };
+      }
+      return { alert: await store.addPriceAlert(userId, { symbol: alert.symbol, direction: alert.direction, thresholdUsd: price }) };
+    },
+
+    async listPriceAlerts() {
+      return { alerts: await store.listPriceAlerts(userId) };
+    },
+
+    async cancelPriceAlert(id) {
+      return { cancelled: await store.deletePriceAlert(userId, id) };
+    },
+
+    async getInsights(month) {
+      const when = month && /^\d{4}-\d{2}$/.test(month) ? month : monthOf(new Date());
+      return insightsFor(store, userId, account, when);
+    },
+
+    async setBudget(category, monthlyUsd) {
+      if (!(BUDGET_CATEGORIES as readonly string[]).includes(category)) return { error: 'Budgets are for "people", "investing" or "total".' };
+      const amount = monthlyUsd?.trim().replace(/^\$/, '') ?? null;
+      if (amount !== null && !/^\d+(\.\d{1,6})?$/.test(amount)) return { error: 'Give the budget as a number of dollars.' };
+      await store.setBudget(userId, category, amount);
+      return { budgets: await store.listBudgets(userId) };
+    },
+
+    async listPots() {
+      return { pots: await store.listPots(userId) };
+    },
+
+    async createPot(name, targetUsd) {
+      const target = targetUsd?.trim().replace(/^\$/, '') ?? null;
+      if (target !== null && !/^\d+(\.\d{1,6})?$/.test(target)) return { error: 'Give the goal as a number of dollars.' };
+      return { pot: await store.createPot(userId, { name, targetUsd: target }) };
+    },
+
+    async moveToPot(potName, amountUsd) {
+      const pot = (await store.listPots(userId)).find((candidate) => candidate.name.toLowerCase() === potName.trim().toLowerCase());
+      if (!pot) return { error: `There's no pot called "${potName}".` };
+      const raw = amountUsd.trim().replace('$', '');
+      if (!/^-?\d+(\.\d{1,6})?$/.test(raw)) return { error: 'Give the amount in dollars, negative to take money out.' };
+      const out = raw.startsWith('-');
+      const units = parseUsd(raw.replace('-', ''));
+
+      if (!out) {
+        const [{ amount }, pots] = await Promise.all([readUsdcBalance(reader, DEFAULT_CHAIN, account), store.listPots(userId)]);
+        const free = amount - pots.reduce((sum, p) => sum + parseUsd(p.savedUsd), 0n);
+        if (units > free) return { error: `Only ${formatUsd(free > 0n ? free : 0n)} dollars aren't already in a pot.` };
+      }
+      return { pot: await store.adjustPot(userId, pot.id, out ? `-${formatUsd(units)}` : formatUsd(units)) };
+    },
+
+    async setUsername(name) {
+      const result = await store.setUsername(userId, name);
+      return result === 'ok'
+        ? { username: await store.getUsername(userId) }
+        : { error: result === 'taken' ? 'That name is taken.' : '3–20 letters, numbers or _, starting with a letter.' };
+    },
+
     async remember(note) {
       return store.addMemory(userId, note);
     },
@@ -354,7 +519,9 @@ export function createAgentHandler(
         const mismatch = destinationMismatch(intent);
         if (mismatch) return { ok: false, message: mismatch };
         const outcome = await buildPlan(intent, context);
-        return outcome.ok ? { ok: true, plan: outcome.plan } : { ok: false, message: outcome.failure.message };
+        return outcome.ok
+          ? { ok: true, plan: await potWarning(store, reader, userId, account, outcome.plan) }
+          : { ok: false, message: outcome.failure.message };
       },
       history: history.map((entry) => ({ role: entry.role, content: entry.content })),
     });
@@ -408,6 +575,8 @@ export function createAgentHandler(
       // Held so the client can approve it by id rather than posting a plan back —
       // a plan that arrives from a client is a plan an attacker can edit.
       await store.putPlan(userId, plan!, 'agent');
+      // Paying someone who is asking them for that much settles their request.
+      await linkMatchingRequest(store, userId, plan!).catch(() => {});
     }
 
     const first = plans[0]!;

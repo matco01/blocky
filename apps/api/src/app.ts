@@ -4,10 +4,12 @@ import {
   AmountSpecSchema,
   BridgeIntentSchema,
   ChainIdSchema,
+  DecimalSchema,
   PolicySchema,
   RecipientRefSchema,
   TransferIntentSchema,
   evaluatePolicy,
+  displayUsd,
   formatUsd,
   parseUsd,
   planOutflowUsd,
@@ -46,6 +48,17 @@ import { z } from 'zod';
 import { mergeActivity, type ExplorerTransfer } from './activity';
 import type { AgentResponse, ChatTurn } from './agent';
 import { authenticate, type AuthenticatedUser, type IdentityProvider } from './auth';
+import {
+  BUDGET_CATEGORIES,
+  crossedBudgetLines,
+  monthInsights,
+  monthOf,
+  previousMonth,
+  spentInCategory,
+  statementCsv,
+  type BudgetCategory,
+} from './insights';
+import { createRequest, insightsFor, linkMatchingRequest, monthStart, potWarning, who } from './money';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
 import { DuplicateExecutionError, type Store } from './store';
 
@@ -115,9 +128,237 @@ export function createApp(deps: AppDeps) {
 
   app.get('/health', (c) => c.json({ ok: true, defaultChain: getChain(DEFAULT_CHAIN).name }));
 
-  app.get('/v1/me', (c) => {
+  app.get('/v1/me', async (c) => {
     const user = c.get('user');
-    return c.json({ userId: user.id, walletAddress: user.walletAddress, chainId: DEFAULT_CHAIN });
+    return c.json({
+      userId: user.id,
+      walletAddress: user.walletAddress,
+      chainId: DEFAULT_CHAIN,
+      username: await store.getUsername(user.id),
+    });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /*  Usernames — paying people by name                                        */
+  /* ------------------------------------------------------------------------ */
+
+  app.put('/v1/me/username', async (c) => {
+    const body = z.object({ username: z.string().min(1).max(40) }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'invalid_username', message: 'Pick a name.' }, 400);
+
+    const result = await store.setUsername(c.get('user').id, body.data.username);
+    if (result === 'invalid') {
+      return c.json(
+        { error: 'invalid_username', message: '3–20 letters, numbers or _, starting with a letter.' },
+        400,
+      );
+    }
+    if (result === 'taken') return c.json({ error: 'username_taken', message: 'That name is taken.' }, 409);
+    return c.json({ username: await store.getUsername(c.get('user').id) });
+  });
+
+  /** Who "@sam" is: enough to show before paying them, nothing more. */
+  app.get('/v1/users/:username', async (c) => {
+    const person = await store.findUserByUsername(c.req.param('username'));
+    if (!person) return c.json({ error: 'not_found', message: 'Nobody on Blocky goes by that name.' }, 404);
+    return c.json({ username: person.username, walletAddress: person.walletAddress });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /*  Payment requests                                                         */
+  /* ------------------------------------------------------------------------ */
+
+  app.post('/v1/requests', async (c) => {
+    const body = z
+      .object({
+        /** Omitted: a link anyone can pay. */
+        payer: z.string().min(1).max(40).optional(),
+        amountUsd: DecimalSchema,
+        note: z.string().max(140).optional(),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'invalid_request', issues: body.error.issues }, 400);
+
+    const result = await createRequest(store, c.get('user').id, {
+      payer: body.data.payer ?? null,
+      amountUsd: body.data.amountUsd,
+      note: body.data.note ?? null,
+    });
+    if (!result.ok) {
+      const error = result.status === 404 ? 'not_found' : result.status === 429 ? 'too_many_requests' : 'invalid_request';
+      return c.json({ error, message: result.message }, result.status);
+    }
+    return c.json({ request: result.request, link: result.link, shareText: result.shareText }, 201);
+  });
+
+  app.get('/v1/requests', async (c) => c.json(await store.listPaymentRequests(c.get('user').id)));
+
+  app.get('/v1/requests/:id', async (c) => {
+    const request = await store.getPaymentRequest(c.req.param('id'));
+    if (!request) return c.json({ error: 'not_found', message: 'That request is gone.' }, 404);
+    return c.json({ request });
+  });
+
+  /**
+   * Pay a request: a plan for a USDC send on Arc to whoever asked, for what
+   * they asked. The plan is tied to the request, so when it lands the request
+   * settles itself — nothing the app reports decides that.
+   */
+  app.post('/v1/requests/:id/pay', async (c) => {
+    const wallet = walletOf(c);
+    if (wallet instanceof Response) return wallet;
+    const user = c.get('user');
+
+    const request = await store.getPaymentRequest(c.req.param('id'));
+    if (!request || request.status !== 'open') return c.json({ error: 'not_open', message: 'That request is no longer open.' }, 409);
+    if (request.payerId !== null && request.payerId !== user.id) return c.json({ error: 'not_yours', message: 'That request is for someone else.' }, 403);
+    if (request.requesterId === user.id) return c.json({ error: 'not_yours', message: "That's your own request." }, 400);
+
+    const intent = TransferIntentSchema.parse({
+      type: 'transfer',
+      token: { kind: 'symbol', symbol: 'USDC' },
+      amount: { kind: 'usd', value: request.amountUsd },
+      recipient: { kind: 'address', address: request.requesterWallet },
+      rationale: `Pay ${who(request.requesterUsername)}'s request${request.note ? ` for ${request.note}` : ''}.`,
+    });
+
+    const outcome = await buildPlan(intent, createPlannerContext({ reader, store, userId: user.id, account: wallet, blockyFee: deps.blockyFee ?? null }));
+    if (!outcome.ok) return c.json({ error: outcome.failure.code, message: outcome.failure.message }, 422);
+
+    const plan = await potWarning(store, reader, user.id, wallet, outcome.plan);
+    await store.putPlan(user.id, plan, 'manual');
+    await store.linkRequestPlan(request.id, plan.id);
+    return c.json({ plan }, 201);
+  });
+
+  /** Block whoever made this request: it's declined, and they can't ask again. They aren't told. */
+  app.post('/v1/requests/:id/block', async (c) => {
+    const user = c.get('user');
+    const request = await store.getPaymentRequest(c.req.param('id'));
+    if (!request || request.payerId !== user.id) return c.json({ error: 'not_yours' }, 403);
+    await store.blockUser(user.id, request.requesterId);
+    return c.json({ blocked: true });
+  });
+
+  app.post('/v1/requests/:id/decline', async (c) => {
+    const user = c.get('user');
+    const request = await store.getPaymentRequest(c.req.param('id'));
+    if (!request || request.status !== 'open') return c.json({ error: 'not_open', message: 'That request is no longer open.' }, 409);
+
+    // The one asked declines; the one asking cancels.
+    const status = request.requesterId === user.id ? 'cancelled' : request.payerId === user.id ? 'declined' : null;
+    if (!status) return c.json({ error: 'not_yours', message: 'That request is for someone else.' }, 403);
+
+    await store.settleRequest(request.id, status);
+    if (status === 'declined') {
+      await store.notify(request.requesterId, {
+        kind: 'request_declined',
+        title: `${who(request.payerUsername)} declined your request`,
+        body: `${displayUsd(request.amountUsd)}${request.note ? ` for ${request.note}` : ''}`,
+        data: { requestId: request.id },
+      });
+    }
+    return c.json({ status });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /*  Notifications                                                            */
+  /* ------------------------------------------------------------------------ */
+
+  /* ------------------------------------------------------------------------ */
+  /*  Insights, budgets, statements                                            */
+  /* ------------------------------------------------------------------------ */
+
+  app.get('/v1/insights', async (c) => {
+    const wallet = walletOf(c);
+    if (wallet instanceof Response) return wallet;
+    const user = c.get('user');
+    const month = /^\d{4}-\d{2}$/.test(c.req.query('month') ?? '') ? c.req.query('month')! : monthOf(new Date());
+    return c.json(await insightsFor(store, user.id, wallet, month));
+  });
+
+  app.put('/v1/budgets', async (c) => {
+    const body = z
+      .object({ category: z.enum(BUDGET_CATEGORIES), monthlyUsd: DecimalSchema.nullable() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'invalid_budget', issues: body.error.issues }, 400);
+    await store.setBudget(c.get('user').id, body.data.category, body.data.monthlyUsd);
+    return c.json({ budgets: await store.listBudgets(c.get('user').id) });
+  });
+
+  /** A month as CSV: every move, its category and its fees. */
+  app.get('/v1/statements/:month', async (c) => {
+    const month = c.req.param('month').replace(/\.csv$/, '');
+    if (!/^\d{4}-\d{2}$/.test(month)) return c.json({ error: 'invalid_month' }, 400);
+    const moves = await store.listSettledMoves(c.get('user').id, monthStart(month));
+    c.header('content-type', 'text/csv; charset=utf-8');
+    return c.body(statementCsv(month, moves));
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /*  Savings pots                                                             */
+  /* ------------------------------------------------------------------------ */
+
+  app.get('/v1/pots', async (c) => c.json({ pots: await store.listPots(c.get('user').id) }));
+
+  app.post('/v1/pots', async (c) => {
+    const body = z
+      .object({ name: z.string().trim().min(1).max(40), targetUsd: DecimalSchema.nullable().optional() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'invalid_pot', issues: body.error.issues }, 400);
+    return c.json({ pot: await store.createPot(c.get('user').id, { name: body.data.name, targetUsd: body.data.targetUsd ?? null }) }, 201);
+  });
+
+  /**
+   * Put money in (positive) or take it out (negative). Bookkeeping only —
+   * nothing moves on-chain — but never more than the wallet actually holds
+   * outside other pots.
+   */
+  app.post('/v1/pots/:id/adjust', async (c) => {
+    const body = z.object({ deltaUsd: z.string().regex(/^-?\d+(\.\d{1,6})?$/) }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'invalid_amount' }, 400);
+    const wallet = walletOf(c);
+    if (wallet instanceof Response) return wallet;
+    const user = c.get('user');
+    const delta = parseUsd(body.data.deltaUsd.replace('-', '')) * (body.data.deltaUsd.startsWith('-') ? -1n : 1n);
+
+    if (delta > 0n) {
+      const [{ amount }, pots] = await Promise.all([readUsdcBalance(reader, DEFAULT_CHAIN, wallet), store.listPots(user.id)]);
+      const setAside = pots.reduce((sum, pot) => sum + parseUsd(pot.savedUsd), 0n);
+      if (setAside + delta > amount) {
+        return c.json({ error: 'insufficient_balance', message: `You have ${displayUsd(formatUsd(amount - setAside > 0n ? amount - setAside : 0n))} not already in a pot.` }, 422);
+      }
+    }
+
+    const pot = await store.adjustPot(user.id, c.req.param('id'), delta < 0n ? `-${formatUsd(-delta)}` : formatUsd(delta));
+    if (!pot) return c.json({ error: 'not_found' }, 404);
+    return c.json({ pot });
+  });
+
+  app.delete('/v1/pots/:id', async (c) => {
+    const removed = await store.deletePot(c.get('user').id, c.req.param('id'));
+    return removed ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404);
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /*  Price alerts                                                             */
+  /* ------------------------------------------------------------------------ */
+
+  app.get('/v1/alerts', async (c) => c.json({ alerts: await store.listPriceAlerts(c.get('user').id) }));
+
+  app.delete('/v1/alerts/:id', async (c) => {
+    const removed = await store.deletePriceAlert(c.get('user').id, c.req.param('id'));
+    return removed ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404);
+  });
+
+  app.get('/v1/notifications', async (c) => {
+    const items = await store.listNotifications(c.get('user').id);
+    return c.json({ items, unread: items.filter((item) => !item.read).length });
+  });
+
+  app.post('/v1/notifications/read', async (c) => {
+    await store.markNotificationsRead(c.get('user').id);
+    return c.json({ ok: true });
   });
 
   /** The chains the API knows about, for a client that doesn't bundle `@blocky/wallet-core`. */
@@ -186,10 +427,11 @@ export function createApp(deps: AppDeps) {
 
     const chain = getChain(DEFAULT_CHAIN);
 
-    const [spendable, gateway, otherHoldings] = await Promise.allSettled([
+    const [spendable, gateway, otherHoldings, userPots] = await Promise.allSettled([
       readUsdcBalance(reader, chain.id, wallet),
       deps.gatewayBalances(wallet),
       store.listTrackedTokens(c.get('user').id).then((tracked) => deps.walletHoldings(wallet, tracked)),
+      store.listPots(c.get('user').id).catch(() => []),
     ]);
 
     if (spendable.status === 'rejected') {
@@ -225,6 +467,10 @@ export function createApp(deps: AppDeps) {
       usdc: { amount: amount.toString(), displayAmount: display },
       gateway: gatewayValue,
       otherHoldings: holdings,
+      /** Set aside in savings pots — still in the wallet, but not for spending. */
+      potsUsd: formatUsd(
+        userPots.status === 'fulfilled' ? userPots.value.reduce((sum, pot) => sum + parseUsd(pot.savedUsd), 0n) : 0n,
+      ),
     });
   });
 
@@ -314,8 +560,10 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: outcome.failure.code, message: outcome.failure.message }, 422);
     }
 
-    await store.putPlan(userId, outcome.plan, 'manual');
-    return c.json({ plan: outcome.plan }, 201);
+    const plan = await potWarning(store, reader, userId, wallet, outcome.plan);
+    await store.putPlan(userId, plan, 'manual');
+    await linkMatchingRequest(store, userId, plan).catch(() => {});
+    return c.json({ plan }, 201);
   });
 
   /**
@@ -558,6 +806,10 @@ export function createApp(deps: AppDeps) {
 
       // Verified against the receipt above, so it settles immediately.
       await store.settleExecution(execution.id, 'success');
+
+      await afterMoneyMoved({ store, plan, userId, txHash }).catch((error: unknown) =>
+        console.error('afterMoneyMoved failed', error),
+      );
 
       // A token bought by contract — no list knows it — is remembered, so the
       // portfolio keeps showing it. Best effort: the purchase stands either way.
@@ -934,4 +1186,84 @@ function planShape(plan: Plan): PlanShape | null {
   }
 
   return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  After money moves                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a landed send means for other people: a request it paid is settled
+ * and its asker told; a Blocky user it paid is told who sent what. Best
+ * effort — the money has moved whatever happens here.
+ */
+async function afterMoneyMoved(args: { store: Store; plan: Plan; userId: string; txHash: string }): Promise<void> {
+  const { store, plan, userId, txHash } = args;
+  const sender = await store.getUsername(userId);
+  const amount = planOutflowUsd(plan);
+
+  await budgetAlerts(store, userId, plan).catch((error: unknown) => console.error('budgetAlerts failed', error));
+
+  const request = await store.findRequestByPlan(plan.id);
+  if (request && request.status === 'open') {
+    await store.settleRequest(request.id, 'paid', txHash);
+    await store.notify(request.requesterId, {
+      kind: 'request_paid',
+      title: `${who(sender)} paid your request`,
+      body: `${displayUsd(request.amountUsd)}${request.note ? ` for ${request.note}` : ''}`,
+      data: { requestId: request.id, txHash },
+    });
+    return;
+  }
+
+  if (plan.intentType === 'transfer' && plan.recipient) {
+    const recipient = await store.findUserByWallet(plan.recipient.address);
+    if (recipient && recipient.id !== userId) {
+      const [delta] = plan.outflow;
+      await store.notify(recipient.id, {
+        kind: 'money_received',
+        title: `${who(sender)} sent you ${amount ? displayUsd(amount) : `${delta?.displayAmount} ${delta?.token.symbol}`}`,
+        body: 'It’s in your wallet.',
+        data: { txHash },
+      });
+    }
+  }
+}
+
+
+
+
+/* -------------------------------------------------------------------------- */
+/*  Insights                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * After a move, the budgets it pushed past 80% or 100% this month — told
+ * once each, at the move that crossed the line.
+ */
+async function budgetAlerts(store: Store, userId: string, plan: Plan): Promise<void> {
+  const budgets = await store.listBudgets(userId);
+  if (budgets.length === 0) return;
+
+  const month = monthOf(new Date());
+  const moves = await store.listSettledMoves(userId, monthStart(month));
+  const after = monthInsights(month, moves, []);
+  const before = monthInsights(month, moves.filter((move) => move.plan.id !== plan.id), []);
+
+  for (const budget of budgets) {
+    const category = budget.category as BudgetCategory;
+    const limit = parseUsd(budget.monthlyUsd);
+    for (const line of crossedBudgetLines(limit, spentInCategory(before, category), spentInCategory(after, category))) {
+      await store.notify(userId, {
+        kind: 'budget',
+        title: line === 100 ? `You've reached your ${budgetName(category)} budget` : `${line}% of your ${budgetName(category)} budget`,
+        body: `${displayUsd(formatUsd(spentInCategory(after, category)))} of ${displayUsd(budget.monthlyUsd)} this month.`,
+        data: { category },
+      });
+    }
+  }
+}
+
+function budgetName(category: BudgetCategory): string {
+  return category === 'people' ? 'sending' : category === 'investing' ? 'investing' : 'monthly';
 }

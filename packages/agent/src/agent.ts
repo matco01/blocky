@@ -78,6 +78,23 @@ export interface AgentTools {
   getMarketOverview(): Promise<unknown>;
   remember(note: string): Promise<unknown>;
   lookupToken(address: string): Promise<unknown>;
+  getProfile(): Promise<unknown>;
+  getNotifications(): Promise<unknown>;
+  declineRequest(id: string): Promise<unknown>;
+  blockRequester(id: string): Promise<unknown>;
+  deletePot(pot: string): Promise<unknown>;
+  lowerSpendingLimits(limits: { perSendUsd: string | null; perDayUsd: string | null }): Promise<unknown>;
+  requestMoney(request: { from: string | null; amountUsd: string; note: string | null }): Promise<unknown>;
+  listRequests(): Promise<unknown>;
+  setPriceAlert(alert: { symbol: string; direction: 'above' | 'below'; priceUsd: string }): Promise<unknown>;
+  listPriceAlerts(): Promise<unknown>;
+  cancelPriceAlert(id: string): Promise<unknown>;
+  getInsights(month: string | null): Promise<unknown>;
+  setBudget(category: string, monthlyUsd: string | null): Promise<unknown>;
+  listPots(): Promise<unknown>;
+  createPot(name: string, targetUsd: string | null): Promise<unknown>;
+  moveToPot(pot: string, amountUsd: string): Promise<unknown>;
+  setUsername(username: string): Promise<unknown>;
   forgetMemory(id: string): Promise<unknown>;
 }
 
@@ -376,6 +393,12 @@ function runTools(uses: Anthropic.ToolUseBlock[], tools: AgentTools): Promise<An
   );
 }
 
+/** An optional string argument: absent, null or blank is null. */
+function optionalString(input: unknown, name: string): string | null {
+  const value = (input as Record<string, unknown> | null)?.[name];
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
 /** The shape a tool call's arguments are expected to have, checked before use. */
 function stringArg(input: unknown, name: string): string {
   const value = (input as Record<string, unknown> | null)?.[name];
@@ -415,6 +438,43 @@ async function callTool(name: string, input: unknown, tools: AgentTools): Promis
       return tools.remember(stringArg(input, 'note'));
     case 'lookup_token':
       return tools.lookupToken(stringArg(input, 'address'));
+    case 'get_profile':
+      return tools.getProfile();
+    case 'get_notifications':
+      return tools.getNotifications();
+    case 'decline_request':
+      return tools.declineRequest(stringArg(input, 'id'));
+    case 'block_requester':
+      return tools.blockRequester(stringArg(input, 'id'));
+    case 'delete_pot':
+      return tools.deletePot(stringArg(input, 'pot'));
+    case 'set_spending_limits':
+      return tools.lowerSpendingLimits({ perSendUsd: optionalString(input, 'perSendUsd'), perDayUsd: optionalString(input, 'perDayUsd') });
+    case 'request_money':
+      return tools.requestMoney({ from: optionalString(input, 'from'), amountUsd: stringArg(input, 'amountUsd'), note: optionalString(input, 'note') });
+    case 'list_requests':
+      return tools.listRequests();
+    case 'set_price_alert': {
+      const direction = stringArg(input, 'direction');
+      if (direction !== 'above' && direction !== 'below') throw new Error('direction must be "above" or "below".');
+      return tools.setPriceAlert({ symbol: stringArg(input, 'symbol'), direction, priceUsd: stringArg(input, 'priceUsd') });
+    }
+    case 'list_price_alerts':
+      return tools.listPriceAlerts();
+    case 'cancel_price_alert':
+      return tools.cancelPriceAlert(stringArg(input, 'id'));
+    case 'get_insights':
+      return tools.getInsights(optionalString(input, 'month'));
+    case 'set_budget':
+      return tools.setBudget(stringArg(input, 'category'), optionalString(input, 'monthlyUsd'));
+    case 'list_pots':
+      return tools.listPots();
+    case 'create_pot':
+      return tools.createPot(stringArg(input, 'name'), optionalString(input, 'targetUsd'));
+    case 'move_to_pot':
+      return tools.moveToPot(stringArg(input, 'pot'), stringArg(input, 'amountUsd'));
+    case 'set_username':
+      return tools.setUsername(stringArg(input, 'name'));
     case 'forget_memory':
       return tools.forgetMemory(stringArg(input, 'id'));
     default:

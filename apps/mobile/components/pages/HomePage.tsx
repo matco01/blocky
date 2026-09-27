@@ -14,7 +14,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { displayUsd } from '@blocky/shared';
+import { displayUsd, parseUsd } from '@blocky/shared';
 import { ActionButton } from '../ActionButton';
 import { BalanceDisplay } from '../BalanceDisplay';
 import { CapabilityChips } from '../chat/CapabilityChips';
@@ -64,6 +64,10 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const insets = useSafeAreaInsets();
 
   const [balance, setBalance] = useState<BalanceState>({ state: 'loading' });
+  // Unread notifications, for the bell — refreshed with the balance.
+  const [unread, setUnread] = useState(0);
+  // Money set aside in pots: still theirs, shown under the balance.
+  const [potsUsd, setPotsUsd] = useState('0');
   const lastBalance = useRef<string | null>(null);
   const [focused, setFocused] = useState(true);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
@@ -135,7 +139,9 @@ export function HomePage({ page, onPageChange }: PageProps) {
 
   const fetchBalance = useCallback(async () => {
     try {
-      const result = await api.balance();
+      const [result, inbox] = await Promise.all([api.balance(), api.notifications().catch(() => null)]);
+      if (inbox) setUnread(inbox.unread);
+      setPotsUsd(result.potsUsd ?? '0');
       // The headline is everything the user owns, on every chain — not just
       // the Arc USDC a send can spend.
       const headline = result.portfolioUsd ?? result.totalUsd;
@@ -229,9 +235,21 @@ export function HomePage({ page, onPageChange }: PageProps) {
               </Text>
             </Animated.View>
           ) : (
-            <PressableScale onPress={() => onPageChange(1)} accessibilityLabel="Account" haptic="none" scaleTo={0.9}>
-              <Icon name="person-circle-outline" size={26} tone="secondary" />
-            </PressableScale>
+            <View style={styles.headerIcons}>
+              <PressableScale onPress={() => router.push('/notifications')} accessibilityLabel="Notifications" haptic="none" scaleTo={0.9}>
+                <Icon name={unread > 0 ? 'notifications' : 'notifications-outline'} size={24} tone="secondary" />
+                {unread > 0 ? (
+                  <View style={[styles.badge, { backgroundColor: theme.colors.danger }]}>
+                    <Text variant="caption" tone="inverted" style={styles.badgeText}>
+                      {unread > 9 ? '9+' : unread}
+                    </Text>
+                  </View>
+                ) : null}
+              </PressableScale>
+              <PressableScale onPress={() => onPageChange(1)} accessibilityLabel="Account" haptic="none" scaleTo={0.9}>
+                <Icon name="person-circle-outline" size={26} tone="secondary" />
+              </PressableScale>
+            </View>
           )}
         </View>
 
@@ -243,6 +261,14 @@ export function HomePage({ page, onPageChange }: PageProps) {
               loading={balance.state === 'loading' || balance.state === 'setting-up'}
               onPress={() => void fetchBalance()}
             />
+
+            {parseUsd(potsUsd) > 0n ? (
+              <PressableScale onPress={() => router.push('/pots')} accessibilityLabel="Savings pots" haptic="none">
+                <Text variant="caption" tone="tertiary" style={styles.center}>
+                  {displayUsd(potsUsd)} set aside in pots ›
+                </Text>
+              </PressableScale>
+            ) : null}
 
             {balance.state === 'setting-up' ? (
               <Text variant="caption" tone="tertiary" style={styles.center}>
@@ -379,6 +405,26 @@ export function HomePage({ page, onPageChange }: PageProps) {
 }
 
 const styles = StyleSheet.create({
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -6,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontSize: 10,
+    lineHeight: 12,
+  },
   screen: {
     flex: 1,
   },

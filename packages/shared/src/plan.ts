@@ -60,6 +60,8 @@ export const WarningCodeSchema = z.enum([
    * honeypot, a token tax, or a market too thin to leave.
    */
   'unsellable',
+  /** The send would spend money the user set aside in a savings pot. */
+  'dips_into_pot',
 ]);
 
 export type WarningCode = z.infer<typeof WarningCodeSchema>;

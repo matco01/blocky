@@ -29,6 +29,20 @@
       "when": 1790457559460,
       "tag": "0003_quiet_outlaw_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790535324097,
+      "tag": "0004_dashing_hex",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790536703560,
+      "tag": "0005_magenta_doctor_faustus",
+      "breakpoints": true
     }
   ]
 }

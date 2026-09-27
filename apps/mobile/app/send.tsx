@@ -221,7 +221,7 @@ export default function SendScreen() {
               setAssetKey(key);
               setSendMax(false);
             }}
-            toError={to.length > 0 && !recipient ? 'Enter a 0x address, an ENS name, or a saved contact.' : null}
+            toError={to.length > 0 && !recipient ? 'Enter an @name, a 0x address, an ENS name, or a saved contact.' : null}
             formError={formError}
           />
         ) : null}
@@ -448,7 +448,7 @@ function SendForm(props: {
         label="To"
         value={props.to}
         onChangeText={props.setTo}
-        placeholder="0x…, name.eth, or a contact"
+        placeholder="@name, 0x…, name.eth, or a contact"
         autoCapitalize="none"
         autoCorrect={false}
         error={props.toError ?? props.formError}
@@ -559,6 +559,10 @@ function parseRecipient(input: string): RecipientRef | null {
 
   if (/^0x[0-9a-fA-F]{40}$/.test(value)) {
     return { kind: 'address', address: value.toLowerCase() as `0x${string}` };
+  }
+  // "@sam": another Blocky user, by name.
+  if (/^@[a-zA-Z][a-zA-Z0-9_]{2,19}$/.test(value)) {
+    return { kind: 'username', username: value.slice(1).toLowerCase() };
   }
   if (/^[^\s]{1,250}\.eth$/i.test(value)) {
     return { kind: 'ens', name: value.toLowerCase() };

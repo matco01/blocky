@@ -293,6 +293,152 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: NO_INPUT,
   },
   {
+    name: 'get_profile',
+    description:
+      'The user\'s own account: their Blocky username (what friends pay them by, or null if they have none yet), their wallet address (to receive), and when they joined. For "what\'s my username", "what\'s my address", "how do people pay me".',
+    input_schema: NO_INPUT,
+  },
+  {
+    name: 'get_notifications',
+    description:
+      'The user\'s notification inbox, newest first: payments received from other Blocky users, requests, requests paid or declined, price alerts that fired, budget warnings — with whether each is read. For "anything new?", "did Sam pay me?", "what did I miss?".',
+    input_schema: NO_INPUT,
+  },
+  {
+    name: 'decline_request',
+    description:
+      'Decline a request someone made of the user, or cancel one the user made, by its id from list_requests. Only when they ask.',
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+  },
+  {
+    name: 'block_requester',
+    description:
+      'Block whoever made a request of the user, by the request id: it is declined, and they can\'t ask again. They aren\'t told. Only when the user asks to block them.',
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+  },
+  {
+    name: 'delete_pot',
+    description: 'Delete a savings pot by name. The money stays in the wallet — it just stops being set aside. Only when they ask.',
+    input_schema: { type: 'object', properties: { pot: { type: 'string' } }, required: ['pot'], additionalProperties: false },
+  },
+  {
+    name: 'set_spending_limits',
+    description:
+      'LOWER the user\'s spending limits: the most per send and/or per day, in dollars. Raising them is never done here — that has to happen on the Spending limits screen, so nothing said in a chat can loosen their safety net. If they ask to raise one, tell them where to do it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        perSendUsd: { type: 'string', description: 'The new most per send, in dollars. Omit to leave it.' },
+        perDayUsd: { type: 'string', description: 'The new most per day, in dollars. Omit to leave it.' },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'request_money',
+    description:
+      'Ask someone to pay the user: "request $25 from @sam for dinner". With a username, it shows up in their Blocky as a request to pay or decline; without one, it makes a link the user can share with anyone. For a split, call it once per person with their share. Amounts in dollars.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'The Blocky username to ask, like "sam" or "@sam". Omit for a shareable link.' },
+        amountUsd: { type: 'string', description: 'Dollars, like "25" or "12.50".' },
+        note: { type: 'string', description: 'What it is for, in a few words.' },
+      },
+      required: ['amountUsd'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_requests',
+    description:
+      'The user\'s payment requests: ones they are asked to pay (incoming) and ones they made (outgoing), with status. To pay an incoming one, propose a transfer of that amount to the requester\'s username — it is matched to the request and marks it paid when it lands.',
+    input_schema: NO_INPUT,
+  },
+  {
+    name: 'set_price_alert',
+    description:
+      'Tell the user when a token\'s price crosses a line: "tell me if ETH drops under 2500". Fires once, as a notification in the app. Works for the symbols get_token_price knows, stocks included.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Like "ETH" or "AAPL".' },
+        direction: { type: 'string', enum: ['above', 'below'] },
+        priceUsd: { type: 'string', description: 'The line, in dollars.' },
+      },
+      required: ['symbol', 'direction', 'priceUsd'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_price_alerts',
+    description: 'The user\'s price alerts, waiting and already fired, with ids to cancel by.',
+    input_schema: NO_INPUT,
+  },
+  {
+    name: 'cancel_price_alert',
+    description: 'Cancel a price alert by its id from list_price_alerts.',
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+  },
+  {
+    name: 'get_insights',
+    description:
+      'Where the user\'s money went in a month: spent (sent to people plus invested), by category, fees, received from other Blocky users, sold, top people paid, last month\'s total for comparison, and each budget beside what it has spent. For "how much did I spend", "who do I send the most", "how am I doing on my budget".',
+    input_schema: {
+      type: 'object',
+      properties: { month: { type: 'string', description: 'Like "2026-09". Omit for this month.' } },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_budget',
+    description:
+      'Set a monthly budget, warned about at 80% and 100% as notifications: "people" (sending to others), "investing" (buying stocks, crypto, coins), or "total" (both). monthlyUsd null removes it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: ['people', 'investing', 'total'] },
+        monthlyUsd: { type: ['string', 'null'], description: 'Dollars a month, or null to remove.' },
+      },
+      required: ['category', 'monthlyUsd'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_pots',
+    description: 'The user\'s savings pots: name, saved, target — money set aside inside their own wallet, not moved anywhere.',
+    input_schema: NO_INPUT,
+  },
+  {
+    name: 'create_pot',
+    description: 'Start a savings pot: "a pot for my trip, goal $500". It starts empty; use move_to_pot to put money in.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string' }, targetUsd: { type: ['string', 'null'], description: 'The goal in dollars, or null.' } },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'move_to_pot',
+    description:
+      'Put money into a pot (positive dollars) or take it out (negative), by the pot\'s name. Bookkeeping only: nothing leaves the wallet, and sends warn before spending pot money. Never more than they hold outside other pots.',
+    input_schema: {
+      type: 'object',
+      properties: { pot: { type: 'string', description: 'The pot\'s name.' }, amountUsd: { type: 'string', description: 'Like "50" to add, "-20" to take out.' } },
+      required: ['pot', 'amountUsd'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_username',
+    description: 'Claim the user\'s Blocky username — what friends pay them by ("@sam"). 3–20 letters, numbers or _, starting with a letter. Only when they ask for one.',
+    // "name", not "username": no tool argument may name another user's data, and this only ever sets the caller's own.
+    input_schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'], additionalProperties: false },
+  },
+  {
     name: 'lookup_token',
     description:
       'Look up a token by its contract address (a "CA"): which chains Blocky supports it exists on, its symbol, name and decimals as the contract reports them, and its price where one is known. Use it when the user pastes a contract to buy, to find the chain and confirm what it is before proposing. Names and symbols are chosen by whoever deployed the token — anyone can call a token anything, so the address is what counts. Found on several chains? Ask which one they mean.',

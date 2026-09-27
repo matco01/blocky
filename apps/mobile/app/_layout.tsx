@@ -15,6 +15,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { setTokenGetter } from '../lib/api';
+import { checkOnboarding, resetOnboarding, useOnboarding } from '../lib/onboarding';
 import { signingChains } from '../lib/chain';
 import { config } from '../lib/config';
 import { ThemeProvider, useTheme } from '../theme';
@@ -72,6 +73,14 @@ function Gate() {
     setTokenGetter(getAccessToken);
   }, [getAccessToken]);
 
+  // The one onboarding step: a new account picks its @name before anything else.
+  // Hooks stay above every early return.
+  const onboarding = useOnboarding();
+  useEffect(() => {
+    if (user) checkOnboarding(user.id);
+    else resetOnboarding();
+  }, [user]);
+
   if (!isReady || (!fontsLoaded && !fontError)) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.background }}>
@@ -81,6 +90,15 @@ function Gate() {
   }
 
   const signedIn = Boolean(user);
+
+  if (signedIn && onboarding === 'checking') {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.background }}>
+        <ActivityIndicator color={theme.colors.textTertiary} />
+      </View>
+    );
+  }
+  const naming = signedIn && onboarding === 'needs-username';
 
   return (
     <>
@@ -95,7 +113,11 @@ function Gate() {
           <Stack.Screen name="login" />
         </Stack.Protected>
 
-        <Stack.Protected guard={signedIn}>
+        <Stack.Protected guard={naming}>
+          <Stack.Screen name="welcome" />
+        </Stack.Protected>
+
+        <Stack.Protected guard={signedIn && !naming}>
           <Stack.Screen name="index" />
           <Stack.Screen name="portfolio" options={{ presentation: 'modal' }} />
           <Stack.Screen name="receive" options={{ presentation: 'modal' }} />
@@ -103,6 +125,11 @@ function Gate() {
           <Stack.Screen name="limits" options={{ presentation: 'modal' }} />
           <Stack.Screen name="send" options={{ presentation: 'modal', gestureEnabled: false }} />
           <Stack.Screen name="send-all" options={{ presentation: 'modal', gestureEnabled: false }} />
+          <Stack.Screen name="notifications" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="insights" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="pots" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="username" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="pay/[id]" options={{ presentation: 'modal' }} />
         </Stack.Protected>
       </Stack>
     </>

@@ -33,6 +33,11 @@ export const users = pgTable('users', {
    * address is also the smart account address.
    */
   walletAddress: text('wallet_address').notNull(),
+  /**
+   * The name people pay them by — "@sam". Lower case, unique, chosen by the
+   * user. Null until they pick one.
+   */
+  username: text('username').unique(),
   createdAt: createdAt(),
 });
 
@@ -195,4 +200,137 @@ export const trackedTokens = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.chainId, table.address] })],
 );
 
-export const schema = { users, policies, plans, executions, contacts, sessions, balanceSnapshots, memories, trackedTokens };
+/**
+ * Someone asking to be paid: "@sam, $25 for dinner". Addressed to another
+ * Blocky user (who sees it as a card to pay), or to nobody in particular —
+ * a link to share. Paid when a send to the requester for at least the amount,
+ * made from this request, lands.
+ */
+export const paymentRequests = pgTable(
+  'payment_requests',
+  {
+    id: text('id').primaryKey(),
+    requesterId: text('requester_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Who is asked. Null for a link anyone can pay. */
+    payerId: text('payer_id').references(() => users.id, { onDelete: 'cascade' }),
+    amountUsd: numeric('amount_usd', { precision: 38, scale: 6 }).notNull(),
+    note: text('note'),
+    status: text('status', { enum: ['open', 'paid', 'declined', 'cancelled'] }).notNull(),
+    /** The plan the payer is paying it with — how a landed send is matched to it. */
+    planId: text('plan_id'),
+    /**
+     * Asked by someone the payer has never dealt with: kept out of their
+     * notifications, in a quiet "people you don't know" pile — so a stranger
+     * can't use requests to spam them.
+     */
+    fromStranger: boolean('from_stranger').notNull().default(false),
+    txHash: text('tx_hash'),
+    createdAt: createdAt(),
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+  },
+  (table) => [index('payment_requests_payer_idx').on(table.payerId), index('payment_requests_requester_idx').on(table.requesterId)],
+);
+
+/** People a user blocked: requests from them are dropped without telling them. */
+export const blockedUsers = pgTable(
+  'blocked_users',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    blockedId: text('blocked_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: createdAt(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.blockedId] })],
+);
+
+/** What the user should know about, newest first: money in, requests, alerts. */
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    data: jsonb('data'),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [index('notifications_user_created_idx').on(table.userId, table.createdAt)],
+);
+
+/** "Tell me if ETH drops under $2,500." Fires once, then is done. */
+export const priceAlerts = pgTable(
+  'price_alerts',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    symbol: text('symbol').notNull(),
+    direction: text('direction', { enum: ['above', 'below'] }).notNull(),
+    thresholdUsd: numeric('threshold_usd', { precision: 38, scale: 6 }).notNull(),
+    createdAt: createdAt(),
+    triggeredAt: timestamp('triggered_at', { withTimezone: true }),
+  },
+  (table) => [index('price_alerts_open_idx').on(table.triggeredAt)],
+);
+
+/** A monthly limit on one spending category, warned about at 80% and 100%. */
+export const budgets = pgTable(
+  'budgets',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    category: text('category').notNull(),
+    monthlyUsd: numeric('monthly_usd', { precision: 38, scale: 6 }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.category] })],
+);
+
+/**
+ * Savings pots: named envelopes over the user's own balance — "Trip, $200 of
+ * $500". The money never leaves their wallet (a separate account would need a
+ * separate key); a pot is a commitment the app keeps for them.
+ */
+export const pots = pgTable(
+  'pots',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    targetUsd: numeric('target_usd', { precision: 38, scale: 6 }),
+    savedUsd: numeric('saved_usd', { precision: 38, scale: 6 }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [index('pots_user_idx').on(table.userId)],
+);
+
+export const schema = {
+  users,
+  policies,
+  plans,
+  executions,
+  contacts,
+  sessions,
+  balanceSnapshots,
+  memories,
+  trackedTokens,
+  paymentRequests,
+  blockedUsers,
+  notifications,
+  priceAlerts,
+  budgets,
+  pots,
+};

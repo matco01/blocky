@@ -171,6 +171,8 @@ export const RecipientRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('ens'), name: z.string().min(3).max(255) }),
   /** A label from the user's own saved contacts. */
   z.object({ kind: z.literal('contact'), label: z.string().min(1).max(64) }),
+  /** Another Blocky user, by the name they chose — "@sam". */
+  z.object({ kind: z.literal('username'), username: z.string().min(1).max(21) }),
   /** The user's own wallet — used for self-transfers between chains. */
   z.object({ kind: z.literal('self') }),
 ]);

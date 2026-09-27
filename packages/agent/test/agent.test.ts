@@ -59,6 +59,23 @@ const tools: AgentTools = {
   remember: async (note) => ({ saved: true, note }),
   forgetMemory: async (id) => ({ forgotten: id === 'abc' }),
   lookupToken: async (address) => ({ matches: [{ chain: 'base', symbol: 'DEGEN', address }] }),
+  getProfile: async () => ({ username: 'alice', walletAddress: '0xa11ce00000000000000000000000000000000001' }),
+  getNotifications: async () => ({ unread: 0, items: [] }),
+  declineRequest: async (id) => ({ status: 'declined', id }),
+  blockRequester: async (id) => ({ blocked: id }),
+  deletePot: async (pot) => ({ deleted: pot }),
+  lowerSpendingLimits: async (limits) => limits,
+  requestMoney: async (request) => ({ request, link: 'blocky://pay/r1' }),
+  listRequests: async () => ({ incoming: [], outgoing: [] }),
+  setPriceAlert: async (alert) => ({ alert }),
+  listPriceAlerts: async () => ({ alerts: [] }),
+  cancelPriceAlert: async (id) => ({ cancelled: id }),
+  getInsights: async (month) => ({ month, spentUsd: '0' }),
+  setBudget: async (category, monthlyUsd) => ({ category, monthlyUsd }),
+  listPots: async () => ({ pots: [] }),
+  createPot: async (name, targetUsd) => ({ pot: { name, targetUsd } }),
+  moveToPot: async (pot, amountUsd) => ({ pot, amountUsd }),
+  setUsername: async (username) => ({ username }),
 };
 
 const text = (value: string): Anthropic.TextBlock => ({
@@ -613,5 +630,31 @@ describe('memory', () => {
     const results = JSON.stringify(calls[1]?.messages.at(-1));
     expect(results).toContain('Keeps about $50 on Arc.');
     expect(results).toContain('forgotten');
+  });
+});
+
+describe('money-app tools', () => {
+  it('asks someone to pay, with an optional person and note', async () => {
+    const { client, calls } = fakeClient([
+      { content: [toolUse('request_money', { from: '@sam', amountUsd: '25', note: 'dinner' }, 'a'), toolUse('request_money', { amountUsd: '10' }, 'b')] },
+      { content: [text('Asked.')] },
+    ]);
+
+    await runAgentTurn('request 25 from sam for dinner and make a $10 link', { client, tools });
+
+    const results = JSON.stringify(calls[1]?.messages.at(-1));
+    expect(results).toContain('dinner');
+    expect(results).toContain('\\"from\\":null');
+  });
+
+  it('refuses a price alert that is neither above nor below', async () => {
+    const { client, calls } = fakeClient([
+      { content: [toolUse('set_price_alert', { symbol: 'ETH', direction: 'sideways', priceUsd: '2500' })] },
+      { content: [text('ok')] },
+    ]);
+
+    await runAgentTurn('alert me', { client, tools });
+
+    expect(JSON.stringify(calls[1]?.messages.at(-1))).toContain('is_error');
   });
 });

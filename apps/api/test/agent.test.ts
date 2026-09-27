@@ -291,3 +291,36 @@ describe('destination sanity', () => {
     expect(destinationMismatch(bridge(toChainId, rationale))).toBeNull();
   });
 });
+
+describe('what Blocky can see and do in the app', () => {
+  it('knows the user\'s own name and address', async () => {
+    await store.setUsername(USER, 'olimufa');
+
+    expect(await tools().getProfile()).toMatchObject({ username: 'olimufa', walletAddress: ACCOUNT });
+  });
+
+  it('reads the notification inbox', async () => {
+    await store.notify(USER, { kind: 'money_received', title: '@sam sent you $5.00', body: 'It’s in your wallet.' });
+
+    expect(await tools().getNotifications()).toMatchObject({ unread: 1, items: [{ title: '@sam sent you $5.00', read: false }] });
+  });
+
+  it('lowers spending limits, and never raises them from a chat', async () => {
+    const before = await store.getPolicy(USER);
+
+    const lowered = (await tools().lowerSpendingLimits({ perSendUsd: '$50', perDayUsd: null })) as Record<string, unknown>;
+    expect(lowered).toMatchObject({ perSendUsd: '50', perDayUsd: before.dailyCapUsd });
+    expect((await store.getPolicy(USER)).perTxCapUsd).toBe('50');
+
+    const raised = (await tools().lowerSpendingLimits({ perSendUsd: '5000', perDayUsd: null })) as Record<string, unknown>;
+    expect(raised.notRaised).toMatch(/Spending limits screen/);
+    expect((await store.getPolicy(USER)).perTxCapUsd).toBe('50');
+  });
+
+  it('deletes a pot by name, leaving the money where it is', async () => {
+    await store.createPot(USER, { name: 'Trip', targetUsd: null });
+
+    expect(await tools().deletePot('trip')).toMatchObject({ deleted: 'Trip' });
+    expect(await store.listPots(USER)).toEqual([]);
+  });
+});

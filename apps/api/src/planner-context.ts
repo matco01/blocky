@@ -342,6 +342,20 @@ async function addressFor(
       };
     }
 
+    case 'username': {
+      // Another Blocky user: their wallet, by the name they chose. A name
+      // nobody has claimed doesn't resolve — never a guess.
+      const person = await store.findUserByUsername(ref.username);
+      if (!person) return null;
+
+      return {
+        address: person.walletAddress,
+        display: `@${person.username}`,
+        ensName: null,
+        contactLabel: null,
+      };
+    }
+
     case 'contact': {
       const contact = await store.findContact(userId, ref.label);
 

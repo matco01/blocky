@@ -10,6 +10,7 @@ import {
 } from '@blocky/wallet-core';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { checkPriceAlerts } from '../src/alerts';
 import { createApp, type AppDeps } from '../src/app';
 import type { IdentityProvider } from '../src/auth';
 import { openDatabase, type Database } from '../src/db/client';
@@ -646,5 +647,235 @@ describe('choosing what to send', () => {
     });
 
     expect(response.status).toBe(400);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Money between people                                                       */
+/* -------------------------------------------------------------------------- */
+
+async function claim(token: string, username: string) {
+  return call('/v1/me/username', { token, method: 'PUT', body: { username } });
+}
+
+async function report(token: string, planId: string, txHash: string) {
+  return call(`/v1/plans/${planId}/executions`, { token, method: 'POST', body: { txHash } });
+}
+
+describe('usernames', () => {
+  it('claims a name, case-insensitively, once', async () => {
+    expect((await claim('alice-token', '@Alice')).body.username).toBe('alice');
+    expect((await claim('mallory-token', 'ALICE')).status).toBe(409);
+    expect((await claim('mallory-token', 'a!')).status).toBe(400);
+    expect((await claim('mallory-token', 'blocky')).status).toBe(400);
+    expect((await call('/v1/me', { token: 'alice-token' })).body.username).toBe('alice');
+  });
+
+  it('says who a name is, to pay them', async () => {
+    await claim('alice-token', 'alice');
+    const { status, body } = await call('/v1/users/alice', { token: 'mallory-token' });
+
+    expect(status).toBe(200);
+    expect(body.walletAddress).toBe(ALICE_WALLET);
+    expect((await call('/v1/users/nobody', { token: 'mallory-token' })).status).toBe(404);
+  });
+
+  it('pays someone by their name', async () => {
+    await claim('mallory-token', 'mallory');
+    const { status, body } = await call('/v1/plans', {
+      token: 'alice-token',
+      method: 'POST',
+      body: { recipient: { kind: 'username', username: '@mallory' }, amount: { kind: 'usd', value: '5' } },
+    });
+
+    expect(status).toBe(201);
+    expect(body.plan.recipient).toMatchObject({ address: MALLORY_WALLET, display: '@mallory' });
+  });
+});
+
+describe('payment requests', () => {
+  beforeEach(async () => {
+    await claim('alice-token', 'alice');
+    await claim('mallory-token', 'mallory');
+    // They know each other: Mallory saved Alice as a contact.
+    await store.saveContact('did:privy:mallory', 'Alice', ALICE_WALLET as Address);
+  });
+
+  it('asks, tells the one asked, and settles itself when the payment lands', async () => {
+    const created = await call('/v1/requests', {
+      token: 'alice-token',
+      method: 'POST',
+      body: { payer: '@mallory', amountUsd: '12', note: 'lunch' },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.shareText).toContain('@alice is asking for $12.00 for lunch');
+
+    const inbox = (await call('/v1/notifications', { token: 'mallory-token' })).body;
+    expect(inbox.unread).toBe(1);
+    expect(inbox.items[0]).toMatchObject({ kind: 'request_received', title: '@alice requested $12.00' });
+
+    const paying = await call(`/v1/requests/${created.body.request.id}/pay`, { token: 'mallory-token', method: 'POST' });
+    expect(paying.status).toBe(201);
+    expect(paying.body.plan.recipient.address).toBe(ALICE_WALLET);
+
+    chain.receipts.set(hash('d'), transferReceipt(MALLORY_WALLET, ALICE_WALLET, 12_000_000n));
+    expect((await report('mallory-token', paying.body.plan.id, hash('d'))).status).toBe(201);
+
+    const after = (await call(`/v1/requests/${created.body.request.id}`, { token: 'alice-token' })).body.request;
+    expect(after).toMatchObject({ status: 'paid', txHash: hash('d') });
+    const aliceInbox = (await call('/v1/notifications', { token: 'alice-token' })).body.items;
+    expect(aliceInbox[0]).toMatchObject({ kind: 'request_paid', title: '@mallory paid your request' });
+  });
+
+  it('settles a request paid by an ordinary send of the same amount', async () => {
+    const created = await call('/v1/requests', { token: 'alice-token', method: 'POST', body: { payer: 'mallory', amountUsd: '7' } });
+    const { body } = await call('/v1/plans', {
+      token: 'mallory-token',
+      method: 'POST',
+      body: { recipient: { kind: 'username', username: 'alice' }, amount: { kind: 'usd', value: '7' } },
+    });
+    chain.receipts.set(hash('e'), transferReceipt(MALLORY_WALLET, ALICE_WALLET, 7_000_000n));
+    await report('mallory-token', body.plan.id, hash('e'));
+
+    expect((await call(`/v1/requests/${created.body.request.id}`, { token: 'alice-token' })).body.request.status).toBe('paid');
+  });
+
+  it('lets only the one asked pay it, and lets them decline', async () => {
+    const created = await call('/v1/requests', { token: 'alice-token', method: 'POST', body: { payer: 'mallory', amountUsd: '3' } });
+    const id = created.body.request.id;
+
+    // Not hers to pay: it asks Mallory.
+    expect((await call(`/v1/requests/${id}/pay`, { token: 'alice-token', method: 'POST' })).status).toBe(403);
+    expect((await call(`/v1/requests/${id}/decline`, { token: 'mallory-token', method: 'POST' })).body.status).toBe('declined');
+    expect((await call(`/v1/requests/${id}/pay`, { token: 'mallory-token', method: 'POST' })).status).toBe(409);
+  });
+
+  it('refuses to ask someone who is not on Blocky', async () => {
+    const { status } = await call('/v1/requests', { token: 'alice-token', method: 'POST', body: { payer: 'ghost', amountUsd: '3' } });
+    expect(status).toBe(404);
+  });
+
+  it('tells a Blocky user when someone sends them money', async () => {
+    const { body } = await call('/v1/plans', {
+      token: 'alice-token',
+      method: 'POST',
+      body: { recipient: { kind: 'address', address: MALLORY_WALLET }, amount: { kind: 'usd', value: '4' } },
+    });
+    chain.receipts.set(hash('f'), transferReceipt(ALICE_WALLET, MALLORY_WALLET, 4_000_000n));
+    await report('alice-token', body.plan.id, hash('f'));
+
+    const inbox = (await call('/v1/notifications', { token: 'mallory-token' })).body;
+    expect(inbox.items[0]).toMatchObject({ kind: 'money_received', title: '@alice sent you $4.00' });
+
+    await call('/v1/notifications/read', { token: 'mallory-token', method: 'POST' });
+    expect((await call('/v1/notifications', { token: 'mallory-token' })).body.unread).toBe(0);
+  });
+});
+
+describe('savings pots', () => {
+  it('sets money aside, and warns a send that would spend it', async () => {
+    const pot = (await call('/v1/pots', { token: 'alice-token', method: 'POST', body: { name: 'Trip', targetUsd: '500' } })).body.pot;
+    // $100 in the wallet; $60 of it for the trip.
+    const adjusted = await call(`/v1/pots/${pot.id}/adjust`, { token: 'alice-token', method: 'POST', body: { deltaUsd: '60' } });
+    expect(adjusted.body.pot.savedUsd).toBe('60');
+
+    const plan = await planSend('50');
+    expect(plan.warnings.find((w) => w.code === 'dips_into_pot')?.message).toMatch(/money you set aside \(Trip\)/);
+    expect((await planSend('10')).warnings.map((w) => w.code)).not.toContain('dips_into_pot');
+  });
+
+  it('never sets aside more than the wallet holds', async () => {
+    const pot = (await call('/v1/pots', { token: 'alice-token', method: 'POST', body: { name: 'Car' } })).body.pot;
+    expect((await call(`/v1/pots/${pot.id}/adjust`, { token: 'alice-token', method: 'POST', body: { deltaUsd: '150' } })).status).toBe(422);
+    const out = await call(`/v1/pots/${pot.id}/adjust`, { token: 'alice-token', method: 'POST', body: { deltaUsd: '-5' } });
+    expect(out.body.pot.savedUsd).toBe('0');
+  });
+});
+
+describe('insights and budgets', () => {
+  it('counts what was sent to people this month, and warns at 80% of a budget', async () => {
+    await call('/v1/budgets', { token: 'alice-token', method: 'PUT', body: { category: 'people', monthlyUsd: '12' } });
+
+    const plan = await planSend('10');
+    chain.receipts.set(hash('a'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+    await report('alice-token', plan.id, hash('a'));
+
+    const { body } = await call('/v1/insights', { token: 'alice-token' });
+    expect(body.insights).toMatchObject({ spentUsd: '10', byCategory: { people: '10', investing: '0' }, count: 1 });
+    expect(body.budgets).toEqual([{ category: 'people', monthlyUsd: '12', spentUsd: '10' }]);
+
+    const inbox = (await call('/v1/notifications', { token: 'alice-token' })).body.items;
+    expect(inbox.find((n: { kind: string }) => n.kind === 'budget')?.title).toBe('80% of your sending budget');
+  });
+
+  it('exports a month as CSV', async () => {
+    const response = await app().request(`/v1/statements/${new Date().toISOString().slice(0, 7)}.csv`, {
+      headers: { authorization: 'Bearer alice-token' },
+    });
+    expect(response.headers.get('content-type')).toContain('text/csv');
+    expect((await response.text()).split('\n')[0]).toBe('date,category,description,sent,sent_usd,received,fees_usd');
+  });
+});
+
+describe('price alerts', () => {
+  it('fires once when the price crosses the line, and not before', async () => {
+    await call('/v1/me', { token: 'alice-token' });
+    await store.addPriceAlert('did:privy:alice', { symbol: 'eth', direction: 'below', thresholdUsd: '2500' });
+
+    expect(await checkPriceAlerts(store, async () => '2600')).toBe(0);
+    expect(await checkPriceAlerts(store, async () => '2450.5')).toBe(1);
+    expect(await checkPriceAlerts(store, async () => '2400')).toBe(0);
+
+    const inbox = (await call('/v1/notifications', { token: 'alice-token' })).body.items;
+    expect(inbox[0]).toMatchObject({ kind: 'price_alert', title: 'ETH is below $2,500.00' });
+  });
+});
+
+describe('requests from strangers', () => {
+  beforeEach(async () => {
+    await claim('alice-token', 'alice');
+    await claim('mallory-token', 'mallory');
+  });
+
+  const ask = (amountUsd = '5') =>
+    call('/v1/requests', { token: 'alice-token', method: 'POST', body: { payer: 'mallory', amountUsd } });
+
+  it('reach the one asked quietly: no notification, marked as from a stranger', async () => {
+    expect((await ask()).status).toBe(201);
+
+    expect((await call('/v1/notifications', { token: 'mallory-token' })).body.unread).toBe(0);
+    const { incoming } = (await call('/v1/requests', { token: 'mallory-token' })).body;
+    expect(incoming[0]).toMatchObject({ status: 'open', fromStranger: true });
+  });
+
+  it('are no longer strange once they have paid you', async () => {
+    const { body } = await call('/v1/plans', {
+      token: 'alice-token',
+      method: 'POST',
+      body: { recipient: { kind: 'username', username: 'mallory' }, amount: { kind: 'usd', value: '2' } },
+    });
+    chain.receipts.set(hash('b'), transferReceipt(ALICE_WALLET, MALLORY_WALLET, 2_000_000n));
+    await report('alice-token', body.plan.id, hash('b'));
+    await call('/v1/notifications/read', { token: 'mallory-token', method: 'POST' });
+
+    await ask();
+    expect((await call('/v1/notifications', { token: 'mallory-token' })).body.unread).toBe(1);
+  });
+
+  it('stop, silently, once blocked', async () => {
+    const first = (await ask()).body.request;
+    expect((await call(`/v1/requests/${first.id}/block`, { token: 'mallory-token', method: 'POST' })).body.blocked).toBe(true);
+
+    // Alice isn't told she's blocked — the request just goes nowhere.
+    expect((await ask('6')).status).toBe(201);
+    const { incoming } = (await call('/v1/requests', { token: 'mallory-token' })).body;
+    expect(incoming.every((r: { status: string }) => r.status !== 'open')).toBe(true);
+  });
+
+  it('are limited: three open to the same person at once', async () => {
+    for (let i = 0; i < 3; i++) expect((await ask()).status).toBe(201);
+    const fourth = await ask();
+    expect(fourth.status).toBe(429);
+    expect(fourth.body.message).toMatch(/3 open requests to @mallory/);
   });
 });
