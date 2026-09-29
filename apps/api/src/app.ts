@@ -44,6 +44,7 @@ import {
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { stream } from 'hono/streaming';
 import { z } from 'zod';
 import { mergeActivity, type ExplorerTransfer } from './activity';
 import type { AgentResponse, ChatTurn } from './agent';
@@ -72,6 +73,7 @@ export interface AppDeps {
         user: { id: string; walletAddress: Address },
         message: string,
         history: readonly ChatTurn[],
+        onActivity?: (label: string) => void,
       ) => Promise<AgentResponse>)
     | null;
   gatewayBalances: (address: Address) => Promise<GatewayBalances>;
@@ -885,9 +887,32 @@ export function createApp(deps: AppDeps) {
     const firstUser = parsed.data.history.findIndex((turn) => turn.role === 'user');
     const history = firstUser === -1 ? [] : parsed.data.history.slice(firstUser);
 
-    return c.json(
-      await deps.agent({ id: c.get('user').id, walletAddress: wallet }, parsed.data.message, history),
-    );
+    const user = { id: c.get('user').id, walletAddress: wallet };
+    const agent = deps.agent;
+
+    // The app asks for progress: one JSON line per thing Blocky starts
+    // ("Creating your pot"), then the reply. Anything else gets plain JSON.
+    if ((c.req.header('accept') ?? '').includes('application/x-ndjson')) {
+      c.header('content-type', 'application/x-ndjson');
+      c.header('cache-control', 'no-cache');
+      return stream(c, async (out) => {
+        const line = (value: unknown) => out.write(`${JSON.stringify(value)}\n`);
+        let last = '';
+        try {
+          const response = await agent(user, parsed.data.message, history, (label) => {
+            if (label === last) return;
+            last = label;
+            void line({ type: 'activity', label });
+          });
+          await line({ type: 'result', response });
+        } catch (error) {
+          console.error('agent chat failed', error);
+          await line({ type: 'error', message: 'Something went wrong. Try again.' });
+        }
+      });
+    }
+
+    return c.json(await agent(user, parsed.data.message, history));
   });
 
   /* ------------------------------------------------------------------------ */

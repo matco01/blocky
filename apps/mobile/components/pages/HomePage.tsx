@@ -28,7 +28,12 @@ import { PageDots, type PageProps } from '../PageDots';
 import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
 import { ApiError, api } from '../../lib/api';
-import { STARTER_CAPABILITIES, type Capability } from '../../lib/capabilities';
+import {
+  ALL_CAPABILITIES,
+  STARTER_CAPABILITIES,
+  isCapabilitiesQuestion,
+  type Capability,
+} from '../../lib/capabilities';
 import { matchAppearanceCommand, resolveAppearance } from '../../lib/appearanceCommand';
 import { useChat } from '../../lib/chat';
 import { handOffPlan, useSentPlans } from '../../lib/handoff';
@@ -72,7 +77,9 @@ export function HomePage({ page, onPageChange }: PageProps) {
   const [focused, setFocused] = useState(true);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
 
-  const { messages, busy, send, retry, showCapabilities, reset, sayLocally } = useChat();
+  const { messages, busy, activity, send, retry, showCapabilities, reset, sayLocally } = useChat({
+    onAppearance: theme.setAppearance,
+  });
   const isSent = useSentPlans();
   const scrollRef = useRef<ScrollView>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -100,6 +107,13 @@ export function HomePage({ page, onPageChange }: PageProps) {
       if (isResetPhrase(text)) {
         reset();
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        return;
+      }
+
+      // The menu, mid-conversation too — instantly, not a paragraph from the model.
+      if (isCapabilitiesQuestion(text)) {
+        atBottomRef.current = true;
+        sayLocally(text.trim(), "Here's what I can help with:", ALL_CAPABILITIES);
         return;
       }
 
@@ -377,7 +391,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
                 }
               }
             })}
-            {busy ? <ThinkingRow /> : null}
+            {busy ? <ThinkingRow label={activity} /> : null}
           </>
         )}
       </ScrollView>

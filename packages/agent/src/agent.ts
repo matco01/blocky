@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { parseIntent, type Intent } from '@blocky/shared';
+import { THINKING, activityFor } from './activity';
 import { SYSTEM_PROMPT, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } from './system-prompt';
 import { PROPOSE_INTENT, TOOLS, WEB_SEARCH, untrustedJson, unwrapIntentInput } from './tools';
 
@@ -16,8 +17,8 @@ import { PROPOSE_INTENT, TOOLS, WEB_SEARCH, untrustedJson, unwrapIntentInput } f
  * A runner that loops until the model stops wanting tools has neither shape.
  */
 
-/** Sonnet 5 at low effort. Intent extraction is closer to classification than reasoning. */
-export const AGENT_MODEL = 'claude-sonnet-5';
+/** Sonnet 5.5 at low effort. Intent extraction is closer to classification than reasoning. */
+export const AGENT_MODEL = 'claude-sonnet-5-5';
 export const AGENT_EFFORT = 'low' as const;
 
 /**
@@ -96,6 +97,17 @@ export interface AgentTools {
   moveToPot(pot: string, amountUsd: string): Promise<unknown>;
   setUsername(username: string): Promise<unknown>;
   forgetMemory(id: string): Promise<unknown>;
+  /** Asks the app to switch theme; the server only records it for the response. */
+  setAppearance(mode: 'light' | 'dark'): Promise<unknown>;
+  setAutoSave(rule: {
+    pot: string;
+    kind: string;
+    percent: number | null;
+    amountUsd: string | null;
+    every: string | null;
+  }): Promise<unknown>;
+  listAutoSaves(): Promise<unknown>;
+  deleteAutoSave(id: string): Promise<unknown>;
 }
 
 export interface AgentUsage {
@@ -160,6 +172,8 @@ export interface AgentOptions<P> {
   memories?: ReadonlyArray<{ id: string; note: string }>;
   /** Prior turns. The API is stateless, so the caller owns the history. */
   history?: Anthropic.MessageParam[];
+  /** Called with a short label ("Creating your pot") whenever the agent starts something, for the waiting UI. */
+  onActivity?: (label: string) => void;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -168,7 +182,7 @@ export interface AgentOptions<P> {
 
 export async function runAgentTurn<P = unknown>(
   message: string,
-  { client, tools, plan, webSearch = false, testnet = false, memories = [], history = [] }: AgentOptions<P>,
+  { client, tools, plan, webSearch = false, testnet = false, memories = [], history = [], onActivity }: AgentOptions<P>,
 ): Promise<AgentTurn<P>> {
   const messages: Anthropic.MessageParam[] = [
     ...history,
@@ -199,10 +213,11 @@ export async function runAgentTurn<P = unknown>(
   let searched = false;
 
   for (let step = 0; step < MAX_STEPS; step += 1) {
-    const response = await client.messages.create({
+    onActivity?.(THINKING);
+    const params: Anthropic.MessageCreateParamsNonStreaming = {
       model: AGENT_MODEL,
       max_tokens: MAX_TOKENS,
-      // Adaptive is the only on-mode on Sonnet 5; `budget_tokens` is rejected.
+      // Sonnet 5.5 rejects `disabled` and `budget_tokens`; adaptive at low effort is the chat setting.
       thinking: { type: 'adaptive' },
       output_config: { effort: AGENT_EFFORT },
       /*
@@ -227,7 +242,11 @@ export async function runAgentTurn<P = unknown>(
        * rather than paying full input price for the whole history again.
        */
       cache_control: { type: 'ephemeral' },
-    });
+    };
+    // A web search runs inside the model call, so the only way to say "Reading
+    // the news" while it happens is to watch the stream for it starting.
+    const response =
+      onActivity && webSearch ? await createWatchingSearch(client, params, onActivity) : await client.messages.create(params);
 
     accumulate(usage, response.usage);
     usage.steps += 1;
@@ -242,6 +261,13 @@ export async function runAgentTurn<P = unknown>(
     // A long server-side search paused mid-turn: send it back as it is and
     // the API picks up where it left off. No user message in between.
     if (response.stop_reason === 'pause_turn') continue;
+
+    // Sonnet 5.5's safety filters can decline outright, often with no text at
+    // all. Say so plainly rather than showing an empty reply.
+    if (response.stop_reason === 'refusal') {
+      if (accepted.length > 0) return { kind: 'intent', proposals: accepted, unplanned: [], text, usage };
+      return { kind: 'reply', text: text || "Sorry, I can't help with that one.", usage };
+    }
 
     const toolUses = response.content.filter(
       (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
@@ -260,6 +286,7 @@ export async function runAgentTurn<P = unknown>(
     const proposals = toolUses.filter((use) => use.name === PROPOSE_INTENT);
 
     if (proposals.length > 0) {
+      onActivity?.(activityFor(PROPOSE_INTENT));
       const results: Anthropic.ToolResultBlockParam[] = [];
       let planFailed = false;
       let intentFailed: { error: string; issues: string[] } | null = null;
@@ -345,7 +372,7 @@ export async function runAgentTurn<P = unknown>(
       // Every tool call in a message needs its result in the next one — the
       // read-only ones called alongside the proposals included.
       const others = toolUses.filter((use) => use.name !== PROPOSE_INTENT);
-      messages.push({ role: 'user', content: [...results, ...(await runTools(others, tools))] });
+      messages.push({ role: 'user', content: [...results, ...(await runTools(others, tools, onActivity))] });
 
       continue;
     }
@@ -354,7 +381,7 @@ export async function runAgentTurn<P = unknown>(
 
     // All results in a single user message. Splitting them across several
     // teaches the model to stop making parallel calls.
-    messages.push({ role: 'user', content: await runTools(toolUses, tools) });
+    messages.push({ role: 'user', content: await runTools(toolUses, tools, onActivity) });
   }
 
   if (accepted.length > 0) return { kind: 'intent', proposals: accepted, unplanned: [], text: '', usage };
@@ -372,7 +399,13 @@ function memoryBlock(memories: ReadonlyArray<{ id: string; note: string }>): str
 }
 
 /** Run read-only tool calls in parallel. A failing tool is reported to the model, never thrown. */
-function runTools(uses: Anthropic.ToolUseBlock[], tools: AgentTools): Promise<Anthropic.ToolResultBlockParam[]> {
+function runTools(
+  uses: Anthropic.ToolUseBlock[],
+  tools: AgentTools,
+  onActivity?: (label: string) => void,
+): Promise<Anthropic.ToolResultBlockParam[]> {
+  // Several in parallel: the first says what's happening; they all finish together.
+  if (uses[0]) onActivity?.(activityFor(uses[0].name));
   return Promise.all(
     uses.map(async (use): Promise<Anthropic.ToolResultBlockParam> => {
       try {
@@ -391,6 +424,25 @@ function runTools(uses: Anthropic.ToolUseBlock[], tools: AgentTools): Promise<An
       }
     }),
   );
+}
+
+/** A model call that reports "Reading the news" the moment a web search starts in it. */
+async function createWatchingSearch(
+  client: Anthropic,
+  params: Anthropic.MessageCreateParamsNonStreaming,
+  onActivity: (label: string) => void,
+): Promise<Anthropic.Message> {
+  const stream = client.messages.stream(params);
+  stream.on('streamEvent', (event) => {
+    if (
+      event.type === 'content_block_start' &&
+      event.content_block.type === 'server_tool_use' &&
+      event.content_block.name === 'web_search'
+    ) {
+      onActivity(activityFor('web_search'));
+    }
+  });
+  return stream.finalMessage();
 }
 
 /** An optional string argument: absent, null or blank is null. */
@@ -477,6 +529,25 @@ async function callTool(name: string, input: unknown, tools: AgentTools): Promis
       return tools.setUsername(stringArg(input, 'name'));
     case 'forget_memory':
       return tools.forgetMemory(stringArg(input, 'id'));
+    case 'set_auto_save': {
+      const percent = (input as Record<string, unknown> | null)?.['percent'];
+      return tools.setAutoSave({
+        pot: stringArg(input, 'pot'),
+        kind: stringArg(input, 'kind'),
+        percent: typeof percent === 'number' ? percent : null,
+        amountUsd: optionalString(input, 'amountUsd'),
+        every: optionalString(input, 'every'),
+      });
+    }
+    case 'list_auto_saves':
+      return tools.listAutoSaves();
+    case 'delete_auto_save':
+      return tools.deleteAutoSave(stringArg(input, 'id'));
+    case 'set_appearance': {
+      const mode = stringArg(input, 'mode');
+      if (mode !== 'light' && mode !== 'dark') throw new Error('mode must be "light" or "dark".');
+      return tools.setAppearance(mode);
+    }
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -500,7 +571,7 @@ function accumulate(total: AgentUsage, usage: Anthropic.Usage): void {
 }
 
 /**
- * What a turn cost, in USD, at Claude Sonnet 5's list prices — for logs and
+ * What a turn cost, in USD, at Claude Sonnet 5.5's list prices (same as Sonnet 5) — for logs and
  * dashboards, not billing. Thinking is billed as output, so it is inside
  * `outputTokens`. Update these if `AGENT_MODEL` changes.
  */

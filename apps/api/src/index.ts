@@ -12,6 +12,7 @@ import {
   fetchWalletHoldings,
   getTokenPriceUsd,
   priceAsDecimal,
+  readUsdcBalance,
   forgetWalletHoldings,
   getChain,
   rpcConfigFromEnv,
@@ -19,6 +20,7 @@ import {
 } from '@blocky/wallet-core';
 import { fetchExplorerTransfers } from './activity';
 import { ALERT_CHECK_MS, checkPriceAlerts } from './alerts';
+import { AUTOSAVE_CHECK_MS, CHECK_IN_SCAN_MS, runAutoSave, runCheckIns } from './autosave';
 import { createAgentHandler } from './agent';
 import { createApp } from './app';
 import { createPrivyIdentity } from './auth';
@@ -87,6 +89,19 @@ const alertTimer = setInterval(() => {
   );
 }, ALERT_CHECK_MS);
 alertTimer.unref();
+
+// Auto-save rules fill pots on their own; the weekly check-in lands in the inbox.
+const autoSaveTimer = setInterval(() => {
+  void runAutoSave(store, async (address) => (await readUsdcBalance(reader, DEFAULT_CHAIN, address)).amount).catch(
+    (error: unknown) => console.error('auto-save failed', error),
+  );
+}, AUTOSAVE_CHECK_MS);
+autoSaveTimer.unref();
+
+const checkInTimer = setInterval(() => {
+  void runCheckIns(store).catch((error: unknown) => console.error('check-ins failed', error));
+}, CHECK_IN_SCAN_MS);
+checkInTimer.unref();
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, ({ port }) => {
   console.log(

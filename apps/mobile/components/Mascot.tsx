@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Image, type ImageStyle, type StyleProp } from 'react-native';
+import { Image, View, type StyleProp, type ViewStyle } from 'react-native';
 
 export type MascotPose =
   | 'neutral'
@@ -23,11 +23,23 @@ const POSES: Record<MascotPose, number> = {
 };
 
 /**
- * Poses calm enough to interrupt with a blink or a glance. `sad`/`angry`/
- * `confused` are reserved for specific moments — see "the mascot never jokes
- * about money" below — and never get randomly animated over.
+ * In-betweens for a glance, from the turnaround sheet: the neutral pose's eyes
+ * sliding to his right. Cleaned and aligned to the neutral pose's body, so
+ * stepping through them moves only the face. A glance left is the same frames
+ * mirrored.
  */
-const IDLE_SAFE = new Set<MascotPose>(['neutral', 'happy']);
+const TURN = [
+  require('../assets/blockyturn1.png'),
+  require('../assets/blockyturn2.png'),
+  require('../assets/blockyturn3.png'),
+] as const;
+
+/** What's on screen: a pose, or a step of the turn (optionally mirrored). */
+type Frame = { pose: MascotPose } | { turn: 0 | 1 | 2; mirrored: boolean };
+
+const STEP_MS = 90;
+const HOLD_MS = 1800;
+const BLINK_MS = 260;
 
 /**
  * The mascot, hand-drawn (assets/blocky*.png, background keyed out) and shown
@@ -37,10 +49,11 @@ const IDLE_SAFE = new Set<MascotPose>(['neutral', 'happy']);
  * warnings and the approval screen stay calm and plain — the mascot never
  * jokes about money.
  *
- * `idle` swaps the frame for a blink or a sideways glance every few seconds,
- * entirely by picking a different pre-drawn pose — no sprite sheet, no
- * skeletal rig, just the same `<Image>` swap this component already does.
- * Only takes effect on `neutral`/`happy`; anywhere else it's a no-op.
+ * `idle` adds a blink or a glance every few seconds. Every frame is mounted
+ * up front and only its opacity changes: swapping an `<Image>`'s source makes
+ * Android decode the new picture on the spot, which is what made the old
+ * one-picture glance look like a flicker. Glances only run on `neutral` — the
+ * turn frames are drawn from that face.
  */
 export function Mascot({
   pose = 'neutral',
@@ -51,41 +64,94 @@ export function Mascot({
   pose?: MascotPose;
   size?: number;
   idle?: boolean;
-  style?: StyleProp<ImageStyle>;
+  style?: StyleProp<ViewStyle>;
 }) {
-  const [frame, setFrame] = useState<MascotPose>(pose);
+  const [frame, setFrame] = useState<Frame>({ pose });
+  const animated = idle && (pose === 'neutral' || pose === 'happy');
 
   useEffect(() => {
-    setFrame(pose);
-    if (!idle || !IDLE_SAFE.has(pose)) return undefined;
+    setFrame({ pose });
+    if (!animated) return undefined;
 
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
-
-    const schedule = () => {
-      // A few seconds of stillness, then either a quick blink or a longer glance.
-      timer = setTimeout(() => {
-        if (!alive) return;
-        const glance = Math.random() < 0.3;
-        setFrame(glance ? (Math.random() < 0.5 ? 'lookLeft' : 'lookRight') : 'closedEyes');
-
-        timer = setTimeout(
-          () => {
-            if (!alive) return;
-            setFrame(pose);
-            schedule();
-          },
-          glance ? 1100 : 260,
-        );
-      }, 2400 + Math.random() * 2600);
+    const later = (ms: number, fn: () => void) => {
+      timer = setTimeout(() => alive && fn(), ms);
     };
+
+    const glance = (mirrored: boolean) => {
+      const steps: Frame[] = [0, 1, 2].map((turn) => ({ turn: turn as 0 | 1 | 2, mirrored }));
+      const back: Frame[] = [steps[1]!, steps[0]!, { pose }];
+      const run = (queue: Frame[], then: () => void) => {
+        const [next, ...rest] = queue;
+        if (!next) return then();
+        setFrame(next);
+        later(STEP_MS, () => run(rest, then));
+      };
+      run(steps, () => later(HOLD_MS, () => run(back, schedule)));
+    };
+
+    const schedule = () =>
+      later(2400 + Math.random() * 2600, () => {
+        if (pose === 'neutral' && Math.random() < 0.3) {
+          glance(Math.random() < 0.5);
+        } else {
+          setFrame({ pose: 'closedEyes' });
+          later(BLINK_MS, () => {
+            setFrame({ pose });
+            schedule();
+          });
+        }
+      });
     schedule();
 
     return () => {
       alive = false;
       clearTimeout(timer);
     };
-  }, [pose, idle]);
+  }, [pose, animated]);
 
-  return <Image source={POSES[frame]} style={[{ width: size, height: size }, style]} resizeMode="contain" />;
+  const box = [{ width: size, height: size }, style];
+  // An explicit size on every layer: Android's image view doesn't reliably size
+  // an absolutely-positioned image from its insets alone.
+  const layer = { position: 'absolute' as const, top: 0, left: 0, width: size, height: size };
+
+  if (!animated) {
+    return (
+      <View style={box}>
+        <Image source={POSES[pose]} style={layer} resizeMode="contain" />
+      </View>
+    );
+  }
+
+  const shown = (candidate: Frame) =>
+    'pose' in frame && 'pose' in candidate
+      ? frame.pose === candidate.pose
+      : 'turn' in frame && 'turn' in candidate && frame.turn === candidate.turn;
+  const mirrored = 'turn' in frame && frame.mirrored;
+
+  return (
+    <View style={box}>
+      {([pose, 'closedEyes'] as const).map((p) => (
+        <Image
+          key={p}
+          source={POSES[p]}
+          style={[layer, { opacity: shown({ pose: p }) ? 1 : 0 }]}
+          resizeMode="contain"
+        />
+      ))}
+      {TURN.map((source, i) => (
+        <Image
+          key={`turn${i}`}
+          source={source}
+          style={[
+            layer,
+            { opacity: shown({ turn: i as 0 | 1 | 2, mirrored }) ? 1 : 0 },
+            mirrored ? { transform: [{ scaleX: -1 }] } : null,
+          ]}
+          resizeMode="contain"
+        />
+      ))}
+    </View>
+  );
 }

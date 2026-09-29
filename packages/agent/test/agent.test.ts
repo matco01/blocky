@@ -76,6 +76,10 @@ const tools: AgentTools = {
   createPot: async (name, targetUsd) => ({ pot: { name, targetUsd } }),
   moveToPot: async (pot, amountUsd) => ({ pot, amountUsd }),
   setUsername: async (username) => ({ username }),
+  setAppearance: async (mode) => ({ appearance: mode }),
+  setAutoSave: async (rule) => ({ rule }),
+  listAutoSaves: async () => ({ rules: [] }),
+  deleteAutoSave: async (id) => ({ deleted: id === 'abc' }),
 };
 
 const text = (value: string): Anthropic.TextBlock => ({
@@ -319,12 +323,12 @@ describe('cost controls', () => {
     });
   });
 
-  it('runs Sonnet 5 at low effort', async () => {
+  it('runs Sonnet 5.5 at low effort', async () => {
     const { client, calls } = fakeClient([{ content: [text('hi')] }]);
 
     await runAgentTurn('hi', { client, tools });
 
-    expect(calls[0]?.model).toBe('claude-sonnet-5');
+    expect(calls[0]?.model).toBe('claude-sonnet-5-5');
     expect(calls[0]?.output_config?.effort).toBe('low');
   });
 

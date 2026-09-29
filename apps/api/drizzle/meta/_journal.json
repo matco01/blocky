@@ -43,6 +43,13 @@
       "when": 1790536703560,
       "tag": "0005_magenta_doctor_faustus",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790705125148,
+      "tag": "0006_perpetual_stark_industries",
+      "breakpoints": true
     }
   ]
 }

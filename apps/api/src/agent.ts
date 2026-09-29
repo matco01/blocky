@@ -3,6 +3,7 @@ import { estimateCostUsd, runAgentTurn, type AgentTools, type AgentTurn } from '
 import { buildPlan } from '@blocky/planner';
 import {
   AddressSchema,
+  displayUsd,
   evaluatePolicy,
   formatUnits,
   formatUsd,
@@ -34,7 +35,7 @@ import { mergeActivity, type ExplorerTransfer } from './activity';
 import { createRequest, insightsFor, linkMatchingRequest, potWarning, who } from './money';
 import { BUDGET_CATEGORIES, monthOf } from './insights';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
-import type { Store } from './store';
+import type { SaveRule, Store } from './store';
 
 /**
  * The agent route's plumbing.
@@ -56,6 +57,20 @@ import type { Store } from './store';
  * transfer is what keeps Blocky a software provider. Revisit only with
  * counsel, and preferably as a co-signer that is necessary but not sufficient.
  */
+
+/** Enough for any sensible plan; a cap so a looping model can't pile them up. */
+const MAX_SAVE_RULES = 10;
+
+/** An auto-save rule as the agent reads it back — and as it says it to the user. */
+function describeRule(rule: SaveRule, potName: string) {
+  const what =
+    rule.kind === 'percent_in'
+      ? `${rule.percent}% of money received goes into ${potName}`
+      : rule.kind === 'recurring'
+        ? `${displayUsd(rule.amountUsd ?? '0')} goes into ${potName} every ${rule.everyDays === 30 ? 'month' : 'week'}`
+        : `everything above ${displayUsd(rule.amountUsd ?? '0')} free goes into ${potName}`;
+  return { id: rule.id, pot: potName, rule: what };
+}
 
 /**
  * The agent's tools, bound to one user.
@@ -408,6 +423,61 @@ export function agentToolsFor(
       return store.addMemory(userId, note);
     },
 
+    async setAutoSave({ pot: potName, kind, percent, amountUsd, every }) {
+      const pot = (await store.listPots(userId)).find((candidate) => candidate.name.toLowerCase() === potName.trim().toLowerCase());
+      if (!pot) return { error: `There's no pot called "${potName}". Create it first.` };
+      if ((await store.listSaveRules(userId)).length >= MAX_SAVE_RULES) {
+        return { error: `At most ${MAX_SAVE_RULES} auto-saves. Stop one first.` };
+      }
+
+      const amount = amountUsd?.trim().replace(/^\$/, '') ?? null;
+      const validAmount = amount !== null && /^\d+(\.\d{1,6})?$/.test(amount) && parseUsd(amount) > 0n;
+
+      if (kind === 'percent_in') {
+        if (percent === null || !Number.isInteger(percent) || percent < 1 || percent > 100) {
+          return { error: 'Give the share as a whole percent, 1 to 100.' };
+        }
+        const rule = await store.addSaveRule(userId, { potId: pot.id, kind, percent, amountUsd: null, everyDays: null, nextRunAt: null });
+        return { rule: describeRule(rule, pot.name) };
+      }
+      if (kind === 'recurring') {
+        if (!validAmount) return { error: 'Give the amount in dollars, like "20".' };
+        const everyDays = every === 'month' ? 30 : 7;
+        // Starts now: "save $20 a week" puts the first $20 aside today.
+        const rule = await store.addSaveRule(userId, {
+          potId: pot.id,
+          kind,
+          percent: null,
+          amountUsd: amount,
+          everyDays,
+          nextRunAt: new Date().toISOString(),
+        });
+        return { rule: describeRule(rule, pot.name) };
+      }
+      if (kind === 'sweep_above') {
+        if (amount === null || !/^\d+(\.\d{1,6})?$/.test(amount)) return { error: 'Give the floor to keep free, in dollars.' };
+        const rule = await store.addSaveRule(userId, { potId: pot.id, kind, percent: null, amountUsd: amount, everyDays: null, nextRunAt: null });
+        return { rule: describeRule(rule, pot.name) };
+      }
+      return { error: 'Kind must be "percent_in", "recurring" or "sweep_above".' };
+    },
+
+    async listAutoSaves() {
+      const [rules, pots] = await Promise.all([store.listSaveRules(userId), store.listPots(userId)]);
+      const names = new Map(pots.map((pot) => [pot.id, pot.name]));
+      return { rules: rules.map((rule) => describeRule(rule, names.get(rule.potId) ?? 'a pot')) };
+    },
+
+    async deleteAutoSave(id) {
+      return { deleted: await store.deleteSaveRule(userId, id.trim()) };
+    },
+
+    // Theme lives on the phone. `createAgentHandler` overrides this to carry the
+    // request back in the response; anywhere else there is no app to apply it.
+    async setAppearance() {
+      return { error: 'Appearance can only be changed from the app.' };
+    },
+
     /** By the short id the agent sees — the first characters of the stored one. */
     async forgetMemory(id) {
       const wanted = id.trim().toLowerCase();
@@ -477,6 +547,8 @@ export interface AgentResponse {
   /** Plain-language note about what has and has not happened. */
   status: string;
   usage: AgentTurn['usage'];
+  /** A theme the agent asked the app to switch to this turn. */
+  appearance: 'light' | 'dark' | null;
 }
 
 export function createAgentHandler(
@@ -494,6 +566,7 @@ export function createAgentHandler(
     user: { id: string; walletAddress: Address },
     message: string,
     history: readonly ChatTurn[] = [],
+    onActivity?: (label: string) => void,
   ): Promise<AgentResponse> {
     const userId = user.id;
     const account = user.walletAddress;
@@ -508,10 +581,19 @@ export function createAgentHandler(
       note: memory.note,
     }));
 
+    // Set by `set_appearance`; the app switches theme when the reply arrives.
+    let appearance: 'light' | 'dark' | null = null;
+
     const turn = await runAgentTurn<Plan>(message, {
       memories,
       client,
-      tools: agentToolsFor(store, userId, reader, account, explorerTransfers),
+      tools: {
+        ...agentToolsFor(store, userId, reader, account, explorerTransfers),
+        async setAppearance(mode) {
+          appearance = mode;
+          return { switched: true, appearance: mode };
+        },
+      },
       // News and "why did it move" need the web; a turn that searches can't propose.
       webSearch: true,
       testnet: IS_TESTNET,
@@ -524,11 +606,12 @@ export function createAgentHandler(
           : { ok: false, message: outcome.failure.message };
       },
       history: history.map((entry) => ({ role: entry.role, content: entry.content })),
+      ...(onActivity ? { onActivity } : {}),
     });
 
     logUsage(turn);
 
-    const empty = { plan: null, decision: null, plans: [], usage: turn.usage };
+    const empty = { plan: null, decision: null, plans: [], usage: turn.usage, appearance };
 
     switch (turn.kind) {
       case 'reply':
@@ -584,6 +667,7 @@ export function createAgentHandler(
 
     return {
       kind: 'plan',
+      appearance,
       reply: turn.text,
       plan: first.plan,
       decision: first.decision,

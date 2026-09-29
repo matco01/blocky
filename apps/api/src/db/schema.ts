@@ -317,7 +317,40 @@ export const pots = pgTable(
   (table) => [index('pots_user_idx').on(table.userId)],
 );
 
+/**
+ * Auto-save: rules that fill a pot on their own — a share of money received,
+ * a fixed amount on a schedule, or everything above a floor. Pots are
+ * envelopes over the wallet, so a rule never moves money or signs anything.
+ */
+export const saveRules = pgTable(
+  'save_rules',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    potId: text('pot_id')
+      .notNull()
+      .references(() => pots.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['percent_in', 'recurring', 'sweep_above'] }).notNull(),
+    /** percent_in: the share of money received, 1–100. */
+    percent: integer('percent'),
+    /** recurring: the amount each time. sweep_above: the floor kept free. */
+    amountUsd: numeric('amount_usd', { precision: 38, scale: 6 }),
+    /** recurring: 7 for weekly, 30 for monthly. */
+    everyDays: integer('every_days'),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    /** percent_in: the wallet balance last seen, to tell money that arrived since. */
+    lastBalanceUsd: numeric('last_balance_usd', { precision: 38, scale: 6 }),
+    /** Put aside since the last weekly check-in, for "auto-save added $32". */
+    savedSinceCheckInUsd: numeric('saved_since_check_in_usd', { precision: 38, scale: 6 }).notNull().default('0'),
+    createdAt: createdAt(),
+  },
+  (table) => [index('save_rules_user_idx').on(table.userId)],
+);
+
 export const schema = {
+  saveRules,
   users,
   policies,
   plans,

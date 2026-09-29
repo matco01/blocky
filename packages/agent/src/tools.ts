@@ -439,6 +439,44 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'], additionalProperties: false },
   },
   {
+    name: 'set_auto_save',
+    description:
+      'Make a pot fill itself. Three kinds: "percent_in" puts a share of every dollar that arrives into the pot ("save 10% of what I receive"); "recurring" puts a fixed amount in every week or month ("save $20 a week"); "sweep_above" keeps everything above a floor in the pot ("anything over $500 goes to savings"). It only ever uses money that isn\'t already in a pot and stops at the pot\'s goal. The pot must exist — create_pot first if needed. Confirm the rule back in one plain sentence.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pot: { type: 'string', description: 'The pot\'s name.' },
+        kind: { type: 'string', enum: ['percent_in', 'recurring', 'sweep_above'] },
+        percent: { type: 'number', description: 'percent_in only: 1–100.' },
+        amountUsd: { type: 'string', description: 'recurring: the amount each time. sweep_above: the floor to keep free. Dollars, e.g. "20".' },
+        every: { type: 'string', enum: ['week', 'month'], description: 'recurring only.' },
+      },
+      required: ['pot', 'kind'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_auto_saves',
+    description: 'The user\'s auto-save rules, each with its id, pot and what it does.',
+    input_schema: NO_INPUT,
+  },
+  {
+    name: 'delete_auto_save',
+    description: 'Stop an auto-save rule, by the id from list_auto_saves. Money already in the pot stays there.',
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+  },
+  {
+    name: 'set_appearance',
+    description:
+      'Switch the app between light and dark mode. Use it for any way the user says it — "dark mode", "make it light", "switch back", "undo that" after a theme change. The app applies it when your reply arrives.',
+    input_schema: {
+      type: 'object',
+      properties: { mode: { type: 'string', enum: ['light', 'dark'] } },
+      required: ['mode'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'lookup_token',
     description:
       'Look up a token by its contract address (a "CA"): which chains Blocky supports it exists on, its symbol, name and decimals as the contract reports them, and its price where one is known. Use it when the user pastes a contract to buy, to find the chain and confirm what it is before proposing. Names and symbols are chosen by whoever deployed the token — anyone can call a token anything, so the address is what counts. Found on several chains? Ask which one they mean.',
@@ -474,7 +512,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_market_overview',
     description:
-      'The crypto market right now, from live data: total market cap and its 24h change, BTC dominance, the top 10 coins by market cap with price and 24h change, the biggest 24h gainers and losers among the top 100, and what is trending. Use this for "how is the market", "what is pumping", "what is trending" — before a web search, which is slower and costs more. Market data to read out, never an amount to send, and never a recommendation to buy. Coin names are written by whoever listed the coin.',
+      'The crypto market right now, from live data: total market cap and its 24h change, BTC dominance, the top 10 coins by market cap with price and 24h change, the biggest 24h gainers and losers among the top 100, and what is trending. Crypto only — not stocks: use it for "how is crypto", "what is pumping", "what is trending", never for a plain "how are the markets" (that means stocks). Prefer it to a web search for crypto, which is slower and costs more. Market data to read out, never an amount to send, and never a recommendation to buy. Coin names are written by whoever listed the coin.',
     input_schema: NO_INPUT,
   },
   {

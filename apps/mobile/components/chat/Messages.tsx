@@ -85,7 +85,7 @@ export function AssistantMessage({
  * vertical centre can't land him beside something unrelated the way it could
  * for a reply. Nothing to solve here that the column above solves elsewhere.
  */
-export function ThinkingRow() {
+export function ThinkingRow({ label }: { label: string | null }) {
   return (
     <Animated.View
       entering={FadeIn.duration(160)}
@@ -93,7 +93,15 @@ export function ThinkingRow() {
       style={styles.thinkingRow}
     >
       <Mascot pose="neutral" size={AVATAR_SIZE} idle />
-      <ThinkingDots />
+      <View style={styles.thinkingText}>
+        {/* Keyed on the label so each new step fades in rather than snapping. */}
+        <Animated.View key={label ?? 'thinking'} entering={FadeIn.duration(180)}>
+          <Text variant="label" tone="secondary" numberOfLines={1}>
+            {label ?? 'Thinking'}
+          </Text>
+        </Animated.View>
+        <ThinkingDots />
+      </View>
     </Animated.View>
   );
 }
@@ -135,6 +143,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  thinkingText: {
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   error: {
     flexDirection: 'row',

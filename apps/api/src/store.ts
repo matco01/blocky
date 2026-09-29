@@ -24,6 +24,7 @@ import {
   policies,
   pots,
   priceAlerts,
+  saveRules,
   sessions,
   trackedTokens,
   users,
@@ -159,6 +160,25 @@ export interface PriceAlert {
   thresholdUsd: string;
   createdAt: string;
   triggeredAt: string | null;
+}
+
+export type SaveRuleKind = 'percent_in' | 'recurring' | 'sweep_above';
+
+export interface NewSaveRule {
+  potId: string;
+  kind: SaveRuleKind;
+  percent: number | null;
+  amountUsd: string | null;
+  everyDays: number | null;
+  nextRunAt: string | null;
+}
+
+export interface SaveRule extends NewSaveRule {
+  id: string;
+  userId: string;
+  lastBalanceUsd: string | null;
+  savedSinceCheckInUsd: string;
+  createdAt: string;
 }
 
 export interface Pot {
@@ -299,6 +319,22 @@ export interface Store {
   /** Move money into (positive) or out of (negative) a pot. Never below zero. */
   adjustPot(userId: string, id: string, deltaUsd: string): Promise<Pot | null>;
   deletePot(userId: string, id: string): Promise<boolean>;
+
+  /** Auto-save rules. A rule belongs to one pot and goes when the pot does. */
+  addSaveRule(userId: string, rule: NewSaveRule): Promise<SaveRule>;
+  listSaveRules(userId: string): Promise<SaveRule[]>;
+  deleteSaveRule(userId: string, id: string): Promise<boolean>;
+  /** Every rule, for the background sweep. */
+  listAllSaveRules(): Promise<SaveRule[]>;
+  updateSaveRule(
+    id: string,
+    patch: Partial<Pick<SaveRule, 'nextRunAt' | 'lastBalanceUsd' | 'savedSinceCheckInUsd'>>,
+  ): Promise<void>;
+
+  /** Users with a wallet, for the weekly check-in. */
+  listUsers(): Promise<Array<UserRecord & { createdAt: string }>>;
+  /** When a user last got a notification of this kind, or null. */
+  lastNotificationAt(userId: string, kind: string): Promise<string | null>;
 
   /** Remember a token the user bought by contract, so their portfolio shows it. Idempotent. */
   trackToken(userId: string, token: TrackedToken): Promise<void>;
@@ -883,6 +919,65 @@ export function createStore(db: Db): Store {
       return removed.length > 0;
     },
 
+    async addSaveRule(userId, rule) {
+      const id = crypto.randomUUID();
+      await db.insert(saveRules).values({
+        id,
+        userId,
+        potId: rule.potId,
+        kind: rule.kind,
+        percent: rule.percent,
+        amountUsd: rule.amountUsd,
+        everyDays: rule.everyDays,
+        nextRunAt: rule.nextRunAt ? new Date(rule.nextRunAt) : null,
+      });
+      const [row] = await db.select().from(saveRules).where(eq(saveRules.id, id));
+      return toSaveRule(row!);
+    },
+
+    async listSaveRules(userId) {
+      const rows = await db.select().from(saveRules).where(eq(saveRules.userId, userId)).orderBy(saveRules.createdAt);
+      return rows.map(toSaveRule);
+    },
+
+    async deleteSaveRule(userId, id) {
+      const removed = await db
+        .delete(saveRules)
+        .where(and(eq(saveRules.userId, userId), eq(saveRules.id, id)))
+        .returning({ id: saveRules.id });
+      return removed.length > 0;
+    },
+
+    async listAllSaveRules() {
+      return (await db.select().from(saveRules).orderBy(saveRules.createdAt)).map(toSaveRule);
+    },
+
+    async updateSaveRule(id, patch) {
+      await db
+        .update(saveRules)
+        .set({
+          ...(patch.nextRunAt !== undefined ? { nextRunAt: patch.nextRunAt ? new Date(patch.nextRunAt) : null } : {}),
+          ...(patch.lastBalanceUsd !== undefined ? { lastBalanceUsd: patch.lastBalanceUsd } : {}),
+          ...(patch.savedSinceCheckInUsd !== undefined ? { savedSinceCheckInUsd: patch.savedSinceCheckInUsd } : {}),
+        })
+        .where(eq(saveRules.id, id));
+    },
+
+    async listUsers() {
+      const rows = await db.select().from(users);
+      return rows.map((row) => ({ id: row.id, walletAddress: row.walletAddress as Address, createdAt: row.createdAt.toISOString() }));
+    },
+
+    async lastNotificationAt(userId, kind) {
+      const [row] = await db
+        .select({ at: notifications.createdAt })
+        .from(notifications)
+        .where(and(eq(notifications.userId, userId), eq(notifications.kind, kind)))
+        .orderBy(desc(notifications.createdAt))
+        .limit(1);
+      return row ? row.at.toISOString() : null;
+    },
+
     async trackToken(userId, token) {
       await db
         .insert(trackedTokens)
@@ -1039,6 +1134,23 @@ function toAlert(row: typeof priceAlerts.$inferSelect): PriceAlert {
     thresholdUsd: formatUsd(parseUsd(row.thresholdUsd)),
     createdAt: row.createdAt.toISOString(),
     triggeredAt: row.triggeredAt?.toISOString() ?? null,
+  };
+}
+
+function toSaveRule(row: typeof saveRules.$inferSelect): SaveRule {
+  const usd = (value: string | null) => (value === null ? null : formatUsd(parseUsd(value)));
+  return {
+    id: row.id,
+    userId: row.userId,
+    potId: row.potId,
+    kind: row.kind,
+    percent: row.percent,
+    amountUsd: usd(row.amountUsd),
+    everyDays: row.everyDays,
+    nextRunAt: row.nextRunAt ? row.nextRunAt.toISOString() : null,
+    lastBalanceUsd: usd(row.lastBalanceUsd),
+    savedSinceCheckInUsd: formatUsd(parseUsd(row.savedSinceCheckInUsd)),
+    createdAt: row.createdAt.toISOString(),
   };
 }
 

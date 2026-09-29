@@ -7,6 +7,7 @@ import {
   type Policy,
   type RecipientRef,
 } from '@blocky/shared';
+import { fetch as streamingFetch } from 'expo/fetch';
 import { z } from 'zod';
 import { config } from './config';
 
@@ -99,6 +100,8 @@ const AgentResponseSchema = z.object({
   /** Every plan in the reply. Older servers send only `plan`. */
   plans: z.array(z.object({ plan: PlanSchema, decision: PolicyDecisionSchema })).default([]),
   status: z.string(),
+  /** A theme the agent asked the app to switch to. Older servers don't send it. */
+  appearance: z.enum(['light', 'dark']).nullable().default(null),
 });
 
 export type AgentResponse = z.infer<typeof AgentResponseSchema>;
@@ -299,12 +302,70 @@ export const api = {
       body: JSON.stringify({ recipient, amount, ...(asset ? { asset } : {}) }),
     }).then((r): Plan => r.plan),
 
-  /** Talk to the agent. History is the recent conversation, oldest first. */
-  agentChat: (message: string, history: readonly ChatTurn[]) =>
-    request('/v1/agent/chat', AgentResponseSchema, {
-      method: 'POST',
-      body: JSON.stringify({ message, history }),
-    }),
+  /**
+   * Talk to the agent. History is the recent conversation, oldest first.
+   * `onActivity` hears what Blocky is doing while the reply is on its way
+   * ("Creating your pot"), streamed line by line.
+   */
+  agentChat: async (
+    message: string,
+    history: readonly ChatTurn[],
+    onActivity?: (label: string) => void,
+  ): Promise<AgentResponse> => {
+    const token = await getToken();
+
+    let response: Awaited<ReturnType<typeof streamingFetch>>;
+    try {
+      // expo/fetch, not the global one: React Native's fetch can't read a body
+      // as it arrives, only once it has all landed.
+      response = await streamingFetch(`${config.apiUrl}/v1/agent/chat`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/x-ndjson',
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message, history }),
+      });
+    } catch {
+      throw new ApiError("Can't reach Blocky right now. Check your connection.", 0);
+    }
+
+    if (!response.ok || !response.body) {
+      const body = (await response.json().catch(() => null)) as { message?: string; error?: string } | null;
+      throw new ApiError(body?.message ?? body?.error ?? 'Something went wrong.', response.status, body?.error ?? null);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = '';
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) buffered += decoder.decode(value, { stream: true });
+
+      let newline = buffered.indexOf('\n');
+      while (newline !== -1) {
+        const line = buffered.slice(0, newline).trim();
+        buffered = buffered.slice(newline + 1);
+        newline = buffered.indexOf('\n');
+        if (!line) continue;
+
+        const event = JSON.parse(line) as { type: string; label?: string; message?: string; response?: unknown };
+        if (event.type === 'activity' && event.label) onActivity?.(event.label);
+        if (event.type === 'error') throw new ApiError(event.message ?? 'Something went wrong.', 500);
+        if (event.type === 'result') {
+          const parsed = AgentResponseSchema.safeParse(event.response);
+          if (!parsed.success) {
+            throw new ApiError('Blocky sent a response this version of the app does not understand.', 200);
+          }
+          return parsed.data;
+        }
+      }
+
+      if (done) throw new ApiError('The reply was cut off. Try again.', 0);
+    }
+  },
 
   /** A fresh quote for a plan whose price window has passed. Keeps the plan's origin. */
   requotePlan: (planId: string) =>

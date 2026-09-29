@@ -26,6 +26,8 @@ export type ChatMessage =
       note: string | null;
       /** Tappable actions, shown under the text. Set only by `showCapabilities`. */
       capabilities: Capability[] | null;
+      /** Written by the app itself (see `sayLocally`), not by the agent. */
+      local?: boolean;
     }
   | {
       id: string;
@@ -43,7 +45,11 @@ let nextId = 0;
 const launch = Date.now().toString(36);
 const id = () => `m${launch}-${++nextId}`;
 
-export function useChat() {
+export function useChat({ onAppearance }: { onAppearance?: (mode: 'light' | 'dark') => void } = {}) {
+  // Latest callback without re-creating `ask` when it changes.
+  const onAppearanceRef = useRef(onAppearance);
+  onAppearanceRef.current = onAppearance;
+
   // The conversation picks up where it left off, cards and all.
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const saved = loadChat();
@@ -56,6 +62,8 @@ export function useChat() {
     saveChat(messages, sentPlanIds());
   }, [messages, sentVersion]);
   const [busy, setBusy] = useState(false);
+  // What Blocky says he's doing while a reply is on its way ("Creating your pot").
+  const [activity, setActivity] = useState<string | null>(null);
 
   // The latest messages without re-creating `send` on every change.
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -79,10 +87,16 @@ export function useChat() {
       const generation = generationRef.current;
       busyRef.current = true;
       setBusy(true);
+      setActivity(null);
 
       try {
-        const response = await api.agentChat(text, history);
-        if (generationRef.current === generation) append(fromResponse(response));
+        const response = await api.agentChat(text, history, (label) => {
+          if (generationRef.current === generation) setActivity(label);
+        });
+        if (generationRef.current === generation) {
+          if (response.appearance) onAppearanceRef.current?.(response.appearance);
+          append(fromResponse(response));
+        }
       } catch (error) {
         if (generationRef.current === generation) {
           append({ id: id(), role: 'error', text: describeError(error), retry: { text, history } });
@@ -91,6 +105,7 @@ export function useChat() {
         if (generationRef.current === generation) {
           busyRef.current = false;
           setBusy(false);
+          setActivity(null);
         }
       }
     },
@@ -131,7 +146,7 @@ export function useChat() {
   const sayLocally = useCallback(
     (userText: string, replyText: string, capabilities: Capability[] | null = null) => {
       append({ id: id(), role: 'user', text: userText });
-      append(assistantMessage(replyText, { capabilities }));
+      append(assistantMessage(replyText, { capabilities, local: true }));
     },
     [append],
   );
@@ -159,14 +174,14 @@ export function useChat() {
     clearChat();
   }, []);
 
-  return { messages, busy, send, retry, showCapabilities, reset, sayLocally };
+  return { messages, busy, activity, send, retry, showCapabilities, reset, sayLocally };
 }
 
 type AssistantMessage = Extract<ChatMessage, { role: 'assistant' }>;
 
 function assistantMessage(
   text: string,
-  extra: Partial<Pick<AssistantMessage, 'plans' | 'note' | 'capabilities'>> = {},
+  extra: Partial<Pick<AssistantMessage, 'plans' | 'note' | 'capabilities' | 'local'>> = {},
 ): AssistantMessage {
   return { id: id(), role: 'assistant', text, plans: [], note: null, capabilities: null, ...extra };
 }
@@ -207,6 +222,14 @@ function toHistory(messages: readonly ChatMessage[]): ChatTurn[] {
   for (const message of messages) {
     if (message.role === 'user') {
       turns.push({ role: 'user', content: message.text });
+    } else if (message.role === 'assistant' && message.local) {
+      // Sent as the app's own note, not as something the agent said. Passed off
+      // as the agent's words, "Switched to dark mode." made the agent "correct"
+      // itself on the next message, since it knows it can't change settings.
+      turns.push({
+        role: 'assistant',
+        content: `[Not written by you: the app handled the previous message itself and replied "${message.text}".]`,
+      });
     } else if (message.role === 'assistant') {
       // What became of each card, not just that it was proposed: "now do the
       // rest" only makes sense if Blocky knows which ones went.
