@@ -2,12 +2,11 @@
   "expo": {
     "name": "Blocky",
     "slug": "blocky",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "blocky",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.blocky.wallet",
@@ -18,7 +17,7 @@
     "android": {
       "package": "com.blocky.wallet",
       "adaptiveIcon": {
-        "backgroundColor": "#0B0B0F",
+        "backgroundColor": "#F6EFE6",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -31,7 +30,20 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFCF8",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#121816"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
