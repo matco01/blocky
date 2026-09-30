@@ -174,13 +174,43 @@ export class ApiError extends Error {
     readonly status: number,
     /** Machine-readable code from the server, e.g. `insufficient_balance`. */
     readonly code: string | null = null,
+    /** The request never reached the Blocky API, or its answer came from something in between. */
+    readonly fromInfrastructure = false,
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
+const UNREACHABLE = "Can't reach Blocky right now. Check your connection.";
+
+/**
+ * Every error the Blocky API sends carries an `error` code. A failure without
+ * one came from something in between — the host's edge answering while the
+ * server restarts or redeploys ("Application not found"), a proxy, a captive
+ * portal — and its wording means nothing to the user.
+ */
+function isFromBlocky(body: unknown): body is { error: string; message?: string } {
+  return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string';
+}
+
 async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+  try {
+    return await attempt(path, schema, init);
+  } catch (error) {
+    // Reads are safe to repeat, and a blip in hosting usually clears in a
+    // second. Anything that writes is never retried here: sending money twice
+    // is the one failure worse than not sending it.
+    const isRead = !init?.method || init.method === 'GET';
+    if (isRead && error instanceof ApiError && error.fromInfrastructure) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return attempt(path, schema, init);
+    }
+    throw error;
+  }
+}
+
+async function attempt<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
   const token = await getToken();
 
   let response: Response;
@@ -194,14 +224,14 @@ async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit
       },
     });
   } catch {
-    throw new ApiError("Can't reach Blocky right now. Check your connection.", 0);
+    throw new ApiError(UNREACHABLE, 0, null, true);
   }
 
   const body: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const { message, error } = (body ?? {}) as { message?: string; error?: string };
-    throw new ApiError(message ?? 'Something went wrong.', response.status, error ?? null);
+    if (!isFromBlocky(body)) throw new ApiError(UNREACHABLE, response.status, null, true);
+    throw new ApiError(body.message ?? 'Something went wrong.', response.status, body.error);
   }
 
   const parsed = schema.safeParse(body);

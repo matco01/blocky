@@ -1,9 +1,10 @@
 import { useLoginWithEmail, useLoginWithOAuth } from '@privy-io/expo';
 import { useLoginWithPasskey } from '@privy-io/expo/passkey';
-import { useCallback, useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
 import Animated, {
   Easing,
+  cancelAnimation,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -45,7 +46,11 @@ export default function LoginScreen() {
 
   const reduced = useReducedMotion();
   const [revealed, setRevealed] = useState(false);
-  const reveal = useCallback(() => setRevealed(true), []);
+  const revealedRef = useRef(false);
+  const reveal = useCallback(() => {
+    revealedRef.current = true;
+    setRevealed(true);
+  }, []);
   const [skipped, setSkipped] = useState(false);
   const form = useSharedValue(reduced ? 1 : 0);
 
@@ -53,6 +58,20 @@ export default function LoginScreen() {
     if (!revealed || reduced) return;
     form.value = withDelay(80, withTiming(1, { duration: 420, easing: Easing.out(Easing.cubic) }));
   }, [revealed, reduced, form]);
+
+  // An animation started while the app was in the background can stall on
+  // Android and leave the form invisible. Coming back, show it outright.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        setSkipped(true);
+      } else if (revealedRef.current) {
+        cancelAnimation(form);
+        form.value = 1;
+      }
+    });
+    return () => subscription.remove();
+  }, [form]);
 
   const formStyle = useAnimatedStyle(() => ({
     opacity: form.value,

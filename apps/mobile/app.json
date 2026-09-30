@@ -34,19 +34,21 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-icon.png",
-          "imageWidth": 220,
+          "image": "./assets/splash-blank.png",
+          "imageWidth": 64,
           "resizeMode": "contain",
-          "backgroundColor": "#FFFCF8",
-          "dark": {
-            "image": "./assets/splash-icon.png",
-            "backgroundColor": "#121816"
-          }
+          "backgroundColor": "#FFFCF8"
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "121213c3-0183-4651-acba-b5a7511f6f3e"
+      }
+    },
+    "owner": "matco"
   }
 }

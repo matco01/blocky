@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { memo, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native';
+import { AppState, StyleSheet, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -127,7 +127,20 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
   /** Jump straight to the resting state — for a skip, or reduced motion. */
   function finish() {
     if (finished.current) return;
+    snap();
+    rest();
+    revealOnce();
+  }
 
+  /**
+   * Set every value to where the intro ends, without animating.
+   *
+   * Also the repair for an intro that was interrupted: on Android, an animation
+   * started while the app is in the background can stall and never run, which
+   * strands him off-screen above the letters. Setting values directly always
+   * lands.
+   */
+  function snap() {
     timers.current.forEach(clearTimeout);
     timers.current = [];
     for (const value of [glide, fall, squashX, squashY, hop, shadow, word, tagline]) cancelAnimation(value);
@@ -140,9 +153,6 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
     shadow.value = 0;
     word.value = 1;
     tagline.value = 1;
-
-    rest();
-    revealOnce();
   }
 
   function play(offset: number) {
@@ -212,6 +222,23 @@ export const IntroHero = memo(function IntroHero({ skipped, onReveal }: { skippe
   useEffect(() => {
     if (skipped) finish();
   }, [skipped]);
+
+  // Leaving the app mid-intro ends it: the rest would otherwise play (or stall)
+  // unseen. Coming back re-applies the end state, in case it didn't take while
+  // the app was in the background.
+  useEffect(() => {
+    let wasAway = false;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        wasAway = true;
+        finish();
+      } else if (wasAway) {
+        wasAway = false;
+        snap();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   const heroStyle = useAnimatedStyle(() => ({ transform: [{ translateY: glide.value }] }));
   const mascotStyle = useAnimatedStyle(() => ({

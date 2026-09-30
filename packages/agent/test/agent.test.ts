@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { estimateCostUsd, runAgentTurn, type AgentTools } from '../src/agent';
 import { PROPOSE_INTENT, TOOLS } from '../src/tools';
 
@@ -231,6 +231,24 @@ describe('proposing an intent', () => {
 
     expect(turn.kind).toBe('intent');
     expect(calls).toHaveLength(1);
+  });
+
+  it('still runs a tool that acts when it was called alongside a proposal', async () => {
+    const setBudget = vi.fn(tools.setBudget);
+    const { client } = fakeClient([
+      {
+        content: [
+          text("Your $100 budget is set, and here's the send."),
+          toolUse('set_budget', { category: 'total', monthlyUsd: '100' }, 'a'),
+          toolUse(PROPOSE_INTENT, { intent: VALID_TRANSFER }, 'b'),
+        ],
+      },
+    ]);
+
+    const turn = await runAgentTurn('set a $100 budget and send sam $20', { client, tools: { ...tools, setBudget } });
+
+    expect(turn.kind).toBe('intent');
+    expect(setBudget).toHaveBeenCalledWith('total', '100');
   });
 
   it('hands validation errors back rather than repairing them', async () => {

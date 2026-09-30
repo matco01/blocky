@@ -350,6 +350,13 @@ export async function runAgentTurn<P = unknown>(
         }
       }
 
+      // Every other tool called alongside the proposals runs, whatever happens
+      // to them. Ending the turn on the proposals alone would silently drop a
+      // "set your budget" or "create the pot" the model already told the user
+      // it did.
+      const others = toolUses.filter((use) => use.name !== PROPOSE_INTENT);
+      const otherResults = await runTools(others, tools, onActivity);
+
       if (judged.every((outcome) => 'accepted' in outcome && outcome.accepted)) {
         return { kind: 'intent', proposals: accepted, unplanned: [], text, usage };
       }
@@ -370,9 +377,8 @@ export async function runAgentTurn<P = unknown>(
       }
 
       // Every tool call in a message needs its result in the next one — the
-      // read-only ones called alongside the proposals included.
-      const others = toolUses.filter((use) => use.name !== PROPOSE_INTENT);
-      messages.push({ role: 'user', content: [...results, ...(await runTools(others, tools, onActivity))] });
+      // ones called alongside the proposals included.
+      messages.push({ role: 'user', content: [...results, ...otherResults] });
 
       continue;
     }
