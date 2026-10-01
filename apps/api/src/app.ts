@@ -130,6 +130,43 @@ export function createApp(deps: AppDeps) {
 
   app.get('/health', (c) => c.json({ ok: true, defaultChain: getChain(DEFAULT_CHAIN).name }));
 
+  /* --- The website's waitlist: public, so outside /v1 and its auth --------- */
+
+  const WaitlistBodySchema = z.object({
+    email: z.string().trim().max(254).email(),
+    source: z.string().max(32).optional(),
+    /** A field people never see. A bot that fills in every input fills this in too. */
+    website: z.string().optional(),
+  });
+
+  // Per address, in memory. One server, and a waitlist doesn't need more: this
+  // only has to stop a script from filling the table, not a determined attacker.
+  const WAITLIST_LIMIT = 5;
+  const WAITLIST_WINDOW_MS = 60 * 60 * 1000;
+  const waitlistHits = new Map<string, number[]>();
+
+  app.post('/waitlist', async (c) => {
+    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    const now = Date.now();
+    const recent = (waitlistHits.get(ip) ?? []).filter((at) => now - at < WAITLIST_WINDOW_MS);
+    if (recent.length >= WAITLIST_LIMIT) {
+      return c.json({ error: 'rate_limited', message: 'Too many tries. Give it a little while.' }, 429);
+    }
+    recent.push(now);
+    waitlistHits.set(ip, recent);
+    if (waitlistHits.size > 10_000) waitlistHits.clear();
+
+    const parsed = WaitlistBodySchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: 'invalid_email', message: "That doesn't look like an email address." }, 400);
+    }
+    // Looks like success to the bot; stores nothing.
+    if (parsed.data.website) return c.json({ ok: true, position: null, alreadyJoined: false });
+
+    const { position, alreadyJoined } = await store.joinWaitlist(parsed.data.email, parsed.data.source ?? null);
+    return c.json({ ok: true, position, alreadyJoined });
+  });
+
   app.get('/v1/me', async (c) => {
     const user = c.get('user');
     return c.json({

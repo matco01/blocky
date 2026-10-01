@@ -28,6 +28,7 @@ import {
   sessions,
   trackedTokens,
   users,
+  waitlist,
 } from './db/schema';
 
 /**
@@ -190,6 +191,12 @@ export interface Pot {
 }
 
 export interface Store {
+  /**
+   * Put an email on the website's waitlist. Signing up again is not an error
+   * and doesn't move anyone: `position` is where they first joined.
+   */
+  joinWaitlist(email: string, source: string | null): Promise<{ position: number; alreadyJoined: boolean }>;
+
   /** Create or refresh a user. The wallet address comes from Privy, never the client. */
   upsertUser(user: UserRecord): Promise<void>;
   getUser(userId: string): Promise<UserRecord | null>;
@@ -444,6 +451,22 @@ export function createStore(db: Db): Store {
   }
 
   return {
+    async joinWaitlist(email, source) {
+      const address = email.trim().toLowerCase();
+      const inserted = await db
+        .insert(waitlist)
+        .values({ email: address, source })
+        .onConflictDoNothing()
+        .returning({ email: waitlist.email });
+      const [row] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(waitlist)
+        .where(
+          sql`${waitlist.createdAt} <= (select ${waitlist.createdAt} from ${waitlist} where ${waitlist.email} = ${address})`,
+        );
+      return { position: row?.n ?? 1, alreadyJoined: inserted.length === 0 };
+    },
+
     async upsertUser(user) {
       await db
         .insert(users)

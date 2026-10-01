@@ -879,3 +879,39 @@ describe('requests from strangers', () => {
     expect(fourth.body.message).toMatch(/3 open requests to @mallory/);
   });
 });
+
+describe('waitlist', () => {
+  beforeEach(async () => {
+    await database.db.execute(sql`TRUNCATE waitlist`);
+  });
+
+  it('takes a signup without a token, and counts places in order', async () => {
+    const first = await call('/waitlist', { method: 'POST', body: { email: 'ada@example.com', source: 'hero' } });
+    expect(first).toEqual({ status: 200, body: { ok: true, position: 1, alreadyJoined: false } });
+
+    const second = await call('/waitlist', { method: 'POST', body: { email: 'sam@example.com' } });
+    expect(second.body.position).toBe(2);
+  });
+
+  it('treats the same address twice as one signup, keeping its place', async () => {
+    await call('/waitlist', { method: 'POST', body: { email: 'ada@example.com' } });
+    await call('/waitlist', { method: 'POST', body: { email: 'sam@example.com' } });
+
+    const again = await call('/waitlist', { method: 'POST', body: { email: '  ADA@example.com ' } });
+    expect(again.body).toEqual({ ok: true, position: 1, alreadyJoined: true });
+  });
+
+  it('rejects something that is not an email', async () => {
+    const { status, body } = await call('/waitlist', { method: 'POST', body: { email: 'not an email' } });
+    expect(status).toBe(400);
+    expect(body.error).toBe('invalid_email');
+  });
+
+  it('pretends to accept a bot that filled the hidden field, and stores nothing', async () => {
+    const { status } = await call('/waitlist', { method: 'POST', body: { email: 'bot@example.com', website: 'spam' } });
+    expect(status).toBe(200);
+
+    const rows = await database.db.execute(sql`select count(*)::int as n from waitlist`);
+    expect((rows as any).rows?.[0]?.n ?? (rows as any)[0]?.n).toBe(0);
+  });
+});

@@ -39,6 +39,7 @@ packages/agent/        The model, and the boundary around it.
 packages/planner/      Intent in, Plan out. Deterministic.
 apps/api/              Hono backend.
 apps/mobile/           Expo app.
+apps/web/              The website and waitlist. Static, no dependencies.
 ```
 
 `packages/shared` is load-bearing: the Intent, Plan and Policy schemas are the
@@ -59,6 +60,21 @@ npm run dev:mobile                          # Expo
 The API needs nothing else installed: without `DATABASE_URL` it runs embedded
 Postgres (PGlite) persisted to `.data/`, and without `ARC_TESTNET_RPC_URL` it
 uses Circle's public Arc endpoint.
+
+### The website
+
+`apps/web` is one static page served by a forty-line Node server, with no
+dependencies and no build step. Signups go to the API's public `POST /waitlist`
+and land in the `waitlist` table.
+
+```bash
+API_URL=http://localhost:8787 npm run dev --workspace @blocky/web   # http://localhost:3000
+```
+
+On Railway it is its own service: root directory `apps/web`, config file
+`/apps/web/railway.json`, and `API_URL` set to the API's public URL (it
+defaults to production). Watch paths keep the two services from redeploying
+for each other's changes.
 
 ### The app needs a development build, not Expo Go
 

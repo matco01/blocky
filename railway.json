@@ -1,7 +1,14 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "buildCommand": "npm ci"
+    "buildCommand": "npm ci",
+    "watchPatterns": [
+      "/apps/api/**",
+      "/packages/**",
+      "/package.json",
+      "/package-lock.json",
+      "/railway.json"
+    ]
   },
   "deploy": {
     "startCommand": "npm run start --workspace apps/api",

@@ -349,7 +349,20 @@ export const saveRules = pgTable(
   (table) => [index('save_rules_user_idx').on(table.userId)],
 );
 
+/**
+ * People who asked to hear when Blocky opens, from the website. Not users: no
+ * Privy id, no wallet — just an address to write to. Stored lowercased, so the
+ * same person signing up twice is one row.
+ */
+export const waitlist = pgTable('waitlist', {
+  email: text('email').primaryKey(),
+  /** Where they signed up from ("hero", "footer"), for nothing more than counting. */
+  source: text('source'),
+  createdAt: createdAt(),
+});
+
 export const schema = {
+  waitlist,
   saveRules,
   users,
   policies,
