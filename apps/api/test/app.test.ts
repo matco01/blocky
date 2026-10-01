@@ -915,3 +915,27 @@ describe('waitlist', () => {
     expect((rows as any).rows?.[0]?.n ?? (rows as any)[0]?.n).toBe(0);
   });
 });
+
+describe('waitlist abuse limits', () => {
+  beforeEach(async () => {
+    await database.db.execute(sql`TRUNCATE waitlist`);
+  });
+
+  it('turns away the thirty-first try from one address within the hour', async () => {
+    const shared = app();
+    const from = (email: string) =>
+      shared.request('/waitlist', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7' },
+        body: JSON.stringify({ email }),
+      });
+
+    for (let i = 0; i < 30; i += 1) expect((await from(`p${i}@example.com`)).status).toBe(200);
+    expect((await from('p30@example.com')).status).toBe(429);
+  });
+
+  it('refuses a body far bigger than any signup', async () => {
+    const { status } = await call('/waitlist', { method: 'POST', body: { email: 'a@example.com', source: 'x'.repeat(5000) } });
+    expect(status).toBe(413);
+  });
+});

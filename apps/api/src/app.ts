@@ -42,6 +42,7 @@ import {
   stockByAddress,
 } from '@blocky/wallet-core';
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { stream } from 'hono/streaming';
@@ -141,31 +142,51 @@ export function createApp(deps: AppDeps) {
 
   // Per address, in memory. One server, and a waitlist doesn't need more: this
   // only has to stop a script from filling the table, not a determined attacker.
-  const WAITLIST_LIMIT = 5;
+  // Railway overwrites x-forwarded-for with the real client address, so a
+  // client can't pick its own (checked against the live service). Generous on
+  // purpose: a household, an office or a mobile carrier puts many real people
+  // behind one address, and at 5 an hour a family signing up together was
+  // turned away.
+  const WAITLIST_LIMIT = 30;
   const WAITLIST_WINDOW_MS = 60 * 60 * 1000;
+  // And for everyone together: a botnet with many addresses still can't add
+  // more than this many rows an hour.
+  const WAITLIST_GLOBAL_LIMIT = 500;
   const waitlistHits = new Map<string, number[]>();
+  let waitlistGlobal: number[] = [];
 
-  app.post('/waitlist', async (c) => {
-    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-    const now = Date.now();
-    const recent = (waitlistHits.get(ip) ?? []).filter((at) => now - at < WAITLIST_WINDOW_MS);
-    if (recent.length >= WAITLIST_LIMIT) {
-      return c.json({ error: 'rate_limited', message: 'Too many tries. Give it a little while.' }, 429);
-    }
-    recent.push(now);
-    waitlistHits.set(ip, recent);
-    if (waitlistHits.size > 10_000) waitlistHits.clear();
+  app.post(
+    '/waitlist',
+    // A waitlist signup is a few dozen bytes; anything bigger is not one.
+    bodyLimit({ maxSize: 2 * 1024, onError: (c) => c.json({ error: 'too_large', message: 'That request is too large.' }, 413) }),
+    async (c) => {
+      const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+      const now = Date.now();
+      const fresh = (at: number) => now - at < WAITLIST_WINDOW_MS;
+      waitlistGlobal = waitlistGlobal.filter(fresh);
+      const recent = (waitlistHits.get(ip) ?? []).filter(fresh);
+      if (recent.length >= WAITLIST_LIMIT || waitlistGlobal.length >= WAITLIST_GLOBAL_LIMIT) {
+        return c.json({ error: 'rate_limited', message: 'Too many tries. Give it a little while.' }, 429);
+      }
+      recent.push(now);
+      waitlistHits.set(ip, recent);
+      waitlistGlobal.push(now);
+      // Forget addresses whose hour is up, so the map can't grow without bound.
+      if (waitlistHits.size > 5_000) {
+        for (const [key, hits] of waitlistHits) if (!hits.some(fresh)) waitlistHits.delete(key);
+      }
 
-    const parsed = WaitlistBodySchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      return c.json({ error: 'invalid_email', message: "That doesn't look like an email address." }, 400);
-    }
-    // Looks like success to the bot; stores nothing.
-    if (parsed.data.website) return c.json({ ok: true, position: null, alreadyJoined: false });
+      const parsed = WaitlistBodySchema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) {
+        return c.json({ error: 'invalid_email', message: "That doesn't look like an email address." }, 400);
+      }
+      // Looks like success to the bot; stores nothing.
+      if (parsed.data.website) return c.json({ ok: true, position: null, alreadyJoined: false });
 
-    const { position, alreadyJoined } = await store.joinWaitlist(parsed.data.email, parsed.data.source ?? null);
-    return c.json({ ok: true, position, alreadyJoined });
-  });
+      const { position, alreadyJoined } = await store.joinWaitlist(parsed.data.email, parsed.data.source ?? null);
+      return c.json({ ok: true, position, alreadyJoined });
+    },
+  );
 
   app.get('/v1/me', async (c) => {
     const user = c.get('user');
