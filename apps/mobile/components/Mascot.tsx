@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Image, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Image, View, type StyleProp, type ViewStyle } from 'react-native';
 
 export type MascotPose =
   | 'neutral'
@@ -40,6 +40,21 @@ type Frame = { pose: MascotPose } | { turn: 0 | 1 | 2; mirrored: boolean };
 const STEP_MS = 90;
 const HOLD_MS = 1800;
 const BLINK_MS = 260;
+/**
+ * Crossfades. The glance frames are drawn rounder than the standing pose, so a
+ * hard swap between the two reads as a snap; easing into and out of the turn
+ * hides it. Steps within the turn fade quicker. Blinks stay a hard cut — a
+ * blink that fades looks like a flicker.
+ */
+const TURN_IN_OUT_MS = 160;
+const TURN_STEP_MS = 70;
+
+/** Layers bottom to top: the pose, its blink, then the three turn frames. */
+const LAYER_COUNT = 5;
+function layerOf(frame: Frame): number {
+  if ('turn' in frame) return 2 + frame.turn;
+  return frame.pose === 'closedEyes' ? 1 : 0;
+}
 
 /**
  * The mascot, hand-drawn (assets/blocky*.png, background keyed out) and shown
@@ -86,7 +101,10 @@ export function Mascot({
         const [next, ...rest] = queue;
         if (!next) return then();
         setFrame(next);
-        later(STEP_MS, () => run(rest, then));
+        // Stepping off the standing pose crossfades for longer than a step:
+        // wait it out, or the next frame starts over a half-faded one.
+        const fromPose = queue === steps;
+        later(fromPose ? TURN_IN_OUT_MS : STEP_MS, () => run(rest, then));
       };
       run(steps, () => later(HOLD_MS, () => run(back, schedule)));
     };
@@ -111,6 +129,43 @@ export function Mascot({
     };
   }, [pose, animated]);
 
+  // One opacity per layer, and which layer is showing now.
+  const opacities = useRef(Array.from({ length: LAYER_COUNT }, (_, i) => new Animated.Value(i === 0 ? 1 : 0))).current;
+  const showing = useRef(0);
+  // The direction of the last glance, kept while it fades out: the frame
+  // state is already back on the pose by then, and the fading frame must not
+  // flip mid-fade.
+  const lastMirrored = useRef(false);
+  if ('turn' in frame) lastMirrored.current = frame.mirrored;
+  const mirrored = lastMirrored.current;
+
+  useEffect(() => {
+    const prev = showing.current;
+    const next = layerOf(frame);
+    if (next === prev) return;
+    showing.current = next;
+
+    if (prev <= 1 && next <= 1) {
+      // A blink: a hard cut.
+      opacities[prev]!.setValue(0);
+      opacities[next]!.setValue(1);
+      return;
+    }
+
+    const duration = prev <= 1 || next <= 1 ? TURN_IN_OUT_MS : TURN_STEP_MS;
+    if (next > prev) {
+      // The new frame is on top: fade it in over the old, then drop the old.
+      opacities[next]!.setValue(0);
+      Animated.timing(opacities[next]!, { toValue: 1, duration, useNativeDriver: true }).start(({ finished }) => {
+        if (finished && showing.current !== prev) opacities[prev]!.setValue(0);
+      });
+    } else {
+      // The new frame is underneath: show it, and fade the old one off it.
+      opacities[next]!.setValue(1);
+      Animated.timing(opacities[prev]!, { toValue: 0, duration, useNativeDriver: true }).start();
+    }
+  }, [frame, opacities]);
+
   const box = [{ width: size, height: size }, style];
   // An explicit size on every layer: Android's image view doesn't reliably size
   // an absolutely-positioned image from its insets alone.
@@ -124,34 +179,20 @@ export function Mascot({
     );
   }
 
-  const shown = (candidate: Frame) =>
-    'pose' in frame && 'pose' in candidate
-      ? frame.pose === candidate.pose
-      : 'turn' in frame && 'turn' in candidate && frame.turn === candidate.turn;
-  const mirrored = 'turn' in frame && frame.mirrored;
-
   return (
     <View style={box}>
-      {([pose, 'closedEyes'] as const).map((p) => (
-        <Image
-          key={p}
-          source={POSES[p]}
-          style={[layer, { opacity: shown({ pose: p }) ? 1 : 0 }]}
-          resizeMode="contain"
-        />
+      {([pose, 'closedEyes'] as const).map((p, i) => (
+        <Animated.Image key={p} source={POSES[p]} style={[layer, { opacity: opacities[i] }]} resizeMode="contain" />
       ))}
       {TURN.map((source, i) => (
-        <Image
+        <Animated.Image
           key={`turn${i}`}
           source={source}
-          style={[
-            layer,
-            { opacity: shown({ turn: i as 0 | 1 | 2, mirrored }) ? 1 : 0 },
-            mirrored ? { transform: [{ scaleX: -1 }] } : null,
-          ]}
+          style={[layer, { opacity: opacities[2 + i] }, mirrored ? { transform: [{ scaleX: -1 }] } : null]}
           resizeMode="contain"
         />
       ))}
     </View>
   );
 }
+

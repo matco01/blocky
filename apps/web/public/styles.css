@@ -166,6 +166,14 @@ section { padding: 96px 0; }
   font-weight: 800; font-size: 22px; letter-spacing: -0.02em; color: var(--brand); text-decoration: none;
 }
 .wordmark img { width: 36px; height: 36px; margin-top: -4px; }
+/* On the home page the big Blocky already says who we are, so the bar's
+   wordmark waits until he has scrolled away, then rises in. */
+.js .has-hero .nav .wordmark {
+  opacity: 0; transform: translateY(8px); pointer-events: none;
+  transition: opacity 260ms var(--ease), transform 260ms var(--ease);
+}
+.js .has-hero .nav.show-brand .wordmark { opacity: 1; transform: none; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .js .has-hero .nav .wordmark { transition: none; } }
 .wordmark.small { font-size: 18px; }
 .wordmark.small img { width: 26px; height: 26px; }
 .nav-links { display: flex; gap: 28px; margin-left: auto; }

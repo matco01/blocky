@@ -16,6 +16,16 @@
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
 
+  // The bar's wordmark appears once the hero's own wordmark is out of sight.
+  var heroStage = document.querySelector('.hero-stage');
+  if (heroStage && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (entries) {
+      nav.classList.toggle('show-brand', !entries[0].isIntersecting);
+    }, { rootMargin: '-' + nav.offsetHeight + 'px 0px 0px 0px' }).observe(heroStage);
+  } else {
+    nav.classList.add('show-brand');
+  }
+
   var year = document.querySelector('[data-year]');
   if (year) year.textContent = String(new Date().getFullYear());
 
@@ -32,11 +42,50 @@
     var base = root.dataset.poseBase || 'neutral';
     var timer = null;
 
+    var current = root.querySelector('.pose.is-on');
+    var order = Array.prototype.slice.call(root.querySelectorAll('[data-pose]'));
+
+    function setOn(img, on, mirrored) {
+      img.classList.toggle('is-on', on);
+      if (on) img.classList.toggle('is-mirrored', !!mirrored);
+    }
+
+    // The glance frames are drawn rounder than the standing pose, so a hard
+    // swap between them reads as a snap: anything into or out of a turn frame
+    // crossfades. Blinks and the intro's poses stay hard cuts.
     function show(name, mirrored) {
+      var next = poses[name];
+      if (!next) return;
+      var prev = current;
+      current = next;
+      if (prev === next) return setOn(next, true, mirrored);
+
+      var turn = function (img) { return img && /^turn/.test(img.dataset.pose); };
+      var fade = !reduced && prev && (turn(prev) || turn(next)) ? (turn(prev) && turn(next) ? 70 : 160) : 0;
+
       Object.keys(poses).forEach(function (key) {
-        poses[key].classList.toggle('is-on', key === name);
-        poses[key].classList.toggle('is-mirrored', key === name && !!mirrored);
+        var img = poses[key];
+        if (img !== prev && img !== next) { img.style.transition = 'none'; setOn(img, false); }
       });
+      if (!fade || !prev) {
+        prev && (prev.style.transition = 'none', setOn(prev, false));
+        next.style.transition = 'none';
+        return setOn(next, true, mirrored);
+      }
+      if (order.indexOf(next) > order.indexOf(prev)) {
+        // On top: fade the new frame in over the old, then drop the old.
+        next.style.transition = 'opacity ' + fade + 'ms linear';
+        setOn(next, true, mirrored);
+        window.setTimeout(function () {
+          if (current !== prev) { prev.style.transition = 'none'; setOn(prev, false); }
+        }, fade);
+      } else {
+        // Underneath: show the new frame, and fade the old one off it.
+        next.style.transition = 'none';
+        setOn(next, true, mirrored);
+        prev.style.transition = 'opacity ' + fade + 'ms linear';
+        prev.classList.remove('is-on');
+      }
     }
 
     function later(ms, fn) { timer = window.setTimeout(fn, ms); }
@@ -45,14 +94,15 @@
       if (!frames.length) return then();
       var frame = frames[0];
       show(frame[0], frame[1]);
-      later(90, function () { run(frames.slice(1), then); });
+      // A frame that crossfaded in (frame[2]) holds until its fade is done.
+      later(frame[2] || 90, function () { run(frames.slice(1), then); });
     }
 
     function schedule() {
       later(2400 + Math.random() * 2600, function () {
         if (base === 'neutral' && poses.turn1 && Math.random() < 0.3) {
           var m = Math.random() < 0.5;
-          run([['turn1', m], ['turn2', m], ['turn3', m]], function () {
+          run([['turn1', m, 160], ['turn2', m], ['turn3', m]], function () {
             later(1800, function () { run([['turn2', m], ['turn1', m], [base]], schedule); });
           });
         } else {
