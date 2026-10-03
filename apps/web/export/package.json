@@ -1,0 +1,18 @@
+{
+  "name": "blocky-export-page",
+  "private": true,
+  "type": "module",
+  "description": "Source for blocky.page/export. Built into ../public/export and committed; the site itself has no build step.",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@privy-io/react-auth": "3.47.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "vite": "^6.4.3"
+  }
+}

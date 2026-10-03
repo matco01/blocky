@@ -1,0 +1,20 @@
+Copyright (c) 2026 Oliver Matula. All rights reserved.
+
+This repository is made public so that its source code can be read and
+evaluated, including by grant and hackathon reviewers. No licence is granted.
+
+You may view the source code. You may not copy, modify, distribute,
+sublicense, or use it, in whole or in part, in any other software or service,
+without prior written permission from the copyright holder.
+
+Third-party components included in this repository remain under their own
+licences — for example, the Figtree font in apps/web/public/fonts is licensed
+under the SIL Open Font License 1.1 (see OFL.txt there), and dependencies are
+covered by the licences in their own packages.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR ITS USE.
+
+Contact: blockywallet@gmail.com

@@ -294,9 +294,9 @@ describe('destination sanity', () => {
 
 describe('what Blocky can see and do in the app', () => {
   it('knows the user\'s own name and address', async () => {
-    await store.setUsername(USER, 'olimufa');
+    await store.setUsername(USER, 'samlee');
 
-    expect(await tools().getProfile()).toMatchObject({ username: 'olimufa', walletAddress: ACCOUNT });
+    expect(await tools().getProfile()).toMatchObject({ username: 'samlee', walletAddress: ACCOUNT });
   });
 
   it('reads the notification inbox', async () => {

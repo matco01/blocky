@@ -117,7 +117,7 @@ export default function WelcomeScreen() {
   );
 }
 
-/** A starting point from their email: "Oli.Mufa+x@gmail.com" → "olimufa". */
+/** A starting point from their email: "Sam.Lee+x@gmail.com" → "samlee". */
 function suggest(email: string): string {
   const local = email.split('@')[0] ?? '';
   const cleaned = local.split('+')[0]!.toLowerCase().replace(/[^a-z0-9_]/g, '');

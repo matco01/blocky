@@ -531,3 +531,29 @@ details p { padding: 0 24px 22px; color: var(--text-2); }
 .legal strong { color: var(--text); font-weight: 700; }
 .legal a { color: var(--accent); text-underline-offset: 3px; }
 .legal .legal-fine { margin-top: 24px; font-size: 14px; color: var(--text-3); }
+
+/* --- /export: the private key page, opened from inside the app ------------- */
+
+.export { max-width: 520px; padding-top: 40px; padding-bottom: 56px; display: flex; flex-direction: column; gap: 18px; }
+.export-head { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.export-head img { width: 72px; height: 72px; margin-bottom: 6px; }
+.export-head .eyebrow { margin-bottom: 8px; }
+.export h1 { font-size: 30px; font-weight: 800; }
+.export-warning, .export-ok {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 16px 18px; border-radius: var(--r-xl);
+  border: var(--stroke) solid; font-size: 15.5px;
+}
+.export-warning { background: #3B2220; border-color: #6B3A33; }
+.export-warning strong { color: var(--danger); font-size: 16.5px; }
+.export-warning span, .export-ok span { color: var(--text-2); }
+.export-ok { background: var(--accent-tint); border-color: var(--accent); }
+.export-ok strong { color: var(--accent); font-size: 16.5px; }
+.export-steps { margin: 0; padding-left: 22px; color: var(--text-2); display: flex; flex-direction: column; gap: 8px; }
+.export-steps b { color: var(--text); }
+.export-steps li::marker { color: var(--accent); font-weight: 700; }
+.export-cta { width: 100%; margin-top: 4px; }
+.export-link { align-self: center; background: none; border: 0; color: var(--text-2); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 8px; }
+.export-muted { color: var(--text-3); text-align: center; font-size: 15px; }
+.export-muted code { color: var(--text-2); font-size: 14px; }
+.export-error { color: var(--danger); font-size: 14.5px; text-align: center; }

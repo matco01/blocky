@@ -38,7 +38,8 @@ export async function confirmWithBiometrics(reason: string): Promise<Approval> {
     case 'not_available':
       return {
         ok: false,
-        message: 'Set up a screen lock (PIN or fingerprint) on this phone to approve sends.',
+        message:
+          'Set up a screen lock (a PIN, pattern or fingerprint) on this phone first. Blocky uses it to make sure it’s really you before money moves or your key is shown.',
       };
 
     case 'lockout':

@@ -17,6 +17,8 @@ export const config = {
   privyAppId: required('EXPO_PUBLIC_PRIVY_APP_ID', process.env.EXPO_PUBLIC_PRIVY_APP_ID),
   privyClientId: process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID || undefined,
   apiUrl: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8787',
+  /** The website. Key export runs on its /export page, not inside the app. */
+  websiteUrl: (process.env.EXPO_PUBLIC_WEBSITE_URL || 'https://blocky.page').replace(/\/+$/, ''),
   /** Null means passkeys are not configured, and only email login is offered. */
   passkeyRelyingParty: process.env.EXPO_PUBLIC_PASSKEY_RP || null,
 } as const;

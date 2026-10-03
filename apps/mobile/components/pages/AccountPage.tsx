@@ -4,10 +4,13 @@ import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../lib/api';
+import { confirmWithBiometrics } from '../../lib/biometrics';
+import { config } from '../../lib/config';
 import { useWallet } from '../../lib/wallet';
 import { useTheme } from '../../theme';
 import { BlockyCard } from '../BlockyCard';
@@ -54,11 +57,33 @@ export function AccountPage({ page, onPageChange }: PageProps) {
     setTimeout(() => setCopied(false), 1600);
   }
 
-  function explainExport() {
-    Alert.alert(
-      'Export private key',
-      "This will let you move your wallet to another app, like MetaMask. For your safety it runs in a secure page from our wallet provider rather than inside the app, and that page isn't set up yet.",
-    );
+  /**
+   * Export runs on the website, in a browser tab: Privy's mobile SDK doesn't
+   * export keys, by design, because only a browser can keep the key inside
+   * Privy's own isolated frame where neither the app, the site nor our server
+   * can read it. A tab rather than a WebView, because Google won't sign anyone
+   * in inside a WebView and the app can't reach into a tab.
+   *
+   * The phone's lock comes first — the same check that guards a send — and the
+   * page asks the user to sign in again on top of that.
+   */
+  async function exportKey() {
+    if (!address) return;
+    const approval = await confirmWithBiometrics('Confirm it’s you to export your private key');
+    if (!approval.ok) {
+      if (approval.message) Alert.alert('Export private key', approval.message);
+      return;
+    }
+    // In the fragment, which browsers never send to a server.
+    const fragment = new URLSearchParams({
+      from: 'app',
+      address,
+      ...(email && 'address' in email ? { email: email.address } : {}),
+    }).toString();
+    const result = await WebBrowser.openAuthSessionAsync(`${config.websiteUrl}/export/#${fragment}`, 'blocky://');
+    if (result.type === 'success' && result.url.includes('export=done')) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    }
   }
 
   function confirmSignOut() {
@@ -139,7 +164,7 @@ export function AccountPage({ page, onPageChange }: PageProps) {
 
       {/* --- Security ------------------------------------------------------- */}
       <Section title="Security">
-        <Row icon="key-outline" label="Export private key" value="Coming soon" chevron onPress={explainExport} last />
+        <Row icon="key-outline" label="Export private key" value="Move your wallet to another app" chevron onPress={() => void exportKey()} last />
       </Section>
 
       {/* --- Sign out ------------------------------------------------------- */}
