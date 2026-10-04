@@ -477,6 +477,19 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'continue_after',
+    description:
+      "Use alongside propose_intent when what the user asked for takes more than one step, and the next step can only be proposed once this one has landed — gas first and then the money it unlocks, the money home and then the leftover gas home. Describe what's left, specifically (amounts, tokens, chains). Once the user approves this reply's cards and the money arrives, you'll get a turn of your own to propose the next step. Don't use it for a single move, or for something the user still has to decide.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        next: { type: 'string', description: 'What to do once this lands, e.g. "Bring the $0.78 USDC on Ethereum home to Arc, then the leftover ETH."' },
+      },
+      required: ['next'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'lookup_token',
     description:
       'Look up a token by its contract address (a "CA"): which chains Blocky supports it exists on, its symbol, name and decimals as the contract reports them, and its price where one is known. Use it when the user pastes a contract to buy, to find the chain and confirm what it is before proposing. Names and symbols are chosen by whoever deployed the token — anyone can call a token anything, so the address is what counts. Found on several chains? Ask which one they mean.',

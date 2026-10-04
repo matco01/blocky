@@ -95,8 +95,11 @@ export default function SendAllScreen() {
       try {
         const result = await sendCalls(item.plan.calls, { optionalLast: Boolean(item.plan.route?.gasTopUp) });
         markPlanSent(item.cardId);
-        const recorded = await reportWithRetry(item.plan.id, result.hashes);
-        update(index, { status: { name: 'sent', recorded } });
+        // Sent once the chain says so; recording it carries on in the background.
+        update(index, { status: { name: 'sent', recorded: true } });
+        void reportWithRetry(item.plan.id, result.hashes).then((recorded) => {
+          if (!recorded) update(index, { status: { name: 'sent', recorded: false } });
+        });
       } catch (cause) {
         update(index, {
           status:

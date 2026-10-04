@@ -99,6 +99,11 @@ export interface AgentTools {
   forgetMemory(id: string): Promise<unknown>;
   /** Asks the app to switch theme; the server only records it for the response. */
   setAppearance(mode: 'light' | 'dark'): Promise<unknown>;
+  /**
+   * The rest of a multi-step job, to pick up once this reply's cards land. The
+   * server only records it for the response; the app hands it back as a turn.
+   */
+  continueAfter(next: string): Promise<unknown>;
   setAutoSave(rule: {
     pot: string;
     kind: string;
@@ -549,6 +554,8 @@ async function callTool(name: string, input: unknown, tools: AgentTools): Promis
       return tools.listAutoSaves();
     case 'delete_auto_save':
       return tools.deleteAutoSave(stringArg(input, 'id'));
+    case 'continue_after':
+      return tools.continueAfter(stringArg(input, 'next').slice(0, 400));
     case 'set_appearance': {
       const mode = stringArg(input, 'mode');
       if (mode !== 'light' && mode !== 'dark') throw new Error('mode must be "light" or "dark".');

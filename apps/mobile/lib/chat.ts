@@ -28,6 +28,10 @@ export type ChatMessage =
       capabilities: Capability[] | null;
       /** Written by the app itself (see `sayLocally`), not by the agent. */
       local?: boolean;
+      /** What Blocky said comes next once these cards land (see `continue_after`). */
+      followUp?: string | null;
+      /** Whether that next step has been handed back to Blocky — at most once. */
+      continued?: boolean;
     }
   | {
       id: string;
@@ -54,7 +58,9 @@ export function useChat({ onAppearance }: { onAppearance?: (mode: 'light' | 'dar
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const saved = loadChat();
     restoreSentPlans(saved?.sentPlanIds ?? []);
-    return saved?.messages ?? [];
+    // A next step left over from an earlier session is stale: never resume it
+    // on open, when the money and the moment have both moved on.
+    return (saved?.messages ?? []).map((m) => (m.role === 'assistant' && m.followUp ? { ...m, continued: true } : m));
   });
   const sentVersion = useSentVersion();
 
@@ -174,6 +180,40 @@ export function useChat({ onAppearance }: { onAppearance?: (mode: 'light' | 'dar
     clearChat();
   }, []);
 
+  /*
+   * Multi-step jobs. When every card of a reply that planned a next step has
+   * been approved and sent, wait for the money to arrive — the route's own
+   * estimate, plus a margin — then hand the turn back to Blocky, so "gas first,
+   * then bring it home" doesn't need the user to ask twice.
+   */
+  useEffect(() => {
+    const target = [...messages].reverse().find((m): m is AssistantMessage => m.role === 'assistant' && !m.local && m.plans.length > 0);
+    if (!target?.followUp || target.continued) return;
+    if (!target.plans.every(({ plan }) => wasPlanSent(plan.id))) return;
+
+    setMessages((current) => current.map((m) => (m.id === target.id ? { ...m, continued: true } : m)));
+    const eta = Math.max(0, ...target.plans.map(({ plan }) => plan.route?.etaSeconds ?? 0));
+    const generation = generationRef.current;
+    const followUp = target.followUp;
+    const landed = target.plans.map(({ plan }) => plan.summary).join('; ');
+
+    const go = () => {
+      if (generationRef.current !== generation) return;
+      // Never on top of a reply in flight: try again shortly.
+      if (busyRef.current) return void setTimeout(go, 2000);
+      const note =
+        `[Not from the user: the cards from your last reply were approved, sent and should have landed by now (${landed}). ` +
+        `Next, as you planned: ${followUp} Check the balances, then propose it.]`;
+      void ask(note, toHistory(messagesRef.current));
+    };
+    // Not cleared on re-render: marking the message continued re-runs this
+    // effect, and must not cancel the step it just scheduled. A reset is
+    // caught by the generation check instead.
+    setTimeout(go, (eta + 6) * 1000);
+    // Re-checked whenever a card is sent or a message arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, sentVersion]);
+
   return { messages, busy, activity, send, retry, showCapabilities, reset, sayLocally };
 }
 
@@ -181,7 +221,7 @@ type AssistantMessage = Extract<ChatMessage, { role: 'assistant' }>;
 
 function assistantMessage(
   text: string,
-  extra: Partial<Pick<AssistantMessage, 'plans' | 'note' | 'capabilities' | 'local'>> = {},
+  extra: Partial<Pick<AssistantMessage, 'plans' | 'note' | 'capabilities' | 'local' | 'followUp'>> = {},
 ): AssistantMessage {
   return { id: id(), role: 'assistant', text, plans: [], note: null, capabilities: null, ...extra };
 }
@@ -200,6 +240,7 @@ function fromResponse(response: AgentResponse): ChatMessage {
 
   return response.kind === 'plan'
     ? assistantMessage(response.reply, {
+        followUp: response.followUp,
         plans: response.plans.length
           ? response.plans
           : response.plan && response.decision

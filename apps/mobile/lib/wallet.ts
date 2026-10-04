@@ -12,6 +12,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  fallback,
   http,
   numberToHex,
   type Chain,
@@ -36,17 +37,6 @@ import { homeChain, homeChainName, signingChain } from './chain';
  * as one all-or-nothing Multicall3From batch; everywhere else, and for any
  * call carrying value, each call is its own transaction. See `groupCalls`.
  */
-
-const publicClients = new Map<number, PublicClient>();
-
-function publicClientFor(chain: Chain): PublicClient {
-  let client = publicClients.get(chain.id);
-  if (!client) {
-    client = createPublicClient({ chain, transport: http() }) as PublicClient;
-    publicClients.set(chain.id, client);
-  }
-  return client;
-}
 
 export type SendStage = 'preparing' | 'submitting' | 'confirming';
 
@@ -188,7 +178,12 @@ async function sendOne(
    */
   let receipt: Awaited<ReturnType<PublicClient['waitForTransactionReceipt']>>;
   try {
-    receipt = await publicClientFor(chain).waitForTransactionReceipt({ hash, timeout: 90_000 });
+    // Watched through the wallet's own connection first — the one that just
+    // sent it, and so already sees it — falling back to the public endpoint.
+    // A public endpoint alone was slow and rate-limited enough on Ethereum to
+    // leave people on "Confirming…" long after the money had moved.
+    const watcher = createPublicClient({ chain, transport: fallback([custom(provider), http()]), pollingInterval: 2_000 });
+    receipt = await watcher.waitForTransactionReceipt({ hash, timeout: 120_000 });
   } catch {
     throw new SubmittedButUnconfirmedError(hash);
   }

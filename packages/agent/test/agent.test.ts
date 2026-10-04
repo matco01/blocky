@@ -77,6 +77,7 @@ const tools: AgentTools = {
   moveToPot: async (pot, amountUsd) => ({ pot, amountUsd }),
   setUsername: async (username) => ({ username }),
   setAppearance: async (mode) => ({ appearance: mode }),
+  continueAfter: async (next) => ({ noted: next }),
   setAutoSave: async (rule) => ({ rule }),
   listAutoSaves: async () => ({ rules: [] }),
   deleteAutoSave: async (id) => ({ deleted: id === 'abc' }),
@@ -249,6 +250,24 @@ describe('proposing an intent', () => {
 
     expect(turn.kind).toBe('intent');
     expect(setBudget).toHaveBeenCalledWith('total', '100');
+  });
+
+  it('records the next step of a multi-step job alongside the proposal', async () => {
+    const continueAfter = vi.fn(tools.continueAfter);
+    const { client } = fakeClient([
+      {
+        content: [
+          text('First a little ETH on Ethereum, then your USDC comes home.'),
+          toolUse(PROPOSE_INTENT, { intent: VALID_TRANSFER }, 'a'),
+          toolUse('continue_after', { next: 'Bring the USDC on Ethereum home to Arc.' }, 'b'),
+        ],
+      },
+    ]);
+
+    const turn = await runAgentTurn('get my USDC on Ethereum home', { client, tools: { ...tools, continueAfter } });
+
+    expect(turn.kind).toBe('intent');
+    expect(continueAfter).toHaveBeenCalledWith('Bring the USDC on Ethereum home to Arc.');
   });
 
   it('hands validation errors back rather than repairing them', async () => {

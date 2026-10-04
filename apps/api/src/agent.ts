@@ -478,6 +478,10 @@ export function agentToolsFor(
       return { error: 'Appearance can only be changed from the app.' };
     },
 
+    async continueAfter() {
+      return { error: 'Only a chat reply can plan a next step.' };
+    },
+
     /** By the short id the agent sees — the first characters of the stored one. */
     async forgetMemory(id) {
       const wanted = id.trim().toLowerCase();
@@ -549,6 +553,12 @@ export interface AgentResponse {
   usage: AgentTurn['usage'];
   /** A theme the agent asked the app to switch to this turn. */
   appearance: 'light' | 'dark' | null;
+  /**
+   * What's left of a multi-step job, once this reply's cards land. The app
+   * hands it back as a turn of its own after they do — gas first, then the
+   * money it unlocks — so the user doesn't have to ask for each step.
+   */
+  followUp: string | null;
 }
 
 export function createAgentHandler(
@@ -583,6 +593,8 @@ export function createAgentHandler(
 
     // Set by `set_appearance`; the app switches theme when the reply arrives.
     let appearance: 'light' | 'dark' | null = null;
+    // Set by `continue_after`; only meaningful when this reply proposes something.
+    let followUp: string | null = null;
 
     const turn = await runAgentTurn<Plan>(message, {
       memories,
@@ -592,6 +604,10 @@ export function createAgentHandler(
         async setAppearance(mode) {
           appearance = mode;
           return { switched: true, appearance: mode };
+        },
+        async continueAfter(next) {
+          followUp = next.trim() || null;
+          return { noted: true, note: 'You will get a turn to propose this once the cards in this reply have landed.' };
         },
       },
       // News and "why did it move" need the web; a turn that searches can't propose.
@@ -611,7 +627,7 @@ export function createAgentHandler(
 
     logUsage(turn);
 
-    const empty = { plan: null, decision: null, plans: [], usage: turn.usage, appearance };
+    const empty = { plan: null, decision: null, plans: [], usage: turn.usage, appearance, followUp: null };
 
     switch (turn.kind) {
       case 'reply':
@@ -668,6 +684,7 @@ export function createAgentHandler(
     return {
       kind: 'plan',
       appearance,
+      followUp,
       reply: turn.text,
       plan: first.plan,
       decision: first.decision,

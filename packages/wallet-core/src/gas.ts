@@ -1,4 +1,4 @@
-import { formatUsd, parseUsd, type ChainId } from '@blocky/shared';
+import { displayUsd, formatUsd, parseUsd, type ChainId } from '@blocky/shared';
 import { getChain } from './chains';
 
 /**
@@ -87,10 +87,13 @@ export function selectGasStrategy(ctx: GasContext): GasResult {
   }
 
   const token = chain.nativeCurrency.symbol;
+  const needed = displayUsd(network) === '$0.00' ? 'under $0.01' : `about ${displayUsd(network)}`;
   return {
     ok: false,
     code: 'no_gas_route',
-    message: `Fees on ${chain.name} are paid in ${token}, and there isn't enough ${token} in your wallet there. Get a little ${token} on ${chain.name} first.`,
+    // The size of the fee, so the shortfall can be fixed rather than reported:
+    // Blocky can buy that much of the gas token from the user's Arc balance.
+    message: `Fees on ${chain.name} are paid in ${token}, and there isn't enough ${token} in your wallet there. This needs ${needed} of ${token} on ${chain.name} for the fee — a little ${token} has to get there first, and it can be bought from Arc.`,
   };
 }
 

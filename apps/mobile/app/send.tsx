@@ -173,8 +173,13 @@ export default function SendScreen() {
      * to our server hiccups, the transfer still happened on-chain, and telling
      * the user otherwise invites them to send it again.
      */
-    const recorded = await reportWithRetry(plan.id, result.hashes);
-    setStep({ name: 'done', plan, recorded, extrasFailed: result.extrasFailed });
+    // Done the moment the chain says so. Recording it on our server can take a
+    // while on a slow chain, and the user mustn't wait on our bookkeeping — it
+    // carries on in the background, and the note only shows if it fails.
+    setStep({ name: 'done', plan, recorded: true, extrasFailed: result.extrasFailed });
+    void reportWithRetry(plan.id, result.hashes).then((recorded) => {
+      if (!recorded) setStep((current) => (current.name === 'done' && current.plan.id === plan.id ? { ...current, recorded: false } : current));
+    });
   }
 
   /* Straight to the fingerprint for a plan the user's limits already cleared. */
@@ -243,6 +248,11 @@ export default function SendScreen() {
             <Text variant="body" tone="secondary">
               {planAmountLabel(step.plan)} {planDestinationLabel(step.plan)}
             </Text>
+            {step.stage === 'confirming' && step.plan.calls[0] && step.plan.calls[0].chainId !== DEFAULT_CHAIN ? (
+              <Text variant="caption" tone="tertiary" style={styles.center}>
+                {getChain(step.plan.calls[0].chainId as ChainId).name} takes longer than Arc to confirm — usually under a minute.
+              </Text>
+            ) : null}
           </View>
         ) : null}
 

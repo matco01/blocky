@@ -37,6 +37,7 @@ const LABELS: Record<string, string> = {
   get_market_overview: 'Checking the markets',
   get_recent_activity: 'Looking at your activity',
   set_appearance: 'Switching the theme',
+  continue_after: 'Planning the next step',
   set_auto_save: 'Setting up auto-save',
   list_auto_saves: 'Checking your auto-saves',
   delete_auto_save: 'Stopping that auto-save',

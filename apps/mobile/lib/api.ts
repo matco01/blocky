@@ -102,6 +102,8 @@ const AgentResponseSchema = z.object({
   status: z.string(),
   /** A theme the agent asked the app to switch to. Older servers don't send it. */
   appearance: z.enum(['light', 'dark']).nullable().default(null),
+  /** What's left of a multi-step job, handed back to the agent once this reply's cards land. */
+  followUp: z.string().nullable().default(null),
 });
 
 export type AgentResponse = z.infer<typeof AgentResponseSchema>;
