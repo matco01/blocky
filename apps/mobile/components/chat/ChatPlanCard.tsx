@@ -53,7 +53,10 @@ export function ChatPlanCard({
 
   // `new_recipient` only restates the "Needs approval" status above. The full
   // review screen shows every warning; this card is the glance.
-  const compactWarnings = plan.warnings.filter((warning) => warning.code !== 'new_recipient');
+  // Danger first, so a lookalike address is never the one cut off.
+  const compactWarnings = plan.warnings
+    .filter((warning) => warning.code !== 'new_recipient')
+    .sort((a, b) => Number(b.severity === 'danger') - Number(a.severity === 'danger'));
 
   const status = denied
     ? { label: 'Blocked', tone: 'warning' as const }

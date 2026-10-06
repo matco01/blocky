@@ -62,6 +62,12 @@ export const WarningCodeSchema = z.enum([
   'unsellable',
   /** The send would spend money the user set aside in a savings pot. */
   'dips_into_pot',
+  /**
+   * The recipient looks like an address the user knows — same opening and
+   * closing characters — but isn't it. Address poisoning: a scammer sends dust
+   * from a lookalike so it sits in the history, waiting to be copied.
+   */
+  'address_lookalike',
 ]);
 
 export type WarningCode = z.infer<typeof WarningCodeSchema>;
@@ -71,6 +77,8 @@ export const WarningSchema = z.object({
   severity: z.enum(['info', 'warn', 'danger']),
   /** Plain language, written for someone who does not know what a nonce is. */
   message: z.string().min(1).max(280),
+  /** For `address_lookalike`: the known address it imitates, so the card can show where they differ. */
+  lookalikeOf: AddressSchema.optional(),
 });
 
 export type Warning = z.infer<typeof WarningSchema>;

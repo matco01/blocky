@@ -32,7 +32,7 @@ import {
   IS_TESTNET,
 } from '@blocky/wallet-core';
 import { mergeActivity, type ExplorerTransfer } from './activity';
-import { createRequest, insightsFor, linkMatchingRequest, potWarning, who } from './money';
+import { createRequest, insightsFor, linkMatchingRequest, moneyWarnings, who } from './money';
 import { BUDGET_CATEGORIES, monthOf } from './insights';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
 import type { SaveRule, Store } from './store';
@@ -85,7 +85,12 @@ export function agentToolsFor(
   reader: ChainReader,
   account: Address,
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>,
+  /** What the user typed this conversation; contacts may only hold addresses from it. */
+  userText: string,
 ): AgentTools {
+  // Addresses from ENS names the user typed, resolved this turn: theirs too.
+  const resolvedFromUser = new Set<string>();
+
   return {
     /**
      * Read from the same chain the planner reads.
@@ -195,6 +200,7 @@ export function agentToolsFor(
 
       const address = await reader.resolveEns(trimmed.toLowerCase());
       if (!address) return { error: `Could not resolve ${trimmed}.` };
+      if (userText.toLowerCase().includes(trimmed.toLowerCase())) resolvedFromUser.add(address.toLowerCase());
 
       return { address, ensName: trimmed.toLowerCase() };
     },
@@ -203,6 +209,13 @@ export function agentToolsFor(
       const parsed = AddressSchema.safeParse(address.trim());
       if (!parsed.success) {
         return { error: 'That is not a valid 0x address. Resolve it with resolve_address first.' };
+      }
+
+      // A contact is trusted as a send destination from then on, so it follows
+      // the same rule as a send: the address came from the user.
+      const fromUser = userText.toLowerCase().includes(parsed.data.toLowerCase()) || resolvedFromUser.has(parsed.data.toLowerCase());
+      if (!fromUser) {
+        return { error: "That address didn't come from the user. Only save one they typed or pasted, or one resolved from an ENS name they gave." };
       }
 
       await store.saveContact(userId, label, parsed.data);
@@ -595,12 +608,14 @@ export function createAgentHandler(
     let appearance: 'light' | 'dark' | null = null;
     // Set by `continue_after`; only meaningful when this reply proposes something.
     let followUp: string | null = null;
+    // Only what the user typed themselves: never a tool result, a web page or a memory.
+    const userText = [message, ...history.filter((entry) => entry.role === 'user').map((entry) => entry.content)].join('\n');
 
     const turn = await runAgentTurn<Plan>(message, {
       memories,
       client,
       tools: {
-        ...agentToolsFor(store, userId, reader, account, explorerTransfers),
+        ...agentToolsFor(store, userId, reader, account, explorerTransfers, userText),
         async setAppearance(mode) {
           appearance = mode;
           return { switched: true, appearance: mode };
@@ -616,9 +631,11 @@ export function createAgentHandler(
       plan: async (intent) => {
         const mismatch = destinationMismatch(intent);
         if (mismatch) return { ok: false, message: mismatch };
+        const unsourced = unsourcedRecipient(intent, userText, await store.listContacts(userId).catch(() => []));
+        if (unsourced) return { ok: false, message: unsourced };
         const outcome = await buildPlan(intent, context);
         return outcome.ok
-          ? { ok: true, plan: await potWarning(store, reader, userId, account, outcome.plan) }
+          ? { ok: true, plan: await moneyWarnings(store, reader, userId, account, outcome.plan) }
           : { ok: false, message: outcome.failure.message };
       },
       history: history.map((entry) => ({ role: entry.role, content: entry.content })),
@@ -761,4 +778,19 @@ export function destinationMismatch(intent: Intent): string | null {
   if (named.length === 0 || !destination || named.includes(destination)) return null;
 
   return `Your rationale names ${named.join(' and ')}, but the destination you set is ${destination}. One of them is wrong — fix it before proposing again.`;
+}
+
+/**
+ * A raw address is only ever one the user gave: typed or pasted, word for word,
+ * into their own messages — or saved as a contact. Not from a web page, a
+ * token's history, an incoming transfer or the model's memory of one: those are
+ * how a poisoned or misremembered address reaches a card that looks right.
+ */
+export function unsourcedRecipient(intent: Intent, userText: string, contacts: ReadonlyArray<{ address: Address }>): string | null {
+  if (intent.type !== 'transfer' || intent.recipient.kind !== 'address') return null;
+  const address = intent.recipient.address.toLowerCase();
+  if (userText.toLowerCase().includes(address)) return null;
+  if (contacts.some((contact) => contact.address.toLowerCase() === address)) return null;
+
+  return 'That address didn’t come from the user. Only send to an address they typed or pasted themselves, a saved contact, or an @username — ask them to paste the address if they mean a new one.';
 }

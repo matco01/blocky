@@ -60,6 +60,63 @@ export async function potWarning(store: Store, reader: ChainReader, userId: stri
   };
 }
 
+/**
+ * Two different addresses a person would mistake for each other: the same
+ * opening and closing characters — what wallets show, and what people check.
+ * Poisoners grind addresses to match six to ten of them; two random addresses
+ * share six about once in sixteen million.
+ */
+export function looksAlike(a: Address, b: Address): boolean {
+  const x = a.slice(2).toLowerCase();
+  const y = b.slice(2).toLowerCase();
+  if (x === y) return false;
+  let prefix = 0;
+  while (prefix < x.length && x[prefix] === y[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < x.length && x[x.length - 1 - suffix] === y[y.length - 1 - suffix]) suffix++;
+  return prefix >= 2 && suffix >= 2 && prefix + suffix >= 6;
+}
+
+/**
+ * A recipient that imitates someone the user knows — a contact, anyone they've
+ * paid, or their own wallet — gets a red warning naming who it imitates. The
+ * card then shows both addresses in full with the differences marked.
+ */
+export async function lookalikeWarning(store: Store, userId: string, wallet: Address, plan: Plan): Promise<Plan> {
+  const recipient = plan.recipient?.address;
+  if (!recipient) return plan;
+
+  const [contacts, policy] = await Promise.all([store.listContacts(userId).catch(() => []), store.getPolicy(userId).catch(() => null)]);
+  const known: Array<{ address: Address; name: string }> = [
+    { address: wallet, name: 'your own wallet' },
+    ...contacts.map((contact) => ({ address: contact.address, name: contact.label })),
+    ...(policy?.recipientAllowlist ?? []).map((address) => ({ address, name: 'someone you’ve paid before' })),
+  ];
+
+  // An exact match is the real thing, whatever else it resembles.
+  if (known.some((entry) => entry.address.toLowerCase() === recipient.toLowerCase())) return plan;
+  const imitated = known.find((entry) => looksAlike(recipient, entry.address));
+  if (!imitated) return plan;
+
+  return {
+    ...plan,
+    warnings: [
+      ...plan.warnings,
+      {
+        code: 'address_lookalike',
+        severity: 'danger',
+        message: `This address looks like ${imitated.name}, but it isn’t. Scammers copy the start and end of addresses you know. Check every character before you send.`,
+        lookalikeOf: imitated.address,
+      },
+    ],
+  };
+}
+
+/** Every check a send gets on top of the planner's: pots, then lookalikes. */
+export async function moneyWarnings(store: Store, reader: ChainReader, userId: string, wallet: Address, plan: Plan): Promise<Plan> {
+  return lookalikeWarning(store, userId, wallet, await potWarning(store, reader, userId, wallet, plan));
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Requests                                                                   */
 /* -------------------------------------------------------------------------- */

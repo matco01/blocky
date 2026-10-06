@@ -1,7 +1,8 @@
 /*
- * The website's behaviour: Blocky's poses, the chat demo, and the waitlist.
- * Plain DOM, no dependencies. Everything degrades: without this file the page
- * still reads top to bottom, and the forms just don't submit.
+ * The website's behaviour: the chat demo, Blocky's blinks, sections easing in
+ * as they scroll into view, and the waitlist. Plain DOM, no dependencies.
+ * Everything degrades: without this file the page still reads top to bottom,
+ * and the forms just don't submit.
  */
 (function () {
   'use strict';
@@ -16,98 +17,69 @@
   window.addEventListener('scroll', onScroll, { passive: true });
   onScroll();
 
-  // The bar's wordmark appears once the hero's own wordmark is out of sight.
-  var heroStage = document.querySelector('.hero-stage');
-  if (heroStage && 'IntersectionObserver' in window) {
-    new IntersectionObserver(function (entries) {
-      nav.classList.toggle('show-brand', !entries[0].isIntersecting);
-    }, { rootMargin: '-' + nav.offsetHeight + 'px 0px 0px 0px' }).observe(heroStage);
-  } else {
-    nav.classList.add('show-brand');
-  }
-
   var year = document.querySelector('[data-year]');
   if (year) year.textContent = String(new Date().getFullYear());
 
+  /* --- Reveal on scroll ---------------------------------------------------- */
+
+  // Big numbers in the feature cards count up from zero as they arrive.
+  function countUp(root) {
+    root.querySelectorAll('[data-count]').forEach(function (node) {
+      var to = Number(node.dataset.count);
+      var start = null;
+      var ms = 1100;
+      node.textContent = '0';
+      function step(now) {
+        if (start === null) start = now;
+        var t = Math.min(1, (now - start) / ms);
+        node.textContent = String(Math.round(to * (1 - Math.pow(1 - t, 3))));
+        if (t < 1) window.requestAnimationFrame(step);
+      }
+      window.setTimeout(function () { window.requestAnimationFrame(step); }, 250);
+    });
+  }
+
+  var reveals = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window && !reduced) {
+    var revealer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-in');
+          countUp(entry.target);
+          revealer.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.12 });
+    reveals.forEach(function (node) { revealer.observe(node); });
+  } else {
+    reveals.forEach(function (node) { node.classList.add('is-in'); });
+  }
+
   /* --- Mascot -------------------------------------------------------------- */
 
-  /*
-   * The same idea as the app's <Mascot>: every pose is on the page up front
-   * and only its opacity changes, so a blink never waits on an image decode.
-   * A glance steps through the three turn frames (mirrored for the other way).
-   */
+  // Every pose is on the page up front and only its opacity changes, so a
+  // blink never waits on an image decode.
   function Mascot(root) {
     var poses = {};
     root.querySelectorAll('[data-pose]').forEach(function (img) { poses[img.dataset.pose] = img; });
     var base = root.dataset.poseBase || 'neutral';
     var timer = null;
 
-    var current = root.querySelector('.pose.is-on');
-    var order = Array.prototype.slice.call(root.querySelectorAll('[data-pose]'));
-
-    function setOn(img, on, mirrored) {
-      img.classList.toggle('is-on', on);
-      if (on) img.classList.toggle('is-mirrored', !!mirrored);
+    function show(name) {
+      if (!poses[name]) return;
+      Object.keys(poses).forEach(function (key) { poses[key].classList.toggle('is-on', key === name); });
     }
-
-    // The glance frames are drawn rounder than the standing pose, so a hard
-    // swap between them reads as a snap: anything into or out of a turn frame
-    // crossfades. Blinks and the intro's poses stay hard cuts.
-    function show(name, mirrored) {
-      var next = poses[name];
-      if (!next) return;
-      var prev = current;
-      current = next;
-      if (prev === next) return setOn(next, true, mirrored);
-
-      var turn = function (img) { return img && /^turn/.test(img.dataset.pose); };
-      var fade = !reduced && prev && (turn(prev) || turn(next)) ? (turn(prev) && turn(next) ? 70 : 160) : 0;
-
-      Object.keys(poses).forEach(function (key) {
-        var img = poses[key];
-        if (img !== prev && img !== next) { img.style.transition = 'none'; setOn(img, false); }
-      });
-      if (!fade || !prev) {
-        prev && (prev.style.transition = 'none', setOn(prev, false));
-        next.style.transition = 'none';
-        return setOn(next, true, mirrored);
-      }
-      if (order.indexOf(next) > order.indexOf(prev)) {
-        // On top: fade the new frame in over the old, then drop the old.
-        next.style.transition = 'opacity ' + fade + 'ms linear';
-        setOn(next, true, mirrored);
-        window.setTimeout(function () {
-          if (current !== prev) { prev.style.transition = 'none'; setOn(prev, false); }
-        }, fade);
-      } else {
-        // Underneath: show the new frame, and fade the old one off it.
-        next.style.transition = 'none';
-        setOn(next, true, mirrored);
-        prev.style.transition = 'opacity ' + fade + 'ms linear';
-        prev.classList.remove('is-on');
-      }
-    }
-
     function later(ms, fn) { timer = window.setTimeout(fn, ms); }
 
-    function run(frames, then) {
-      if (!frames.length) return then();
-      var frame = frames[0];
-      show(frame[0], frame[1]);
-      // A frame that crossfaded in (frame[2]) holds until its fade is done.
-      later(frame[2] || 90, function () { run(frames.slice(1), then); });
-    }
-
     function schedule() {
-      later(2400 + Math.random() * 2600, function () {
-        if (base === 'neutral' && poses.turn1 && Math.random() < 0.3) {
-          var m = Math.random() < 0.5;
-          run([['turn1', m, 160], ['turn2', m], ['turn3', m]], function () {
-            later(1800, function () { run([['turn2', m], ['turn1', m], [base]], schedule); });
-          });
+      later(2200 + Math.random() * 2800, function () {
+        // Now and then a glance at the chat, otherwise a blink.
+        if (poses.left && Math.random() < 0.35) {
+          show(Math.random() < 0.5 ? 'left' : 'right');
+          later(1400, function () { show(base); schedule(); });
         } else {
           show('closed');
-          later(260, function () { show(base); schedule(); });
+          later(240, function () { show(base); schedule(); });
         }
       });
     }
@@ -118,48 +90,46 @@
         window.clearTimeout(timer);
         show(base);
         root.classList.add('is-idle');
-        schedule();
+        if (!reduced) schedule();
       },
       cheer: function () {
         window.clearTimeout(timer);
-        if (poses.happy) show('happy');
-        root.classList.remove('is-idle');
+        if (poses.happy) { base = 'happy'; show('happy'); }
         root.classList.remove('is-cheering');
         void root.offsetWidth;
         root.classList.add('is-cheering');
-        window.setTimeout(function () {
-          root.classList.remove('is-cheering');
-          base = poses.happy ? 'happy' : base;
-          root.classList.add('is-idle');
-          schedule();
-        }, 1100);
+        window.setTimeout(function () { root.classList.remove('is-cheering'); if (!reduced) schedule(); }, 1100);
+      },
+      // A beat of delight, then back to normal: a card landing in the demo.
+      flash: function (name, ms) {
+        window.clearTimeout(timer);
+        show(name);
+        later(ms, function () { show(base); if (!reduced) schedule(); });
       },
     };
   }
 
-  var hero = document.querySelector('.mascot-hero');
-  var heroMascot = hero ? Mascot(hero) : null;
-  var finalEl = document.querySelector('.mascot-final');
-  var finalMascot = finalEl ? Mascot(finalEl) : null;
+  var mascots = Array.prototype.map.call(document.querySelectorAll('[data-mascot]'), function (node) {
+    var m = Mascot(node);
+    if (node.hasAttribute('data-intro') && !reduced) intro(node, m);
+    else m.idle();
+    return m;
+  });
 
-  // The intro's poses, on the CSS timeline: asleep while he falls, awake once
+  // The hero's intro, on the CSS timeline: asleep while he falls, awake once
   // he lands, a look around, a happy hop, then ordinary idle blinking.
-  if (heroMascot) {
-    if (reduced) {
-      heroMascot.idle();
-    } else {
-      var beats = [
-        [1100, function () { heroMascot.show('neutral'); }],
-        [1300, function () { heroMascot.show('left'); }],
-        [1550, function () { heroMascot.show('right'); }],
-        [1800, function () { heroMascot.show('happy'); }],
-        [2650, function () { heroMascot.idle(); }],
-      ];
-      beats.forEach(function (beat) { window.setTimeout(beat[1], beat[0]); });
-    }
+  function intro(node, m) {
+    var beats = [
+      [1150, function () { m.show('neutral'); }],
+      [1400, function () { m.show('left'); }],
+      [1650, function () { m.show('right'); }],
+      [1900, function () { m.show('happy'); node.classList.add('is-landed', 'is-hopping'); }],
+      [2400, function () { node.classList.remove('is-hopping'); }],
+      [2900, function () { m.idle(); }],
+    ];
+    beats.forEach(function (beat) { window.setTimeout(beat[1], beat[0]); });
   }
-  if (finalMascot) finalMascot.idle();
-
+  
   /* --- Chat demo ----------------------------------------------------------- */
 
   var FINGERPRINT =
@@ -167,7 +137,7 @@
   var CHECK =
     '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-  // Each scenario is what the app really does today, said the way Blocky says it.
+  // Each scenario is something the app really does today, said the way Blocky says it.
   var SCENARIOS = [
     {
       user: 'Send Sam $20',
@@ -179,16 +149,25 @@
       },
     },
     {
-      user: 'How much did I spend this month?',
-      bot: '<strong>$412.80</strong> so far — $64 less than last month. Most of it went to Sam: $120.',
+      user: 'What did I spend this month?',
+      bot: '<strong>$412.80</strong> so far, $64 less than last month. Most of it went on food: $168.',
     },
     {
-      user: 'Save $50 a month for a trip',
-      bot: 'Your <strong>Trip</strong> pot is ready. $50 goes in on the 1st of every month. Rooting for you.',
+      user: 'Save $200 for a trip',
+      bot: 'Done. Your <strong>Trip</strong> pot has $200 set aside. Want me to add 10% of everything you get paid?',
     },
     {
       user: 'Split $90 dinner with Maya and Leo',
-      bot: 'Asked <strong>@maya</strong> and <strong>@leo</strong> for $30 each. You’ll get a ping when they pay.',
+      bot: 'Asked <strong>@maya</strong> and <strong>@leo</strong> for $30 each. I’ll tell you when they pay.',
+    },
+    {
+      user: 'Buy $50 of Apple',
+      bot: 'Here’s your Apple buy. The price is checked again right before it goes through.',
+      card: {
+        title: 'Buy $50.00 of Apple',
+        rows: [['You get', '≈ 0.218 AAPL'], ['Fee', '$0.31'], ['Arrives', 'In about a minute']],
+        done: 'Apple added to your portfolio',
+      },
     },
   ];
 
@@ -260,7 +239,7 @@
       });
     }
 
-    if (autoplay && !reduced) at(s.card ? 6200 : 4800, function () { play((current + 1) % SCENARIOS.length); });
+    if (autoplay && !reduced) at(s.card ? 6400 : 5000, function () { play((current + 1) % SCENARIOS.length); });
   }
 
   chips.forEach(function (chip, i) {
@@ -321,22 +300,15 @@
     text.appendChild(span);
     box.appendChild(text);
 
-    form.classList.add('is-done');
-    var note = form.querySelector('.form-note');
-    note.textContent = '';
-    form.insertBefore(box, note);
-
     // Every form on the page agrees: you're in.
     document.querySelectorAll('[data-waitlist]').forEach(function (other) {
-      if (other !== form && !other.classList.contains('is-done')) {
-        other.classList.add('is-done');
-        other.insertBefore(box.cloneNode(true), other.querySelector('.form-note'));
-        other.querySelector('.form-note').textContent = '';
-      }
+      if (other.classList.contains('is-done')) return;
+      other.classList.add('is-done');
+      other.insertBefore(other === form ? box : box.cloneNode(true), other.querySelector('.form-note'));
+      other.querySelector('.form-note').textContent = '';
     });
 
-    if (heroMascot) heroMascot.cheer();
-    if (finalMascot) finalMascot.cheer();
+    mascots.forEach(function (m) { m.cheer(); });
   }
 
   document.querySelectorAll('[data-waitlist]').forEach(function (form) {

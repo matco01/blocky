@@ -12,7 +12,8 @@
 <p align="center">
   <a href="https://blocky.page">Website</a> ·
   <a href="VISION.md">Vision</a> ·
-  <a href="docs/ENGINEERING.md">Engineering notes</a>
+  <a href="docs/ENGINEERING.md">Engineering notes</a> ·
+  <a href="PRIVACY.md">Privacy &amp; safety</a>
 </p>
 
 ---

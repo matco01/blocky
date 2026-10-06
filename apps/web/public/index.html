@@ -3,233 +3,328 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Blocky — your money, moved by your words</title>
-  <meta name="description" content="Blocky is an AI-powered money app. Tell Blocky what you want to do with your money, and it handles the rest. Join the waitlist.">
-  <meta name="theme-color" content="#1F2824">
-  <meta name="color-scheme" content="dark">
+  <title>Blocky — money, in plain words</title>
+  <meta name="description" content="Blocky is a money app you talk to. Pay friends, save, invest and track your spending by just saying what you want. Nothing moves until you approve it.">
+  <meta name="theme-color" content="#7DBE5A">
+  <meta name="color-scheme" content="light">
 
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Blocky — your money, moved by your words">
-  <meta property="og:description" content="Tell Blocky what you want to do with your money, and it handles the rest.">
+  <meta property="og:title" content="Blocky — money, in plain words">
+  <meta property="og:description" content="A money app you talk to. Nothing moves until you approve it.">
   <meta property="og:image" content="/img/icon.png">
   <meta name="twitter:card" content="summary">
 
   <link rel="icon" type="image/png" href="/img/favicon.png">
   <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
-
   <link rel="preload" href="/fonts/figtree-latin.woff2" as="font" type="font/woff2" crossorigin>
-
-  <link rel="preload" as="image" href="/img/neutral.webp" type="image/webp">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/home.css">
   <script>document.documentElement.classList.add('js');</script>
   <script src="/config.js"></script>
   <script src="/app.js" defer></script>
 </head>
-<body class="has-hero">
+<body>
   <a class="skip" href="#main">Skip to content</a>
 
   <header class="nav" id="nav">
     <div class="wrap nav-inner">
       <a href="#" class="wordmark" aria-label="Blocky, home">
-        <img src="/img/neutral.webp" alt="" width="36" height="36">
         <span>Blocky</span>
       </a>
       <nav class="nav-links" aria-label="Sections">
-        <a href="#how">How it works</a>
-        <a href="#mission">Mission</a>
+        <a href="#features">Features</a>
+        <a href="#safety">Safety</a>
+        <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
       </nav>
-      <a href="#join" class="block block-sm" data-scroll-to-form>Join the waitlist</a>
+      <a href="#join" class="block block-sm block-ink nav-cta" data-scroll-to-form>Get early access</a>
     </div>
   </header>
 
   <main id="main">
 
-    <!-- Hero: Blocky lands on his own name, like the app's opening. -->
+    <!-- Hero: one colour, big words, the product. -->
     <section class="hero">
-      <div class="wrap hero-inner">
-        <div class="hero-stage" aria-hidden="true">
-          <div class="mascot mascot-hero" data-mascot data-idle>
-            <span class="drop-shadow"></span>
-            <div class="mascot-body">
-              <img class="pose" data-pose="neutral" src="/img/neutral.webp" alt="" width="480" height="480">
-              <img class="pose is-on" data-pose="closed" src="/img/closed.webp?v=2" alt="" width="480" height="480">
-              <img class="pose" data-pose="happy" src="/img/happy.webp" alt="" width="480" height="480">
-              <img class="pose" data-pose="left" src="/img/left.webp" alt="" width="480" height="480">
-              <img class="pose" data-pose="right" src="/img/right.webp" alt="" width="480" height="480">
-              <img class="pose" data-pose="turn1" src="/img/turn1.webp?v=2" alt="" width="480" height="480">
-              <img class="pose" data-pose="turn2" src="/img/turn2.webp?v=2" alt="" width="480" height="480">
-              <img class="pose" data-pose="turn3" src="/img/turn3.webp?v=2" alt="" width="480" height="480">
-            </div>
+      <div class="wrap hero-copy">
+        <div class="mascot mascot-hero" data-mascot data-intro aria-hidden="true">
+          <div class="mascot-body">
+            <img class="pose" data-pose="neutral" src="/img/neutral.webp" alt="" width="480" height="480">
+            <img class="pose is-on" data-pose="closed" src="/img/closed.webp?v=2" alt="" width="480" height="480">
+            <img class="pose" data-pose="happy" src="/img/happy.webp" alt="" width="480" height="480">
+            <img class="pose" data-pose="left" src="/img/left.webp" alt="" width="480" height="480">
+            <img class="pose" data-pose="right" src="/img/right.webp" alt="" width="480" height="480">
           </div>
-          <div class="platform"><span>B</span><span>l</span><span>o</span><span>c</span><span>k</span><span>y</span></div>
         </div>
+        <h1 class="display"><span class="land">Your money.</span><br>In plain words.</h1>
 
-        <h1 class="hero-title">Tell Blocky what you want to do with your money. <em>It handles the rest.</em></h1>
-
-        <form class="waitlist" id="join" data-waitlist data-source="hero" novalidate>
+        <form class="waitlist reveal" data-delay="2" id="join" data-waitlist data-source="hero" novalidate>
           <label class="sr-only" for="email-hero">Email address</label>
           <div class="field">
-            <input id="email-hero" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required>
+            <input id="email-hero" name="email" type="email" inputmode="email" autocomplete="email" placeholder="Your email" required>
             <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
-            <button class="block" type="submit"><span>Get early access</span></button>
+            <button class="block block-ink" type="submit"><span>Get early access</span></button>
           </div>
-          <p class="form-legal">We’ll only email you about Blocky’s launch — nothing else. <a href="/privacy">Privacy policy</a></p>
+          <p class="form-legal">Private beta on Android. We’ll only email you about Blocky’s launch. <a href="/privacy">Privacy</a></p>
           <p class="form-note" role="status" aria-live="polite"></p>
         </form>
+
+        <div class="hero-phone reveal" aria-hidden="true">
+          <div class="phone">
+            <div class="phone-screen">
+              <span class="island"></span>
+              <div class="phone-top">
+                <span class="phone-brand">Blocky</span>
+                <span class="phone-dots"><i class="on"></i><i></i></span>
+              </div>
+              <div class="phone-balance">
+                <span class="caption">Balance</span>
+                <span class="amount">$1,240<span class="cents">.50</span></span>
+              </div>
+              <div class="chat" data-chat></div>
+              <div class="composer">
+                <span>Ask Blocky</span>
+                <span class="send-btn"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 11.5 21 3l-8.5 18-2-7.5L3 11.5Z" fill="currentColor"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- Demo: the conversation is the product. -->
-    <section class="demo" aria-labelledby="demo-title">
-      <div class="wrap demo-inner">
-        <div class="demo-copy">
-          <p class="eyebrow">The magic</p>
-          <h2 id="demo-title">It moves money with your words.</h2>
-          <p class="lede">No menus to dig through, no forms, no jargon. Say it the way you'd say it to a friend who happens to be very good with money.</p>
-          <div class="prompts" role="tablist" aria-label="Try an example">
-            <button class="chip is-active" role="tab" aria-selected="true" data-demo="0">Send Sam $20</button>
-            <button class="chip" role="tab" aria-selected="false" data-demo="1">How much did I spend this month?</button>
-            <button class="chip" role="tab" aria-selected="false" data-demo="2">Save $50 a month for a trip</button>
-            <button class="chip" role="tab" aria-selected="false" data-demo="3">Split dinner with Maya and Leo</button>
-          </div>
+    <!-- The examples, and three plain promises. -->
+    <section class="after-hero" aria-label="Try it">
+      <div class="wrap">
+        <p class="prompts-label">Try one</p>
+        <div class="prompts" role="tablist" aria-label="Try an example">
+          <button class="chip is-active" role="tab" aria-selected="true" data-demo="0">Send Sam $20</button>
+          <button class="chip" role="tab" aria-selected="false" data-demo="1">What did I spend this month?</button>
+          <button class="chip" role="tab" aria-selected="false" data-demo="2">Save $200 for a trip</button>
+          <button class="chip" role="tab" aria-selected="false" data-demo="3">Split dinner</button>
+          <button class="chip" role="tab" aria-selected="false" data-demo="4">Buy $50 of Apple</button>
         </div>
 
-        <div class="phone" aria-hidden="true">
-          <div class="phone-screen">
-            <div class="phone-top">
-              <span class="phone-brand">Blocky</span>
-              <span class="phone-dots"><i class="on"></i><i></i></span>
-            </div>
-            <div class="phone-balance">
-              <span class="caption">Balance</span>
-              <span class="amount">$1,240<span class="cents">.50</span></span>
-            </div>
-            <div class="chat" data-chat></div>
-            <div class="composer">
-              <span>Ask Blocky</span>
-              <span class="send-btn"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 11.5 21 3l-8.5 18-2-7.5L3 11.5Z" fill="currentColor"/></svg></span>
-            </div>
-          </div>
+        <div class="trust">
+          <span><svg viewBox="0 0 24 24"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="4.5" y="10" width="15" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>Your keys, never ours</span>
+          <span><svg viewBox="0 0 24 24"><path d="M12 3c-4 0-7 3-7 7v2M19 12v-2a7 7 0 0 0-3-5.7M9 21c-.6-1.8-1-3.8-1-6v-3a4 4 0 0 1 8 0v1M12 12v3c0 2.4.5 4.6 1.4 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Fingerprint on every payment</span>
+          <span><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M14.8 9.2c-.5-.9-1.6-1.4-2.8-1.4-1.6 0-2.8.8-2.8 2.1 0 3 5.8 1.5 5.8 4.3 0 1.3-1.3 2.1-3 2.1-1.3 0-2.5-.6-3-1.5M12 6v1.8M12 16.3V18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Free to send to people</span>
+          <span><svg viewBox="0 0 24 24"><path d="m8 7-5 5 5 5M16 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Open source</span>
         </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" aria-labelledby="features-title" style="padding-top:112px">
+      <div class="wrap">
+        <div class="features-head reveal">
+          <h2 id="features-title" class="h2">Everything you do with money.<br>One conversation.</h2>
+        </div>
+
+        <div class="fgrid">
+          <article class="fcard wide tint-leaf reveal">
+            <div class="fcard-text">
+              <h3 class="h3">Pay anyone by name.</h3>
+              <p>Send to @sam, split dinner three ways, or ask for what you’re owed. Free, in seconds.</p>
+            </div>
+            <div class="fcard-art" aria-hidden="true">
+              <div class="ui">
+                <p class="ui-label">Dinner at Lucia’s</p>
+                <p class="ui-big">$<span data-count="90">90</span><small>.00</small></p>
+                <div style="margin-top:16px">
+                  <div class="ui-row slide" style="--i:0"><span class="avatar a1">M</span><span><b>@maya</b><span class="sub">$30.00</span></span><span class="right"><span class="tag">Paid</span></span></div>
+                  <div class="ui-row slide" style="--i:1"><span class="avatar a2">L</span><span><b>@leo</b><span class="sub">$30.00</span></span><span class="right"><span class="tag wait">Waiting</span></span></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="fcard tint-maroon reveal">
+            <div class="fcard-text">
+              <h3 class="h3">Savings that fill themselves.</h3>
+              <p>Put a share of every payment aside, automatically.</p>
+            </div>
+            <div class="fcard-art" aria-hidden="true">
+              <div class="ui">
+                <p class="ui-label">Trip to Lisbon</p>
+                <p class="ui-big">$<span data-count="340">340</span><small> of $800</small></p>
+                <div class="progress"><i class="fill" style="--w:42%"></i></div>
+                <div class="ui-row" style="margin-top:18px"><span><b>Auto-save</b><span class="sub">10% of money you get</span></span><span class="right pos">On</span></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="fcard tint-amber reveal" data-delay="1">
+            <div class="fcard-text">
+              <h3 class="h3">Own a slice of Apple.</h3>
+              <p>US stocks from any amount, with the fee shown first.</p>
+            </div>
+            <div class="fcard-art" aria-hidden="true">
+              <div class="ui">
+                <p class="ui-label">Investments</p>
+                <p class="ui-big">$<span data-count="412">412</span><small>.36</small></p>
+                <div style="margin-top:14px">
+                  <div class="ui-row slide" style="--i:0"><span class="avatar a4">A</span><span><b>Apple</b><span class="sub">AAPL</span></span><span class="right pos">+1.24%</span></div>
+                  <div class="ui-row slide" style="--i:1"><span class="avatar a1">T</span><span><b>Tesla</b><span class="sub">TSLA</span></span><span class="right pos">+0.87%</span></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="fcard wide tint-sand reveal">
+            <div class="fcard-text">
+              <h3 class="h3">Know where every dollar went.</h3>
+              <p>Ask what you spent on food, set a budget, and get a heads-up before you go over.</p>
+            </div>
+            <div class="fcard-art" aria-hidden="true">
+              <div class="ui">
+                <p class="ui-label">Spent in October</p>
+                <p class="ui-big">$<span data-count="412">412</span><small>.80</small></p>
+                <div class="bars">
+                  <div><i style="--h:62%"></i>Aug</div>
+                  <div><i style="--h:88%"></i>Sep</div>
+                  <div class="on"><i style="--h:74%"></i>Oct</div>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+        <p class="fine center" style="margin-top:20px">Tokenized stocks track the share price but aren’t legal ownership of the share.</p>
       </div>
     </section>
 
     <!-- How it works -->
     <section class="how" id="how" aria-labelledby="how-title">
       <div class="wrap">
-        <p class="eyebrow center">How it works</p>
-        <h2 id="how-title" class="center">You say what. Blocky works out how.</h2>
+        <div class="center reveal">
+          <h2 id="how-title" class="h2">You say what. Blocky works out how.</h2>
+        </div>
         <ol class="steps">
-          <li class="tile">
-            <span class="step-num">1</span>
-            <h3>Say what you want</h3>
-            <p>"Pay Sam back for lunch." "Put $100 aside." "How's the market today?" Plain words, any way you'd say them.</p>
-          </li>
-          <li class="tile">
-            <span class="step-num">2</span>
-            <h3>Blocky does the legwork</h3>
-            <p>It checks what you have, thinks a step ahead and finds the cheapest way to do it. Then it shows you exactly what will happen, fee included, in dollars.</p>
-          </li>
-          <li class="tile">
-            <span class="step-num">3</span>
-            <h3>You approve</h3>
-            <p>One tap and your fingerprint, face or PIN. Nothing moves without it — Blocky proposes, you decide.</p>
-          </li>
+          <li class="reveal"><span class="step-num">1</span><h3>Say it.</h3><p>Type what you want, the way you’d tell a friend. “Pay Sam back for lunch.”</p></li>
+          <li class="reveal" data-delay="1"><span class="step-num">2</span><h3>Check it.</h3><p>Blocky finds the cheapest way and shows a card: who gets what, the fee in dollars, and when it arrives.</p></li>
+          <li class="reveal" data-delay="2"><span class="step-num">3</span><h3>Approve it.</h3><p>Your fingerprint or face confirms it. Without that, nothing moves.</p></li>
         </ol>
       </div>
     </section>
 
-    <!-- Mission -->
-    <section class="mission" id="mission" aria-labelledby="mission-title">
+    <!-- Safety -->
+    <section class="safety" id="safety" aria-labelledby="safety-title">
       <div class="wrap">
-        <div class="mission-card">
-          <div class="mission-text">
-            <p class="eyebrow on-brand">Our mission</p>
-            <h2 id="mission-title">All your money.<br>One conversation.</h2>
-            <p>Money apps keep getting more complicated: more tabs, more products, more fine print. Crypto apps are worse — chains, bridges, gas, seed phrases. Most people just want to pay a friend, save a little, and know where their money went.</p>
-            <p>Blocky is a money app, not a crypto app. Underneath, it runs on stablecoins and open networks, which is what makes sending instant, global and cheap — and what lets your money truly be yours. But you never have to think about any of that. You think about money. Blocky handles the machinery.</p>
-            <p class="mission-sign">Like asking a friend who happens to be very good with money.</p>
+        <div class="safety-top">
+          <div class="reveal">
+            <h2 id="safety-title" class="h2">The AI can suggest. Only you can approve.</h2>
+            <p class="lede" style="margin-top:24px">We built Blocky assuming AI makes mistakes and scammers will try their luck. So the AI never touches your money, and every payment passes checks it can’t override.</p>
           </div>
-          <div class="mission-art" aria-hidden="true">
-            <div class="art-tile"><img src="/img/happy.webp" alt="" width="480" height="480" loading="lazy"></div>
+
+          <div class="warn-card reveal" data-delay="1" aria-label="Example: Blocky catching a lookalike address">
+            <div class="warn-head"><b>Send $500.00</b><span>Review</span></div>
+            <div class="warn-box">
+              <p><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v6m0 3.5v.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>This address looks like Sam’s, but it isn’t. Scammers copy the start and end of addresses you know.</p>
+              <div class="addr"><span>You’re sending to</span><code>0x71C9<mark>2d0a4be1</mark>8f7<mark>c3e9</mark>01b5<mark>a7d6</mark>e4f2<mark>9c</mark>3a8B2fE</code></div>
+              <div class="addr"><span>Sam’s address</span><code>0x71C9<mark>8e3f1a07</mark>8f7<mark>b5d2</mark>01b5<mark>c0e4</mark>e4f2<mark>61</mark>3a8B2fE</code></div>
+            </div>
+            <div class="warn-actions"><span class="block block-ink">Don’t send</span><span class="block block-ghost">Send anyway</span></div>
           </div>
+        </div>
+
+        <div class="safety-grid">
+          <article class="safe reveal">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="4.5" y="10" width="15" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <h3>Your keys, not ours</h3>
+            <p>Your wallet belongs to you alone. Blocky can’t move, freeze or lose your money, and you can export your key and leave any time.</p>
+          </article>
+          <article class="safe reveal" data-delay="1">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-4 0-7 3-7 7v2M19 12v-2a7 7 0 0 0-3-5.7M9 21c-.6-1.8-1-3.8-1-6v-3a4 4 0 0 1 8 0v1M12 12v3c0 2.4.5 4.6 1.4 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <h3>Your fingerprint, every time</h3>
+            <p>Every payment is a card you read first and confirm with your fingerprint or face. The AI can’t approve anything.</p>
+          </article>
+          <article class="safe reveal" data-delay="2">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <h3>The AI never builds the payment</h3>
+            <p>The AI only says what you want. Fixed, open-source code builds the payment, and our server checks it before your phone will sign.</p>
+          </article>
+          <article class="safe reveal">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m15 17 2 2 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <h3>Addresses only from you</h3>
+            <p>Blocky only sends to an address you typed or pasted yourself, a saved contact or an @username. Never to one it found or remembered.</p>
+          </article>
+          <article class="safe reveal" data-delay="1">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <h3>Lookalikes, caught</h3>
+            <p>An address that imitates one you know gets a red warning, with every character that differs marked.</p>
+          </article>
+          <article class="safe reveal" data-delay="2">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.4 7.5 9.5 4.4-1.1 7.5-4.9 7.5-9.5V6L12 3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            <h3>Limits you set</h3>
+            <p>Cap what can be sent per payment and per day. The AI can lower your limits when you ask, but never raise them.</p>
+          </article>
+        </div>
+
+        <div class="safety-links reveal">
+          <a class="link-arrow" href="/safety">Who sees what, and what the AI can’t do</a>
+          <a class="link-arrow" href="https://github.com/matco01/blocky">Read the code</a>
         </div>
       </div>
     </section>
 
-    <!-- Promises -->
-    <section class="promises" aria-labelledby="promises-title">
+    <!-- Pricing -->
+    <section id="pricing" aria-labelledby="pricing-title">
       <div class="wrap">
-        <p class="eyebrow center">Our promises</p>
-        <h2 id="promises-title" class="center">Built so you stay in control.</h2>
-        <div class="promise-grid">
-          <article class="tile promise">
-            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="4.5" y="10" width="15" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="15.5" r="1.6" fill="currentColor"/></svg></span>
-            <h3>Your money stays yours</h3>
-            <p>Blocky never holds your money or your keys. Your wallet lives on your phone, and only you can move what's in it.</p>
-          </article>
-          <article class="tile promise">
-            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3c-4 0-7 3-7 7v2M19 12v-2a7 7 0 0 0-3-5.7M9 21c-.6-1.8-1-3.8-1-6v-3a4 4 0 0 1 8 0v1M12 12v3c0 2.4.5 4.6 1.4 6.5M16 16.5c0 1.3.2 2.6.5 3.8M5 15.5c0 1.2.2 2.4.6 3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
-            <h3>Nothing moves without you</h3>
-            <p>Every send is a card you read and approve with your fingerprint, face or PIN. The AI suggests; it never decides.</p>
-          </article>
-          <article class="tile promise">
-            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 10h8M8 13h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
-            <h3>Plain words, always</h3>
-            <p>Dollars, people and outcomes. No gas, no bridges, no "sign this transaction." If something needs explaining, it's one sentence.</p>
-          </article>
-          <article class="tile promise">
-            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14.8 9.2c-.5-.9-1.6-1.4-2.8-1.4-1.6 0-2.8.8-2.8 2.1 0 3 5.8 1.5 5.8 4.3 0 1.3-1.3 2.1-3 2.1-1.3 0-2.5-.6-3-1.5M12 6v1.8M12 16.3V18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
-            <h3>Fees up front</h3>
-            <p>Sending money to someone is free — you only pay the small network fee. Anything else shows its cost in dollars before you approve.</p>
-          </article>
+        <div class="center reveal">
+          <h2 id="pricing-title" class="h2">Fees you can actually read.</h2>
+          <p class="lede" style="margin-top:20px">No subscription. Every card shows its fee in dollars before you approve.</p>
         </div>
-      </div>
-    </section>
-
-    <!-- What you can do -->
-    <section class="can" aria-labelledby="can-title">
-      <div class="wrap can-inner">
-        <div>
-          <p class="eyebrow">What you can do</p>
-          <h2 id="can-title">One app for the money stuff.</h2>
-          <p class="lede">Everything goes through the same conversation, and Blocky remembers how you like things done.</p>
+        <div class="price-grid">
+          <div class="price featured reveal">
+            <span class="cost">Free</span>
+            <h3>Sending money to people</h3>
+            <p>Pay friends, split bills, pay requests. You only pay the network fee, usually about a cent.</p>
+          </div>
+          <div class="price reveal" data-delay="1">
+            <span class="cost">Free</span>
+            <h3>Pots, budgets and insights</h3>
+            <p>Everything that helps you keep track of your money, including price alerts.</p>
+          </div>
+          <div class="price reveal" data-delay="2">
+            <span class="cost">0.5%</span>
+            <h3>Buying, selling and moving out</h3>
+            <p>Stocks, tokens and transfers to other networks. The network fee is shown separately.</p>
+          </div>
         </div>
-        <ul class="can-list">
-          <li class="chip static">Pay friends by name</li>
-          <li class="chip static">Request money &amp; split bills</li>
-          <li class="chip static">Savings pots that fill themselves</li>
-          <li class="chip static">Monthly budgets</li>
-          <li class="chip static">See where your money went</li>
-          <li class="chip static">Invest in tokenized US stocks</li>
-          <li class="chip static">Price alerts</li>
-          <li class="chip static">Send anywhere in the world</li>
-          <li class="chip static">Market news, explained</li>
-        </ul>
       </div>
     </section>
 
     <!-- FAQ -->
     <section class="faq" id="faq" aria-labelledby="faq-title">
       <div class="wrap faq-inner">
-        <h2 id="faq-title">Questions</h2>
-        <div class="faq-list">
-          <details class="tile">
+        <div class="reveal">
+          <h2 id="faq-title" class="h2">Questions, answered.</h2>
+        </div>
+        <div class="faq-list reveal" data-delay="1">
+          <details>
             <summary>Is Blocky a bank?</summary>
-            <p>No. Blocky is a non-custodial money app: your money sits in a wallet that only you control, not in an account we hold. That's also why nothing can move without your approval.</p>
+            <p>No. Blocky is software that helps you manage a wallet only you control. We never hold your money, so there’s nothing for us to freeze, lend out or lose.</p>
           </details>
-          <details class="tile">
+          <details>
             <summary>Do I need to know anything about crypto?</summary>
-            <p>No. Your balance is in dollars, and you talk to Blocky about money, not technology. The crypto part is plumbing — it's why sends are instant and global — and you never have to touch it.</p>
+            <p>No. Your balance is in dollars, and you talk to Blocky about money, not technology. Underneath, it runs on digital dollars (USDC) and open networks. That’s why sending is instant and global, and you never have to touch it.</p>
           </details>
-          <details class="tile">
+          <details>
             <summary>Can the AI move my money on its own?</summary>
-            <p>No. Blocky can only propose. Every proposal is checked against your limits and shown to you as a card with the amount, the recipient and the fee. It only goes through when you approve it with your fingerprint, face or PIN.</p>
+            <p>No. The AI can only propose. Every proposal is checked against your limits and shown to you as a card with the amount, the recipient and the fee. It only goes through when you approve it with your fingerprint or face.</p>
           </details>
-          <details class="tile">
+          <details>
+            <summary>What does the AI see, and who runs it?</summary>
+            <p>Blocky’s assistant is Claude, made by Anthropic. It sees the messages you send it and what it looks up to answer you, like your balance or contacts. Your chat history is stored on your phone, not on our servers, and Anthropic doesn’t train its models on it. <a href="/safety">The full breakdown</a></p>
+          </details>
+          <details>
+            <summary>What happens to my money if Blocky shuts down?</summary>
+            <p>Nothing. Your money sits in your own wallet on a public network, not with us. Export your key from the app and open your wallet in another app like MetaMask.</p>
+          </details>
+          <details>
+            <summary>Are the stocks real shares?</summary>
+            <p>They’re tokenized stocks: tokens that track the price of a real share. They aren’t legal ownership of the share and don’t come with voting rights. Prices can go down as well as up, and nothing Blocky says is financial advice.</p>
+          </details>
+          <details>
             <summary>When can I get it?</summary>
-            <p>Blocky is in a private beta on Android right now, and we're letting people in from the waitlist in waves. iPhone is next. Join the list and we'll email you when your spot opens.</p>
+            <p>Blocky is in a private beta on Android, and we’re letting people in from the waitlist in waves. iPhone is next. Join the list and we’ll email you when your spot opens.</p>
           </details>
         </div>
       </div>
@@ -238,22 +333,22 @@
     <!-- Final call -->
     <section class="final" aria-labelledby="final-title">
       <div class="wrap final-inner">
-        <div class="mascot mascot-final" data-mascot data-idle data-pose-base="happy">
+        <div class="mascot mascot-final" data-mascot data-pose-base="happy">
           <div class="mascot-body">
             <img class="pose is-on" data-pose="happy" src="/img/happy.webp" alt="" width="480" height="480" loading="lazy">
             <img class="pose" data-pose="closed" src="/img/closed.webp?v=2" alt="" width="480" height="480" loading="lazy">
           </div>
         </div>
-        <h2 id="final-title">Blocky's saving you a spot.</h2>
-        <p class="lede center">Be one of the first to manage your money just by talking to it.</p>
+        <h2 id="final-title" class="h2">Blocky’s saving you a spot.</h2>
+        <p class="lede center">Be one of the first to manage your money just by asking.</p>
         <form class="waitlist" data-waitlist data-source="footer" novalidate>
           <label class="sr-only" for="email-final">Email address</label>
           <div class="field">
-            <input id="email-final" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required>
+            <input id="email-final" name="email" type="email" inputmode="email" autocomplete="email" placeholder="Your email" required>
             <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
-            <button class="block" type="submit"><span>Join the waitlist</span></button>
+            <button class="block block-ink" type="submit"><span>Join the waitlist</span></button>
           </div>
-          <p class="form-legal">We’ll only email you about Blocky’s launch — nothing else. <a href="/privacy">Privacy policy</a></p>
+          <p class="form-legal">We’ll only email you about Blocky’s launch. <a href="/privacy">Privacy policy</a></p>
           <p class="form-note" role="status" aria-live="polite"></p>
         </form>
       </div>
@@ -261,10 +356,29 @@
   </main>
 
   <footer class="footer">
-    <div class="wrap footer-inner">
-      <span class="wordmark small"><img src="/img/neutral.webp" alt="" width="24" height="24" loading="lazy"><span>Blocky</span></span>
-      <p>Blocky is non-custodial software: it never holds your money. Tokenized stocks track the share price but are not legal ownership of the share. Nothing here is financial advice.</p>
-      <p class="copy"><a href="/privacy">Privacy</a> · <a href="mailto:blockywallet@gmail.com">Contact</a> · © <span data-year>2026</span> Blocky</p>
+    <div class="wrap">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <span class="wordmark small"><img src="/img/neutral.webp" alt="" width="24" height="24" loading="lazy"><span>Blocky</span></span>
+          <p>A money app you talk to.</p>
+        </div>
+        <div>
+          <h4>Product</h4>
+          <ul><li><a href="#features">Features</a></li><li><a href="#pricing">Pricing</a></li><li><a href="#faq">FAQ</a></li></ul>
+        </div>
+        <div>
+          <h4>Trust</h4>
+          <ul><li><a href="/safety">Privacy &amp; safety</a></li><li><a href="https://github.com/matco01/blocky">Source code</a></li><li><a href="/privacy">Website privacy policy</a></li></ul>
+        </div>
+        <div>
+          <h4>Contact</h4>
+          <ul><li><a href="mailto:blockywallet@gmail.com">blockywallet@gmail.com</a></li></ul>
+        </div>
+      </div>
+      <div class="legal-line">
+        <p>Blocky is non-custodial software: it never holds your money and is not a bank, broker or exchange. Tokenized stocks track the share price but are not legal ownership of the share. Nothing here is financial advice.</p>
+        <p>© <span data-year>2026</span> Blocky</p>
+      </div>
     </div>
   </footer>
 </body>

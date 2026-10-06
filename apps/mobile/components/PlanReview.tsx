@@ -1,5 +1,5 @@
 import { shortAddress, type Plan } from '@blocky/shared';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import {
   planAmountLabel,
   planArrivalLabel,
@@ -30,6 +30,7 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
   const outflow = plan.outflow[0];
   const arrival = planArrivalLabel(plan);
   const fee = planFeeLabel(plan);
+  const lookalike = plan.warnings.find((warning) => warning.code === 'address_lookalike');
 
   return (
     <View style={{ gap: theme.space.xl }}>
@@ -64,7 +65,7 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
             {planGasTopUpReason(plan)}
           </Text>
         ) : null}
-        {plan.recipient && plan.recipient.display !== plan.recipient.address ? (
+        {plan.recipient && plan.recipient.display !== plan.recipient.address && !lookalike ? (
           <Row label="Address" value={shortAddress(plan.recipient.address, 10, 8)} />
         ) : null}
       </Tile>
@@ -76,9 +77,17 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
             return (
               <Tile key={warning.code} tint={danger ? 'danger' : 'warning'} radius={theme.radius.md} style={styles.warning}>
                 <Icon name="alert-circle-outline" size={18} tone={danger ? 'danger' : 'warning'} />
-                <Text variant="caption" tone={danger ? 'danger' : 'warning'} style={{ flex: 1 }}>
-                  {warning.message}
-                </Text>
+                <View style={{ flex: 1, gap: 10 }}>
+                  <Text variant="caption" tone={danger ? 'danger' : 'warning'}>
+                    {warning.message}
+                  </Text>
+                  {warning.code === 'address_lookalike' && warning.lookalikeOf && plan.recipient ? (
+                    <>
+                      <AddressDiff label="You're sending to" address={plan.recipient.address} other={warning.lookalikeOf} />
+                      <AddressDiff label="The one you know" address={warning.lookalikeOf} other={plan.recipient.address} />
+                    </>
+                  ) : null}
+                </View>
               </Tile>
             );
           })}
@@ -87,6 +96,44 @@ export function PlanReview({ plan, secondsLeft }: { plan: Plan; secondsLeft: num
 
       <Text variant="caption" tone={secondsLeft <= 10 ? 'warning' : 'tertiary'} style={styles.expiry}>
         {secondsLeft > 0 ? `Price held for ${secondsLeft}s` : 'This quote expired'}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * A whole address, every character, with the ones that differ from `other`
+ * marked — poisoned addresses match at both ends, so the middle is the tell.
+ */
+function AddressDiff({ label, address, other }: { label: string; address: string; other: string }) {
+  const theme = useTheme();
+  const a = address.toLowerCase();
+  const b = other.toLowerCase();
+
+  // Runs of same/different characters, so the text isn't 42 separate spans.
+  const runs: Array<{ text: string; differs: boolean }> = [];
+  for (let i = 0; i < address.length; i++) {
+    const differs = a[i] !== b[i];
+    const last = runs[runs.length - 1];
+    if (last && last.differs === differs) last.text += address[i];
+    else runs.push({ text: address[i]!, differs });
+  }
+
+  return (
+    <View style={{ gap: 2 }}>
+      <Text variant="caption" tone="secondary">
+        {label}
+      </Text>
+      <Text variant="caption" tabular style={styles.address}>
+        {runs.map((run, i) =>
+          run.differs ? (
+            <Text key={i} variant="caption" style={[styles.address, styles.differs, { color: theme.colors.danger }]}>
+              {run.text}
+            </Text>
+          ) : (
+            run.text
+          ),
+        )}
       </Text>
     </View>
   );
@@ -120,6 +167,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     padding: 12,
+  },
+  address: {
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+    letterSpacing: 0.5,
+  },
+  differs: {
+    textDecorationLine: 'underline',
+    fontWeight: 'bold',
   },
   expiry: {
     textAlign: 'center',

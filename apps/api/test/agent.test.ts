@@ -1,6 +1,7 @@
-import { IntentSchema } from '@blocky/shared';
+import { IntentSchema, type Plan } from '@blocky/shared';
 import type { ExplorerTransfer } from '../src/activity';
-import { agentToolsFor, destinationMismatch } from '../src/agent';
+import { agentToolsFor, destinationMismatch, unsourcedRecipient } from '../src/agent';
+import { lookalikeWarning, looksAlike } from '../src/money';
 import { openDatabase, type Database } from '../src/db/client';
 import { createStore, type Store } from '../src/store';
 import type { ChainReader } from '@blocky/wallet-core';
@@ -51,8 +52,8 @@ const reader: ChainReader = {
   },
 };
 
-function tools() {
-  return agentToolsFor(store, USER, reader, ACCOUNT, () => transfers());
+function tools(userText = 'save sam as 0x1111111111111111111111111111111111111111') {
+  return agentToolsFor(store, USER, reader, ACCOUNT, () => transfers(), userText);
 }
 
 beforeAll(async () => {
@@ -190,6 +191,22 @@ describe('save_contact and delete_contact', () => {
     });
   });
 
+  /** A contact is a trusted destination, so it can't be an address from a tool result or a page. */
+  it('refuses an address the user never gave, and saves nothing', async () => {
+    const result = (await tools('save the person who sent me money as Sam').saveContact('Sam', '0x1111111111111111111111111111111111111111')) as { error?: string };
+
+    expect(result.error).toMatch(/come from the user/);
+    expect(await store.findContact(USER, 'sam')).toBeNull();
+  });
+
+  it('saves an address resolved from an ENS name the user typed', async () => {
+    ensResolutions['vitalik.eth'] = VITALIK_ETH_ADDRESS;
+    const turn = tools('save vitalik.eth as Vitalik');
+
+    await turn.resolveAddress('vitalik.eth');
+    expect(await turn.saveContact('Vitalik', VITALIK_ETH_ADDRESS)).toMatchObject({ saved: true });
+  });
+
   /** The model cannot smuggle a non-address destination into the contact book. */
   it('refuses a non-address, and saves nothing', async () => {
     const result = (await tools().saveContact('Sam', 'sam.eth')) as { error?: string };
@@ -289,6 +306,74 @@ describe('destination sanity', () => {
     ['"base" as an ordinary word', 42161, 'Move the base amount to Arbitrum'],
   ])('lets through %s', (_, toChainId, rationale) => {
     expect(destinationMismatch(bridge(toChainId, rationale))).toBeNull();
+  });
+});
+
+describe('raw addresses come only from the user', () => {
+  const POISONED = '0xd8da6bf26964af9d7eed9e03e53415d37aa9a045';
+  const send = (address: string) =>
+    IntentSchema.parse({
+      type: 'transfer',
+      token: { kind: 'symbol', symbol: 'USDC' },
+      amount: { kind: 'usd', value: '5' },
+      recipient: { kind: 'address', address },
+      rationale: 'Send them five dollars.',
+    });
+
+  it('lets through an address the user pasted, in any case', () => {
+    expect(unsourcedRecipient(send(VITALIK_ETH_ADDRESS), `send $5 to ${VITALIK_ETH_ADDRESS.toUpperCase().replace('0X', '0x')}`, [])).toBeNull();
+  });
+
+  it('lets through a saved contact', () => {
+    expect(unsourcedRecipient(send(VITALIK_ETH_ADDRESS), 'pay vitalik', [{ address: VITALIK_ETH_ADDRESS as `0x${string}` }])).toBeNull();
+  });
+
+  it('refuses an address the user never wrote', () => {
+    expect(unsourcedRecipient(send(POISONED), `send $5 to the guy who sent me money`, [])).toMatch(/come from the user/);
+  });
+
+  it('refuses one that only nearly matches what they wrote', () => {
+    expect(unsourcedRecipient(send(POISONED), `send $5 to ${VITALIK_ETH_ADDRESS}`, [])).not.toBeNull();
+  });
+
+  it('does not touch sends by name or moves to themselves', () => {
+    const byName = IntentSchema.parse({ ...send(VITALIK_ETH_ADDRESS), recipient: { kind: 'username', username: 'sam' } });
+    expect(unsourcedRecipient(byName, '', [])).toBeNull();
+  });
+});
+
+describe('lookalike addresses', () => {
+  const REAL = '0xd8da6bf26964af9d7eed9e03e53415d37aa96045';
+
+  it('spots the same start and end on a different address', () => {
+    expect(looksAlike('0xd8da111111111111111111111111111111196045', REAL)).toBe(true);
+    expect(looksAlike(REAL, REAL)).toBe(false);
+    expect(looksAlike('0x1234567890123456789012345678901234567890', REAL)).toBe(false);
+  });
+
+  const toPlan = (address: string) =>
+    ({ warnings: [], recipient: { address, display: address, ensName: null, contactLabel: null, known: false, isContract: false } }) as unknown as Plan;
+
+  it('warns in red when a send imitates a contact, and says which', async () => {
+    await store.saveContact(USER, 'Vitalik', REAL);
+    const imitation = '0xd8da6bf2000000000000000000000000000a6045';
+
+    const plan = await lookalikeWarning(store, USER, ACCOUNT, toPlan(imitation));
+
+    expect(plan.warnings).toEqual([expect.objectContaining({ code: 'address_lookalike', severity: 'danger', lookalikeOf: REAL })]);
+    expect(plan.warnings[0]!.message).toMatch(/Vitalik/);
+  });
+
+  it('stays quiet for the real address and for strangers', async () => {
+    await store.saveContact(USER, 'Vitalik', REAL);
+
+    expect((await lookalikeWarning(store, USER, ACCOUNT, toPlan(REAL))).warnings).toEqual([]);
+    expect((await lookalikeWarning(store, USER, ACCOUNT, toPlan('0x1234567890123456789012345678901234567890'))).warnings).toEqual([]);
+  });
+
+  it("catches an imitation of the user's own wallet", async () => {
+    const plan = await lookalikeWarning(store, USER, ACCOUNT, toPlan('0xa11ce00000000000000000000000000000770001'));
+    expect(plan.warnings[0]).toMatchObject({ code: 'address_lookalike', lookalikeOf: ACCOUNT });
   });
 });
 

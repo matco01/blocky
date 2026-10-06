@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Privacy &amp; safety — Blocky</title>
+  <meta name="description" content="What Blocky can see, what it keeps, what its AI can and can't do, and who else is involved.">
+  <meta name="theme-color" content="#FFFDFA">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" type="image/png" href="/img/favicon.png">
+  <link rel="preload" href="/fonts/figtree-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/home.css">
+  <style>
+    .who { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 15.5px; }
+    .who th, .who td { text-align: left; vertical-align: top; padding: 14px 12px 14px 0; border-bottom: 1px solid var(--line); }
+    .who th { color: var(--ink); font-weight: 700; width: 32%; }
+    .who td { color: var(--ink-2); }
+    .who thead th { font-size: 13px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+    .col { background: var(--bg-2); border-radius: var(--r-lg); padding: 22px 24px; }
+    .col h3 { font-size: 18px; letter-spacing: -0.02em; }
+    .col.yes h3 { color: var(--green); }
+    .col.no h3 { color: var(--maroon); }
+    .col ul { padding-left: 20px; }
+    @media (max-width: 640px) { .cols { grid-template-columns: 1fr; } .who th { width: 40%; } }
+  </style>
+</head>
+<body>
+  <header class="nav plain">
+    <div class="wrap nav-inner">
+      <a href="/" class="wordmark" aria-label="Blocky, home">
+        <img src="/img/neutral.webp" alt="" width="32" height="32">
+        <span>Blocky</span>
+      </a>
+      <a href="/#join" class="block block-sm block-ink nav-cta">Get early access</a>
+    </div>
+  </header>
+
+  <main class="legal wrap">
+    <h1>Who sees what, and what the AI can’t do.</h1>
+    <p class="legal-updated">Last updated 6 October 2026</p>
+
+    <div class="legal-summary">
+      <p><strong>The short version.</strong> Blocky never holds your money or your keys, and nothing moves until you approve it with your fingerprint or face. The AI proposes; you decide. Your chat lives on your phone. Everything onchain is public, as with any crypto wallet. Every claim on this page can be checked in our <a href="https://github.com/matco01/blocky">open-source code</a>.</p>
+    </div>
+
+    <h2>Your money</h2>
+    <p>Blocky is <strong>non-custodial</strong>. Your wallet is created on your phone through <a href="https://privy.io">Privy</a>, our wallet provider. Privy secures the key, and neither Blocky’s server nor its AI ever has it. You can export your private key at any time (Account → Export private key) and take your wallet to another app.</p>
+    <ul>
+      <li><strong>Every move needs you.</strong> Blocky prepares a payment, your phone shows you exactly what it does, and nothing happens until you confirm with your fingerprint or face.</li>
+      <li><strong>No server-side signing.</strong> There is no key on our server that can move your money. Spending limits are checked by our server before a card is shown. They aren’t yet enforced by your wallet onchain.</li>
+      <li><strong>What the card shows is what gets signed.</strong> Fixed, ordinary code builds the payment behind a card from live prices and chain data, and our server checks it byte for byte before your phone will sign it. The AI never writes a transaction.</li>
+    </ul>
+
+    <h2>Who sees what</h2>
+    <table class="who">
+      <thead><tr><th>Who</th><th>What they see, and why</th></tr></thead>
+      <tbody>
+        <tr><th>Blocky’s server</th><td>Your wallet address, username, the payments you make and the records listed below, so it can build cards, check limits and keep your history.</td></tr>
+        <tr><th>Anthropic (Claude)</th><td>Each message you send the assistant, your last 20 or so chat messages, and what its tools look up to answer you: balances, contacts, activity, saved notes. See <a href="#anthropic">Anthropic’s terms</a>.</td></tr>
+        <tr><th>Privy</th><td>Your email (or Google, Apple or passkey sign-in) and your wallet, to sign you in and secure your key.</td></tr>
+        <tr><th>Price, route and network services</th><td>Your wallet address and the amounts involved, never your name or email: Circle, Across, Gas.zip, Uniswap, CoinGecko, DefiLlama, Blockscout and others, for quotes, transfers, prices and history.</td></tr>
+        <tr><th>Other Blocky users</th><td>Your @username, and your wallet address when you pay them or request money from them.</td></tr>
+        <tr><th>Everyone</th><td>Everything on the blockchain: your address, balances and transactions. That’s how public blockchains work.</td></tr>
+      </tbody>
+    </table>
+    <p>Blocky has no ads, no analytics trackers and no data brokers, and doesn’t sell data.</p>
+
+    <h2>What’s stored where</h2>
+    <p><strong>On your phone:</strong> your chat with Blocky (“reset chat” deletes it) and your light or dark mode setting.</p>
+    <p><strong>On Blocky’s server:</strong></p>
+    <ul>
+      <li><strong>Account:</strong> your sign-in ID from Privy, your wallet address and @username. Your email isn’t stored here; Privy holds it.</li>
+      <li><strong>Settings:</strong> spending limits, the tokens Blocky may spend, and the addresses you’ve paid before.</li>
+      <li><strong>Payments:</strong> every card Blocky proposed (amounts, recipient, fees and the assistant’s one-line description), whether you approved it, and the transaction hash.</li>
+      <li><strong>Your people:</strong> contacts you saved, people you blocked, and payment requests with their notes.</li>
+      <li><strong>Notes:</strong> short notes the assistant saved to remember how you like things done. Ask Blocky what it remembers, and tell it to forget any of them.</li>
+      <li><strong>Money features:</strong> pots and auto-save rules, budgets, price alerts, notifications, tokens you bought by address, and balance snapshots for your portfolio chart.</li>
+    </ul>
+    <p><strong>Not stored anywhere by Blocky:</strong> the text of your chat messages, your private key, or a password (you sign in with a code or passkey). Server logs record what each AI reply cost, not what you said.</p>
+
+    <h2>What the AI can and can’t do</h2>
+    <div class="cols">
+      <div class="col yes">
+        <h3>It can</h3>
+        <ul>
+          <li>Read your balances, activity, contacts, pots, requests, budgets and settings to answer questions.</li>
+          <li>Propose a payment as a card for you to review: send, buy, sell or move money.</li>
+          <li>Organise things that don’t move money: contacts, pots, budgets, alerts, requests.</li>
+          <li>Lower your spending limits when you ask.</li>
+          <li>Look up prices and search the web for news.</li>
+          <li>Save short notes about you, and forget them when asked.</li>
+        </ul>
+      </div>
+      <div class="col no">
+        <h3>It can’t</h3>
+        <ul>
+          <li><strong>Sign, send or approve anything.</strong> Every payment waits for your fingerprint.</li>
+          <li><strong>Spend past your limits</strong>, or raise them.</li>
+          <li><strong>Use an address you didn’t give it.</strong> A raw address must be one you typed or pasted yourself. Otherwise it must be a saved contact, an @username or an ENS name you typed. Addresses from web pages, past transfers or its own memory are refused, and saving a contact follows the same rule.</li>
+          <li><strong>Act on a web search.</strong> A reply that searched the web can’t propose a payment, because web pages are written by strangers.</li>
+          <li><strong>Change what a card does.</strong> It says what you want; fixed code works out how.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>Address safety</h2>
+    <p>Most crypto scams don’t break anything. They get you to send money to the wrong address. Besides only accepting addresses that came from you, Blocky watches for <strong>address poisoning</strong>. Scammers create an address that starts and ends like one you know, then send you a tiny amount so the fake sits in your history, waiting to be copied.</p>
+    <p>When a payment goes to an address that matches the start and end of a contact, someone you’ve paid, or your own wallet, but isn’t it, Blocky stops you with a <strong>red warning</strong>. The card shows both addresses in full, with every character that differs underlined in red. A red warning always means the full review and your fingerprint, whatever your limits.</p>
+    <p>New recipients, contracts, unverified tokens, tokens that may be hard to sell, big price impact and money set aside in pots all get their own warnings too.</p>
+
+    <h2 id="anthropic">Anthropic’s terms</h2>
+    <p>Blocky’s assistant is Claude, made by Anthropic, used through Anthropic’s commercial API. Under Anthropic’s <a href="https://www.anthropic.com/legal/commercial-terms">Commercial Terms</a>, Anthropic doesn’t train its models on what’s sent through the API by default. Anthropic keeps API data for a limited time for safety and abuse monitoring; the details are in its <a href="https://privacy.anthropic.com">Privacy Center</a>. Anthropic never receives your email or your keys.</p>
+
+    <h2>Open source</h2>
+    <p>All of Blocky’s code is public at <a href="https://github.com/matco01/blocky">github.com/matco01/blocky</a>: the app, the server, the code that builds payments and the AI’s instructions. You don’t have to take this page’s word for anything.</p>
+
+    <h2>Not done yet</h2>
+    <ul>
+      <li>Spending limits are enforced by our server, not yet by your wallet onchain.</li>
+      <li>Deleting your account from inside the app isn’t built yet. Email <a href="mailto:blockywallet@gmail.com">blockywallet@gmail.com</a> and we’ll delete everything our server holds about you.</li>
+    </ul>
+
+    <p class="legal-fine">Questions or a problem? Email <a href="mailto:blockywallet@gmail.com">blockywallet@gmail.com</a>. This page covers the Blocky app; the <a href="/privacy">website privacy policy</a> covers this site and the waitlist.</p>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <span class="wordmark small"><img src="/img/neutral.webp" alt="" width="24" height="24"><span>Blocky</span></span>
+      <p>Blocky is non-custodial software: it never holds your money. Nothing here is financial advice.</p>
+      <p class="copy"><a href="/privacy">Privacy</a> · <a href="mailto:blockywallet@gmail.com">Contact</a> · © 2026 Blocky</p>
+    </div>
+  </footer>
+</body>
+</html>

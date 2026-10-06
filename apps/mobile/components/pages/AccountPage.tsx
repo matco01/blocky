@@ -21,6 +21,9 @@ import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
 import { Tile } from '../Tile';
 
+/** The same page as PRIVACY.md, on the website so it opens whether or not you use GitHub. */
+const PRIVACY_URL = 'https://blocky.page/safety';
+
 /**
  * Account — the second page of the pager, one swipe left of Home.
  *
@@ -164,7 +167,15 @@ export function AccountPage({ page, onPageChange }: PageProps) {
 
       {/* --- Security ------------------------------------------------------- */}
       <Section title="Security">
-        <Row icon="key-outline" label="Export private key" value="Move your wallet to another app" chevron onPress={() => void exportKey()} last />
+        <Row icon="key-outline" label="Export private key" value="Move your wallet to another app" chevron onPress={() => void exportKey()} />
+        <Row
+          icon="lock-closed-outline"
+          label="Privacy & safety"
+          value="Who sees what, and what Blocky can't do"
+          chevron
+          onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_URL)}
+          last
+        />
       </Section>
 
       {/* --- Sign out ------------------------------------------------------- */}

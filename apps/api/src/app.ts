@@ -60,7 +60,7 @@ import {
   statementCsv,
   type BudgetCategory,
 } from './insights';
-import { createRequest, insightsFor, linkMatchingRequest, monthStart, potWarning, who } from './money';
+import { createRequest, insightsFor, linkMatchingRequest, monthStart, moneyWarnings, who } from './money';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
 import { DuplicateExecutionError, type Store } from './store';
 
@@ -285,7 +285,7 @@ export function createApp(deps: AppDeps) {
     const outcome = await buildPlan(intent, createPlannerContext({ reader, store, userId: user.id, account: wallet, blockyFee: deps.blockyFee ?? null }));
     if (!outcome.ok) return c.json({ error: outcome.failure.code, message: outcome.failure.message }, 422);
 
-    const plan = await potWarning(store, reader, user.id, wallet, outcome.plan);
+    const plan = await moneyWarnings(store, reader, user.id, wallet, outcome.plan);
     await store.putPlan(user.id, plan, 'manual');
     await store.linkRequestPlan(request.id, plan.id);
     return c.json({ plan }, 201);
@@ -620,7 +620,7 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: outcome.failure.code, message: outcome.failure.message }, 422);
     }
 
-    const plan = await potWarning(store, reader, userId, wallet, outcome.plan);
+    const plan = await moneyWarnings(store, reader, userId, wallet, outcome.plan);
     await store.putPlan(userId, plan, 'manual');
     await linkMatchingRequest(store, userId, plan).catch(() => {});
     return c.json({ plan }, 201);
