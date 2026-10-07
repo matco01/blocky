@@ -48,6 +48,52 @@ goes through the same conversation, with Blocky as the friend who does the work.
 
 ---
 
+## The full picture
+
+> **Blocky is the friend who's good with money, and can actually do things.**
+> It sees where your money goes, helps you spend it better, and handles the
+> boring parts for you. You just say what you want, and approve.
+
+The finished product does three things.
+
+**It sees.** You pay with a Blocky card in shops and online, and every
+purchase lands in the same conversation. Blocky knows where your money goes
+in real life, not just onchain.
+
+**It advises.** Blocky is the friend who's good with money:
+
+- It catches impulse buys: *"You've spent $140 on clothes this week, and
+  you're saving for Lisbon. Still want it?"*
+- It finds a cheaper version of the same thing.
+- It warns you before a subscription renews or a budget runs out.
+- It knows your goals, so its advice is about you, not generic tips.
+
+The coach is opt-in. It asks; it doesn't lecture. Nobody keeps an app that
+makes them feel judged.
+
+**It acts.** *"Order six nuggets and a drink from McDonald's to my place."*
+Blocky places the order and pays. The same goes for bills, groceries,
+subscriptions and bookings.
+
+The rule that keeps today's payments safe carries over unchanged: **Blocky
+proposes and the user approves.** Shopping for you is one more card to approve
+with your fingerprint, never the AI spending on its own.
+
+### How we get there
+
+| Stage | What Blocky adds | Who it opens to |
+|---|---|---|
+| **Today** | Send, request and split; save in pots; invest in stocks and tokens; track spending; money moved between networks automatically. | People who already have money in crypto or on an exchange |
+| **Next** | Add money from a bank or card, withdraw to a bank, and an iPhone app. | Anyone with a bank account, no crypto needed |
+| **The full picture** | The Blocky card, through a licensed partner; the spending coach; Blocky shopping and paying for you. | People ready to make Blocky their main money app |
+
+Each step needs partners we don't have yet: a licensed card issuer, ways to
+add and withdraw money, and shops or delivery services Blocky can order from.
+None of it changes the core: one conversation, plain words, and nothing moves
+without the user.
+
+---
+
 ## What this means when we build
 
 These follow from the vision. If a decision fights one of them, the decision is

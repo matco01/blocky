@@ -28,7 +28,6 @@
       var to = Number(node.dataset.count);
       var start = null;
       var ms = 1100;
-      node.textContent = '0';
       function step(now) {
         if (start === null) start = now;
         var t = Math.min(1, (now - start) / ms);
@@ -41,6 +40,9 @@
 
   var reveals = document.querySelectorAll('.reveal');
   if ('IntersectionObserver' in window && !reduced) {
+    // Content is only hidden for its entrance once this script is running,
+    // so a page that loads without it (or with a stale copy) still shows everything.
+    document.documentElement.classList.add('reveal-on');
     var revealer = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (entry.isIntersecting) {

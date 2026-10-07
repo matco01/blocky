@@ -146,11 +146,11 @@ a { color: inherit; }
 
 /* --- Reveal on scroll ---------------------------------------------------- */
 
-.js .reveal { opacity: 0; transform: translateY(24px); transition: opacity 800ms var(--ease), transform 800ms var(--ease); }
-.js .reveal.is-in { opacity: 1; transform: none; }
-.js .reveal[data-delay="1"] { transition-delay: 100ms; }
-.js .reveal[data-delay="2"] { transition-delay: 200ms; }
-@media (prefers-reduced-motion: reduce) { .js .reveal { opacity: 1; transform: none; transition: none; } }
+.reveal-on .reveal { opacity: 0; transform: translateY(24px); transition: opacity 800ms var(--ease), transform 800ms var(--ease); }
+.reveal-on .reveal.is-in { opacity: 1; transform: none; }
+.reveal-on .reveal[data-delay="1"] { transition-delay: 100ms; }
+.reveal-on .reveal[data-delay="2"] { transition-delay: 200ms; }
+@media (prefers-reduced-motion: reduce) { .reveal-on .reveal { opacity: 1; transform: none; transition: none; } }
 
 section { padding: 136px 0; }
 @media (max-width: 760px) { section { padding: 88px 0; } }
@@ -262,18 +262,18 @@ section { padding: 136px 0; }
 }
 
 /* Each card comes alive when it scrolls in: rows slide, the bar fills, the chart grows. */
-.js .fcard .slide { opacity: 0; transform: translateX(16px); transition: opacity 600ms var(--ease), transform 600ms var(--ease); transition-delay: calc(450ms + var(--i) * 150ms); }
-.js .fcard.is-in .slide { opacity: 1; transform: none; }
+.reveal-on .fcard .slide { opacity: 0; transform: translateX(16px); transition: opacity 600ms var(--ease), transform 600ms var(--ease); transition-delay: calc(450ms + var(--i) * 150ms); }
+.reveal-on .fcard.is-in .slide { opacity: 1; transform: none; }
 .progress .fill { width: var(--w); }
-.js .fcard .progress .fill { width: 0; transition: width 1200ms var(--ease) 400ms; }
-.js .fcard.is-in .progress .fill { width: var(--w); }
+.reveal-on .fcard .progress .fill { width: 0; transition: width 1200ms var(--ease) 400ms; }
+.reveal-on .fcard.is-in .progress .fill { width: var(--w); }
 .bars i { height: var(--h); }
-.js .fcard .bars i { height: 4%; transition: height 900ms var(--ease); }
-.js .fcard.is-in .bars i { height: var(--h); }
-.js .fcard .bars div:nth-child(2) i { transition-delay: 120ms; }
-.js .fcard .bars div:nth-child(3) i { transition-delay: 240ms; }
+.reveal-on .fcard .bars i { height: 4%; transition: height 900ms var(--ease); }
+.reveal-on .fcard.is-in .bars i { height: var(--h); }
+.reveal-on .fcard .bars div:nth-child(2) i { transition-delay: 120ms; }
+.reveal-on .fcard .bars div:nth-child(3) i { transition-delay: 240ms; }
 @media (prefers-reduced-motion: reduce) {
-  .js .fcard .slide, .js .fcard .progress .fill, .js .fcard .bars i { transition: none; }
+  .reveal-on .fcard .slide, .reveal-on .fcard .progress .fill, .reveal-on .fcard .bars i { transition: none; }
 }
 
 /* Under the examples: a strip of plain promises, not a paragraph. */
