@@ -360,13 +360,13 @@ describe('cost controls', () => {
     });
   });
 
-  it('runs Sonnet 5.5 at low effort', async () => {
+  it('runs Haiku 5.5 at medium effort', async () => {
     const { client, calls } = fakeClient([{ content: [text('hi')] }]);
 
     await runAgentTurn('hi', { client, tools });
 
-    expect(calls[0]?.model).toBe('claude-sonnet-5-5');
-    expect(calls[0]?.output_config?.effort).toBe('low');
+    expect(calls[0]?.model).toBe('claude-haiku-5-5');
+    expect(calls[0]?.output_config?.effort).toBe('medium');
   });
 
   it('stops after a bounded number of steps', async () => {
@@ -394,8 +394,8 @@ describe('cost controls', () => {
 });
 
 describe('estimateCostUsd', () => {
-  it('prices each kind of token at its own Sonnet 5 rate', () => {
-    // 1M of each: $2 in + $10 out + $0.20 cache read + $2.50 (5m write) + $4 (1h write).
+  it('prices each kind of token at its own Haiku 5.5 rate', () => {
+    // 1M of each: $0.10 in + $0.50 out + $0.01 cache read + $0.125 (5m write) + $0.20 (1h write).
     expect(
       estimateCostUsd({
         inputTokens: 1_000_000,
@@ -406,7 +406,7 @@ describe('estimateCostUsd', () => {
         steps: 1,
         webSearches: 0,
       }),
-    ).toBeCloseTo(18.7, 6);
+    ).toBeCloseTo(0.935, 6);
   });
 });
 

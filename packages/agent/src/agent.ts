@@ -17,9 +17,9 @@ import { PROPOSE_INTENT, TOOLS, WEB_SEARCH, untrustedJson, unwrapIntentInput } f
  * A runner that loops until the model stops wanting tools has neither shape.
  */
 
-/** Sonnet 5.5 at low effort. Intent extraction is closer to classification than reasoning. */
-export const AGENT_MODEL = 'claude-sonnet-5-5';
-export const AGENT_EFFORT = 'low' as const;
+/** Haiku 5.5 at medium effort. Intent extraction is closer to classification than reasoning. */
+export const AGENT_MODEL = 'claude-haiku-5-5';
+export const AGENT_EFFORT = 'medium' as const;
 
 /**
  * Ceiling per model turn.
@@ -222,7 +222,7 @@ export async function runAgentTurn<P = unknown>(
     const params: Anthropic.MessageCreateParamsNonStreaming = {
       model: AGENT_MODEL,
       max_tokens: MAX_TOKENS,
-      // Sonnet 5.5 rejects `disabled` and `budget_tokens`; adaptive at low effort is the chat setting.
+      // Haiku 5.5 rejects `budget_tokens`; adaptive thinking with effort set explicitly is the chat setting.
       thinking: { type: 'adaptive' },
       output_config: { effort: AGENT_EFFORT },
       /*
@@ -267,8 +267,9 @@ export async function runAgentTurn<P = unknown>(
     // the API picks up where it left off. No user message in between.
     if (response.stop_reason === 'pause_turn') continue;
 
-    // Sonnet 5.5's safety filters can decline outright, often with no text at
-    // all. Say so plainly rather than showing an empty reply.
+    // Haiku 5.5's safety classifiers can decline outright, often with no text at
+    // all, and it has no server-side fallback. Say so plainly rather than
+    // showing an empty reply.
     if (response.stop_reason === 'refusal') {
       if (accepted.length > 0) return { kind: 'intent', proposals: accepted, unplanned: [], text, usage };
       return { kind: 'reply', text: text || "Sorry, I can't help with that one.", usage };
@@ -584,16 +585,17 @@ function accumulate(total: AgentUsage, usage: Anthropic.Usage): void {
 }
 
 /**
- * What a turn cost, in USD, at Claude Sonnet 5.5's list prices (same as Sonnet 5) — for logs and
- * dashboards, not billing. Thinking is billed as output, so it is inside
- * `outputTokens`. Update these if `AGENT_MODEL` changes.
+ * What a turn cost, in USD, at Claude Haiku 5.5's list prices for prompts up
+ * to 100,000 tokens (Blocky's are far under) — for logs and dashboards, not
+ * billing. Thinking is billed as output, so it is inside `outputTokens`.
+ * Update these if `AGENT_MODEL` changes.
  */
 const PRICE_PER_MTOK = {
-  input: 2,
-  output: 10,
-  cacheRead: 0.2,
-  cacheWrite5m: 2.5,
-  cacheWrite1h: 4,
+  input: 0.1,
+  output: 0.5,
+  cacheRead: 0.01,
+  cacheWrite5m: 0.125,
+  cacheWrite1h: 0.2,
 } as const;
 
 /** $10 per 1,000 searches, on top of the result tokens already counted as input. */
