@@ -158,4 +158,4 @@ npm test            # 700+ tests; the policy, gas and planner tests are the spec
 
 Copyright © 2026 Oliver Matula. **All rights reserved.** The source is public for review and evaluation. See [LICENSE](LICENSE).
 
-Contact: [blockywallet@gmail.com](mailto:blockywallet@gmail.com)
+Contact: [hello@blocky.page](mailto:hello@blocky.page)

@@ -157,7 +157,7 @@ reading:
 - **Spending limits** are enforced by our server, not yet by your wallet
   onchain.
 - **Deleting your account** from inside the app isn't built yet. Email
-  blockywallet@gmail.com and we'll delete everything the server holds about you.
+  hello@blocky.page and we'll delete everything the server holds about you.
 
-Questions or a problem: email **blockywallet@gmail.com**, or open an issue at
+Questions or a problem: email **hello@blocky.page**, or open an issue at
 https://github.com/matco01/blocky/issues.
