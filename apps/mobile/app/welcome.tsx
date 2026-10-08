@@ -111,7 +111,7 @@ export default function WelcomeScreen() {
       </View>
 
       <View style={{ marginTop: 'auto' }}>
-        <Button label={valid ? `Continue as @${clean}` : 'Continue'} disabled={!valid || availability === 'taken'} loading={saving} onPress={() => void claim()} />
+        <Button variant="ink" label={valid ? `Continue as @${clean}` : 'Continue'} disabled={!valid || availability === 'taken'} loading={saving} onPress={() => void claim()} />
       </View>
     </KeyboardAvoidingView>
   );

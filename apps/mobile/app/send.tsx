@@ -372,7 +372,7 @@ function SendForm(props: {
 
   return (
     <View style={{ gap: theme.space.xl }}>
-      <ScreenHeader title="Send" onClose={() => router.back()} />
+      <ScreenHeader title="Send" feature="leaf" subtitle="To a @name, a contact or an address." onClose={() => router.back()} />
 
       <View style={styles.amountBox}>
         <Text variant="balance" tone={props.amount ? 'primary' : 'tertiary'}>

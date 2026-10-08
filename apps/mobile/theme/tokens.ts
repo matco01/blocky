@@ -60,6 +60,21 @@ export const palette = {
   stone100: '#F6F0E9',
   paper: '#FFFCF8',
   white: '#FFFFFF',
+  // The website's ink: its headlines and its dark buttons.
+  ink950: '#16110E',
+  black: '#000000',
+  creamEdge: '#BDB1A6',
+
+  // The website's feature cards, strong enough to read as colour, not as a
+  // stain on the page — and their night versions, dim enough for mist text.
+  leafCard: '#CDE8B9',
+  maroonCard: '#F0CFCA',
+  amberCard: '#F7DDA8',
+  sandCard: '#E6DCCF',
+  leafCardNight: '#2A3B22',
+  maroonCardNight: '#40292A',
+  amberCardNight: '#3F3322',
+  sandCardNight: '#302A25',
 
   // Night — dark scheme ground and surfaces.
   night950: '#0E1512',
@@ -102,6 +117,21 @@ export interface ThemeColors {
   /** The user's own chat bubbles. */
   brandTint: string;
 
+  /** The ink block, as on the website: the one dark button on a light page. */
+  ink: string;
+  inkEdge: string;
+  inkText: string;
+
+  /**
+   * The website's feature colours, one per area of the app: paying people is
+   * leaf, savings maroon, investing amber, spending sand. Header cards only,
+   * with primary text on them; never a button.
+   */
+  featureLeaf: string;
+  featureMaroon: string;
+  featureAmber: string;
+  featureSand: string;
+
   /** Money coming in. Text and tint only. */
   positive: string;
   positiveTint: string;
@@ -133,6 +163,15 @@ const light: ThemeColors = {
   brand: palette.maroon700,
   brandTint: palette.maroon100,
 
+  ink: palette.ink950,
+  inkEdge: palette.black,
+  inkText: palette.white,
+
+  featureLeaf: palette.leafCard,
+  featureMaroon: palette.maroonCard,
+  featureAmber: palette.amberCard,
+  featureSand: palette.sandCard,
+
   positive: palette.leaf700,
   positiveTint: palette.leaf100,
   warning: palette.amber700,
@@ -163,6 +202,16 @@ const dark: ThemeColors = {
 
   brand: palette.maroonBright,
   brandTint: palette.maroon850,
+
+  // Ink inverts in the dark: the website's cream block, with a dark label.
+  ink: palette.mist100,
+  inkEdge: palette.creamEdge,
+  inkText: palette.night950,
+
+  featureLeaf: palette.leafCardNight,
+  featureMaroon: palette.maroonCardNight,
+  featureAmber: palette.amberCardNight,
+  featureSand: palette.sandCardNight,
 
   positive: palette.leafText,
   positiveTint: palette.leaf850,
@@ -218,15 +267,19 @@ export const font = {
 /**
  * Type scale. `balance` is the biggest thing on Home and everything else is
  * support. Tabular figures on amounts so digits don't shift as a number animates.
+ *
+ * Big type is set tight, as on the website (about −0.045em at the top, easing
+ * off as it shrinks); body sizes keep Figtree's own spacing.
  */
 export const type = {
-  balance: { family: font.extrabold, fontSize: 44, lineHeight: 52 },
-  title: { family: font.extrabold, fontSize: 30, lineHeight: 36 },
-  heading: { family: font.bold, fontSize: 22, lineHeight: 28 },
-  body: { family: font.regular, fontSize: 16, lineHeight: 24 },
-  bodyStrong: { family: font.semibold, fontSize: 16, lineHeight: 24 },
-  label: { family: font.semibold, fontSize: 14, lineHeight: 20 },
-  caption: { family: font.medium, fontSize: 13, lineHeight: 18 },
+  balance: { family: font.extrabold, fontSize: 48, lineHeight: 56, letterSpacing: -2.2 },
+  display: { family: font.extrabold, fontSize: 40, lineHeight: 42, letterSpacing: -1.8 },
+  title: { family: font.extrabold, fontSize: 32, lineHeight: 36, letterSpacing: -1.3 },
+  heading: { family: font.extrabold, fontSize: 22, lineHeight: 28, letterSpacing: -0.6 },
+  body: { family: font.regular, fontSize: 16, lineHeight: 24, letterSpacing: 0 },
+  bodyStrong: { family: font.semibold, fontSize: 16, lineHeight: 24, letterSpacing: -0.1 },
+  label: { family: font.semibold, fontSize: 14, lineHeight: 20, letterSpacing: 0 },
+  caption: { family: font.medium, fontSize: 13, lineHeight: 18, letterSpacing: 0 },
 } as const;
 
 /**

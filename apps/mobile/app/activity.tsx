@@ -47,7 +47,7 @@ export default function ActivityScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: topPadding }]}>
-        <ScreenHeader title="Activity" onClose={() => router.back()} />
+        <ScreenHeader title="Activity" feature="sand" subtitle="Everything in and out." onClose={() => router.back()} />
       </View>
 
       <ScrollView

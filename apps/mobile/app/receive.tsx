@@ -47,12 +47,12 @@ export default function ReceiveScreen() {
         },
       ]}
     >
-      <View style={{ gap: theme.space.sm }}>
-        <ScreenHeader title="Receive" onClose={() => router.back()} />
-        <Text variant="body" tone="secondary">
-          Send USDC on {homeChainName} to this address.
-        </Text>
-      </View>
+      <ScreenHeader
+        title="Receive"
+        feature="leaf"
+        subtitle={`Send USDC on ${homeChainName} to this address.`}
+        onClose={() => router.back()}
+      />
 
       <View style={styles.middle}>
         {address ? (

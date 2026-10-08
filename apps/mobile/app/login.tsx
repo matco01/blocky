@@ -123,6 +123,7 @@ export default function LoginScreen() {
               />
               <Button
                 label="Continue"
+                variant="ink"
                 disabled={!emailValid}
                 loading={busy}
                 onPress={() => run(async () => {
@@ -146,6 +147,7 @@ export default function LoginScreen() {
               />
               <Button
                 label="Sign in"
+                variant="ink"
                 disabled={code.length !== 6}
                 loading={busy}
                 haptic="medium"

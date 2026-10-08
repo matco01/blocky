@@ -47,7 +47,7 @@ export default function PayLinkScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background, paddingTop: topPadding, paddingBottom: insets.bottom + theme.space.xl }]}>
-      <ScreenHeader title="Pay request" onClose={() => router.back()} />
+      <ScreenHeader title="Pay request" feature="leaf" onClose={() => router.back()} />
 
       {!request && !message ? <ActivityIndicator style={{ marginTop: theme.space.xxl }} color={theme.colors.textTertiary} /> : null}
 

@@ -75,7 +75,7 @@ export default function InsightsScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: topPadding }]}>
-        <ScreenHeader title="Insights" onClose={() => router.back()} />
+        <ScreenHeader title="Insights" feature="sand" subtitle="Where every dollar went." onClose={() => router.back()} />
       </View>
 
       <ScrollView

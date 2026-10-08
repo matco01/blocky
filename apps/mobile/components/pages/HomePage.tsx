@@ -39,7 +39,7 @@ import { useChat } from '../../lib/chat';
 import { handOffPlan, useSentPlans } from '../../lib/handoff';
 import { useKeyboardVisible } from '../../lib/keyboard';
 import { isResetPhrase } from '../../lib/resetPhrase';
-import { useTheme } from '../../theme';
+import { font, useTheme } from '../../theme';
 
 type BalanceState =
   | { state: 'loading' }
@@ -455,9 +455,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: 32,
   },
+  // As on the website: extra bold and set tight.
   wordmark: {
-    fontSize: 18,
-    lineHeight: 24,
+    fontFamily: font.extrabold,
+    fontSize: 26,
+    lineHeight: 30,
+    letterSpacing: -1,
   },
   // Centred on the screen regardless of what sits either side of it.
   dots: {

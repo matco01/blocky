@@ -81,7 +81,7 @@ export default function PotsScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: topPadding }]}>
-        <ScreenHeader title="Pots" onClose={() => router.back()} />
+        <ScreenHeader title="Pots" feature="maroon" subtitle="Money set aside for the things you want." onClose={() => router.back()} />
       </View>
 
       <ScrollView

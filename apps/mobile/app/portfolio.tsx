@@ -221,7 +221,7 @@ export default function PortfolioScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: topPadding }]}>
-        <ScreenHeader title="Portfolio" onClose={() => router.back()} />
+        <ScreenHeader title="Portfolio" feature="amber" subtitle="Your stocks and tokens, in dollars." onClose={() => router.back()} />
       </View>
 
       {load.state === 'ready' ? (

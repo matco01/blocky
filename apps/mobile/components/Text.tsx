@@ -35,7 +35,7 @@ const TONE_KEY: Record<Tone, keyof Theme['colors']> = {
 export function Text({ variant = 'body', tone = 'primary', tabular, style, ...rest }: TextProps) {
   const theme = useTheme();
   const typography = theme.type[variant];
-  const useTabular = tabular ?? (variant === 'balance' || variant === 'title');
+  const useTabular = tabular ?? (variant === 'balance' || variant === 'title' || variant === 'display');
 
   const base: TextStyle = {
     fontFamily: typography.family,
@@ -43,6 +43,7 @@ export function Text({ variant = 'body', tone = 'primary', tabular, style, ...re
     fontWeight: 'normal',
     fontSize: typography.fontSize,
     lineHeight: typography.lineHeight,
+    letterSpacing: typography.letterSpacing,
     color: theme.colors[TONE_KEY[tone]],
     // Android pads ascenders/descenders by default, which floats labels in blocks.
     ...Platform.select({ android: { includeFontPadding: false as const } }),
