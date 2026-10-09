@@ -41,8 +41,17 @@ export interface TrackedToken {
   decimals: number;
 }
 
-/** Long enough to absorb the balance poll, short enough that money moved in shows up within a refresh. */
-const HOLDINGS_TTL_MS = 15_000;
+/**
+ * How long a wallet's scan of the other chains is reused.
+ *
+ * The scan is the expensive read (two or more calls on each of nine chains),
+ * and the money it finds rarely moves on its own: almost everything that lands
+ * there arrives through a Blocky send, swap or bridge, and those clear the
+ * cache the moment they settle. Opening Portfolio or pulling to refresh asks
+ * for a fresh scan too. This TTL is only the safety net for money sent in from
+ * outside Blocky, so it can be long; the Home balance poll stays cheap.
+ */
+const HOLDINGS_TTL_MS = 120_000;
 
 /**
  * Scan every chain on this network that the reader supports. Arc is skipped:
@@ -52,8 +61,8 @@ const HOLDINGS_TTL_MS = 15_000;
  * One chain failing to answer never fails the rest — a dead RPC endpoint
  * degrades to "nothing found there", not a broken portfolio. Prices come from
  * the shared snapshot, and a wallet's scan is reused for {@link HOLDINGS_TTL_MS}:
- * on mainnet it is two reads on each of seven chains, which is not something
- * to repeat on every twenty-second balance poll.
+ * on mainnet it is two reads on each of nine chains, which is not something
+ * to repeat on every ten-second balance poll.
  */
 export function fetchWalletHoldings(
   reader: ChainReader,

@@ -226,6 +226,29 @@ describe('balance', () => {
     expect(status).toBe(503);
     expect(body.totalUsd).toBeUndefined();
   });
+
+  /** One app for the whole test: the throttle lives in the app, as in production. */
+  it('re-scans other chains on ?fresh=1, at most once per wallet every ten seconds', async () => {
+    const forgotten: string[] = [];
+    const shared = createApp({
+      store,
+      reader,
+      identity,
+      agent,
+      gatewayBalances: () => gateway(),
+      walletHoldings: async () => [],
+      forgetHoldings: (address) => forgotten.push(address),
+      explorerTransfers: () => explorer(),
+    });
+    const get = (path: string) => shared.request(path, { headers: { authorization: 'Bearer alice-token' } });
+
+    await get('/v1/balance');
+    expect(forgotten).toHaveLength(0);
+
+    await get('/v1/balance?fresh=1');
+    await get('/v1/balance?fresh=1');
+    expect(forgotten).toEqual([ALICE_WALLET]);
+  });
 });
 
 describe('manual send planning', () => {

@@ -151,9 +151,9 @@ export function HomePage({ page, onPageChange }: PageProps) {
     [submit, showCapabilities],
   );
 
-  const fetchBalance = useCallback(async () => {
+  const fetchBalance = useCallback(async (fresh = false) => {
     try {
-      const [result, inbox] = await Promise.all([api.balance(), api.notifications().catch(() => null)]);
+      const [result, inbox] = await Promise.all([api.balance({ fresh }), api.notifications().catch(() => null)]);
       if (inbox) setUnread(inbox.unread);
       setPotsUsd(result.potsUsd ?? '0');
       // The headline is everything the user owns, on every chain — not just
@@ -206,7 +206,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
   // waiting for the next poll — the same gesture as Portfolio.
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchBalance();
+    await fetchBalance(true);
     setRefreshing(false);
   }, [fetchBalance]);
 
@@ -273,7 +273,7 @@ export function HomePage({ page, onPageChange }: PageProps) {
             <BalanceDisplay
               totalUsd={shown}
               loading={balance.state === 'loading' || balance.state === 'setting-up'}
-              onPress={() => void fetchBalance()}
+              onPress={() => void fetchBalance(true)}
             />
 
             {parseUsd(potsUsd) > 0n ? (

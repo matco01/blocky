@@ -462,6 +462,10 @@ export function createApp(deps: AppDeps) {
   /*  Balance                                                                  */
   /* ------------------------------------------------------------------------ */
 
+  /** The shortest gap between two forced re-scans of one wallet's other chains. */
+  const FRESH_SCAN_MS = 10_000;
+  const lastFreshScan = new Map<string, number>();
+
   /**
    * The balance.
    *
@@ -484,6 +488,18 @@ export function createApp(deps: AppDeps) {
   app.get('/v1/balance', async (c) => {
     const wallet = walletOf(c);
     if (wallet instanceof Response) return wallet;
+
+    // `?fresh=1` — Portfolio opening, a pull to refresh — re-scans the other
+    // chains now instead of waiting out the cache. At most once per wallet per
+    // FRESH_SCAN_MS, so a client looping on it can't run up the RPC bill.
+    if (c.req.query('fresh') === '1') {
+      const key = wallet.toLowerCase();
+      const now = Date.now();
+      if (now - (lastFreshScan.get(key) ?? 0) >= FRESH_SCAN_MS) {
+        lastFreshScan.set(key, now);
+        deps.forgetHoldings?.(wallet);
+      }
+    }
 
     const chain = getChain(DEFAULT_CHAIN);
 

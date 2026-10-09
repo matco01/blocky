@@ -249,7 +249,12 @@ async function attempt<T>(path: string, schema: z.ZodType<T>, init?: RequestInit
 /* -------------------------------------------------------------------------- */
 
 export const api = {
-  balance: () => request('/v1/balance', BalanceSchema),
+  /**
+   * `fresh` re-reads the other chains now rather than from the server's
+   * cache: for opening Portfolio and pulling to refresh, never for a poll.
+   */
+  balance: (options?: { fresh?: boolean }) =>
+    request(options?.fresh ? '/v1/balance?fresh=1' : '/v1/balance', BalanceSchema),
 
   me: () => request('/v1/me', MeSchema),
 

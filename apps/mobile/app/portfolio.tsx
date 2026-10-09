@@ -109,10 +109,10 @@ export default function PortfolioScreen() {
     },
   });
 
-  const fetchPortfolio = useCallback(async () => {
+  const fetchPortfolio = useCallback(async (fresh = false) => {
     try {
       const [balance, historyResult] = await Promise.all([
-        api.balance(),
+        api.balance({ fresh }),
         api.balanceHistory().catch((): BalanceHistory => ({ snapshots: [] })),
       ]);
 
@@ -179,7 +179,7 @@ export default function PortfolioScreen() {
   // server refreshes its shared price snapshot. Nothing polls once it closes.
   useFocusEffect(
     useCallback(() => {
-      void fetchPortfolio();
+      void fetchPortfolio(true);
       const timer = setInterval(() => void fetchPortfolio(), PRICE_REFRESH_MS);
       return () => clearInterval(timer);
     }, [fetchPortfolio]),
@@ -187,7 +187,7 @@ export default function PortfolioScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchPortfolio();
+    await fetchPortfolio(true);
     setRefreshing(false);
   }, [fetchPortfolio]);
 
