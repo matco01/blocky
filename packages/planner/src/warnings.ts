@@ -90,13 +90,22 @@ export function feeWarnings(feeUsd: string, outflowUsd: string | null): Warning[
   ];
 }
 
+/**
+ * What the dry run found, as warnings.
+ *
+ * Only a revert is `danger`, and the context only reports one after seeing it
+ * twice, so a red card means "this will fail", not "the check hiccupped".
+ * Not being able to run the check at all (no simulation on that network, the
+ * endpoint down, a timeout) is `warn`: the user should know it wasn't checked,
+ * but crying wolf on every swap would teach them to ignore the red one.
+ */
 export function simulationWarnings(simulation: Simulation | null): Warning[] {
-  if (simulation === null) {
+  if (simulation === null || simulation.status === 'unavailable') {
     return [
       {
         code: 'simulation_failed',
         severity: 'warn',
-        message: "We couldn't dry-run this before sending it.",
+        message: "This couldn't be checked in advance. It will most likely go through as usual.",
       },
     ];
   }
@@ -107,10 +116,7 @@ export function simulationWarnings(simulation: Simulation | null): Warning[] {
     {
       code: 'simulation_failed',
       severity: 'danger',
-      message:
-        simulation.status === 'reverted'
-          ? `This would fail on-chain${simulation.revertReason ? `: ${simulation.revertReason}` : '.'}`
-          : "We couldn't dry-run this before sending it.",
+      message: `A test run says this would fail on-chain${simulation.revertReason ? `: ${simulation.revertReason}` : '.'} Nothing has been sent.`,
     },
   ];
 }

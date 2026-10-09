@@ -142,6 +142,25 @@ export interface ChainReader {
 
   /** Address to primary ENS name, for display. Null when there is no record. */
   lookupEns(address: Address): Promise<string | null>;
+
+  /**
+   * Dry run: the calls in order, sent by `from`, against the latest block —
+   * each one seeing what the ones before it did, so an approval is in place
+   * for the swap after it. Nothing is signed or sent.
+   *
+   * Gas, nonce and the wallet's gas-token balance are not checked
+   * (`validation: false`): the planner's own gas checks cover those, and a
+   * wallet on Arc paying gas in the same USDC it is moving would otherwise
+   * fail here and nowhere else.
+   *
+   * Throws when the chain can't simulate (Avalanche, through Alchemy) or the
+   * endpoint fails: that is "couldn't check", never "it will fail".
+   */
+  simulateCalls?(
+    chainId: ChainId,
+    from: Address,
+    calls: readonly { to: Address; data: `0x${string}`; value: bigint }[],
+  ): Promise<{ ok: true } | { ok: false; reason: string | null }>;
 }
 
 /**
@@ -285,7 +304,34 @@ export function createChainReader(config: RpcConfig): ChainReader {
         return null;
       }
     },
+
+    async simulateCalls(chainId, from, calls) {
+      const { results } = await clientFor(chainId).simulateCalls({
+        account: from,
+        calls: calls.map((call) => ({ to: call.to, data: call.data, value: call.value })),
+        validation: false,
+      });
+
+      const failed = results.find((result) => result.status === 'failure');
+      if (!failed) return { ok: true };
+      return { ok: false, reason: failed.error ? revertReason(failed.error) : null };
+    },
   };
+}
+
+/**
+ * The part of a revert worth showing a person: "ERC20: transfer amount exceeds
+ * balance", not viem's multi-line report with the calldata in it. Null when the
+ * contract gave no reason.
+ */
+function revertReason(error: Error): string | null {
+  const short = 'shortMessage' in error && typeof error.shortMessage === 'string' ? error.shortMessage : error.message;
+  const reason = short
+    .split('\n')[0]!
+    .replace(/^.*reverted with the following reason:\s*/i, '')
+    .replace(/^execution reverted:?\s*/i, '')
+    .trim();
+  return reason && !/^(execution reverted|unknown reason)\.?$/i.test(reason) ? reason.slice(0, 160) : null;
 }
 
 /** Every endpoint the server can be given. Each network reads only its own. */

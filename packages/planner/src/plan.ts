@@ -13,6 +13,7 @@ import {
   type PreparedCall,
   type ResolvedRecipient,
   type ResolvedToken,
+  type Simulation,
   type TransferIntent,
   type Warning,
 } from '@blocky/shared';
@@ -49,7 +50,7 @@ import {
   gasZipDepositCall,
 } from './calls';
 import { fail, type PlanFailure, type PlannerContext } from './context';
-import { destinationWarnings, feeWarnings, recipientWarnings, tokenWarnings } from './warnings';
+import { destinationWarnings, feeWarnings, recipientWarnings, simulationWarnings, tokenWarnings } from './warnings';
 
 /**
  * Intent in, Plan out.
@@ -622,6 +623,9 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   ];
 
   const fromElsewhere = source.id !== DEFAULT_CHAIN ? source.name : null;
+  const calls = [...route.calls, ...(feeCall ? [feeCall] : []), ...(topUpCall ? [topUpCall] : [])];
+  const simulation = await dryRun(ctx, calls);
+  warnings.push(...simulationWarnings(simulation));
 
   return {
     ok: true,
@@ -642,7 +646,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
       recipient: null,
       fee,
       warnings,
-      calls: [...route.calls, ...(feeCall ? [feeCall] : []), ...(topUpCall ? [topUpCall] : [])],
+      calls,
       route: {
         provider: route.provider,
         etaSeconds: route.etaSeconds,
@@ -653,8 +657,37 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
       ...(feeCall && feeTerms
         ? { blockyFee: { amount: blockyFee.toString(), usd: blockyFeeUsd, recipient: feeTerms.recipient, bps: feeTerms.bps } }
         : {}),
-    }),
+    }, simulation),
   };
+}
+
+/**
+ * Dry-run a plan's calls before the user sees the card: every chain's calls in
+ * the order they will be sent, as one sequence, so an approval is in place for
+ * the swap after it.
+ *
+ * A revert on any chain is the answer. Short of that, one chain that couldn't
+ * be checked makes the whole plan "unavailable": a pass on Arc says nothing
+ * about the call that would run on Avalanche. No `simulate` at all is null,
+ * which `simulationWarnings` reads the same way.
+ */
+async function dryRun(ctx: PlannerContext, calls: readonly PreparedCall[]): Promise<Simulation | null> {
+  if (!ctx.simulate) return null;
+
+  const byChain = new Map<ChainId, PreparedCall[]>();
+  for (const call of calls) byChain.set(call.chainId, [...(byChain.get(call.chainId) ?? []), call]);
+
+  const results = await Promise.all(
+    [...byChain].map(([chainId, group]) =>
+      ctx.simulate!(chainId, group).catch((): Simulation => ({ status: 'unavailable', revertReason: null, actualInflow: null })),
+    ),
+  );
+
+  return (
+    results.find((result) => result.status === 'reverted') ??
+    results.find((result) => result.status === 'unavailable') ??
+    { status: 'success', revertReason: null, actualInflow: null }
+  );
 }
 
 /** A chain's USDC, as a resolved token — named like the token it came from. */
@@ -971,21 +1004,20 @@ function probeCalls(chainId: ChainId, token: ResolvedToken, count: number): Prep
 /*  Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** The parts every plan shares: an id, a price window, and no dry run. */
-function stamp(plan: Omit<Plan, 'id' | 'simulation' | 'createdAt' | 'expiresAt'>): Plan {
+/** The parts every plan shares: an id, a price window, and the dry run if there was one. */
+function stamp(plan: Omit<Plan, 'id' | 'simulation' | 'createdAt' | 'expiresAt'>, simulation: Simulation | null = null): Plan {
   const now = new Date();
 
   return {
     id: crypto.randomUUID(),
     ...plan,
     /*
-     * Neither a plain ERC-20 transfer nor a CCTP burn dry-runs: both are fixed
-     * calls to known contracts, and the balance and gas checks above already
-     * cover how they can fail. `ctx.simulate` is for the swap path, where a
-     * router, slippage or an allowance can revert in ways only a dry run
-     * catches.
+     * A plain ERC-20 transfer never dry-runs: it is a fixed call to a known
+     * contract, and the balance and gas checks already cover how it can fail.
+     * Moves between chains do (see `dryRun`): a router, a bridge's deposit,
+     * slippage or an allowance can revert in ways only a dry run catches.
      */
-    simulation: null,
+    simulation,
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + PLAN_TTL_MS).toISOString(),
   };

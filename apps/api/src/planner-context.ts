@@ -4,9 +4,11 @@ import {
   usdValueOf,
   type Address,
   type ChainId,
+  type PreparedCall,
   type RecipientRef,
   type ResolvedRecipient,
   type ResolvedToken,
+  type Simulation,
   type TokenRef,
 } from '@blocky/shared';
 import type { PlannerContext } from '@blocky/planner';
@@ -58,6 +60,29 @@ function transactionGas(callCount: number): bigint {
   return TX_BASE_GAS + TX_EXTRA_CALL_GAS * BigInt(Math.max(0, callCount - 1));
 }
 
+/**
+ * The longest a dry run may hold up a card. Measured at 30–250 ms on every
+ * chain; past this, something is wrong with the endpoint, and the plan goes
+ * out marked "couldn't check" rather than late.
+ */
+const SIMULATION_TIMEOUT_MS = 3_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** A chain's gas token priced in USD, or null. Throws only if the price feed itself is down. */
 async function gasTokenPrice(chainId: ChainId): Promise<string | null> {
   return priceAsDecimal(await getTokenPriceUsd(getChain(chainId).nativeCurrency.symbol));
@@ -104,6 +129,37 @@ export function createPlannerContext({
 
   return {
     blockyFee: () => blockyFee,
+
+    /*
+     * The dry run, tuned against false alarms: red on a card has to mean "this
+     * will fail", or people learn to tap past it.
+     *  - A revert is only reported after a second run agrees, so a pool that
+     *    moved for a moment, or a node a block behind, doesn't trip it.
+     *  - Anything that isn't a clean answer (no simulation on this chain, the
+     *    endpoint down, slower than SIMULATION_TIMEOUT_MS) is "unavailable",
+     *    which the card shows as a note, not a warning.
+     */
+    ...(reader.simulateCalls
+      ? {
+          async simulate(chainId: ChainId, calls: readonly PreparedCall[]): Promise<Simulation> {
+            const unavailable: Simulation = { status: 'unavailable', revertReason: null, actualInflow: null };
+            if (!reader.supports(chainId)) return unavailable;
+
+            const prepared = calls.map((call) => ({ to: call.to, data: call.data as `0x${string}`, value: BigInt(call.value) }));
+            const run = () => withTimeout(reader.simulateCalls!(chainId, account, prepared), SIMULATION_TIMEOUT_MS);
+
+            try {
+              const first = await run();
+              if (first.ok) return { status: 'success', revertReason: null, actualInflow: null };
+              const second = await run();
+              if (second.ok) return { status: 'success', revertReason: null, actualInflow: null };
+              return { status: 'reverted', revertReason: second.reason ?? first.reason, actualInflow: null };
+            } catch {
+              return unavailable;
+            }
+          },
+        }
+      : {}),
 
     async resolveToken(ref: TokenRef, chainId: ChainId): Promise<ResolvedToken | null> {
       const chain = getChain(chainId);

@@ -253,3 +253,55 @@ describe("Blocky's fee", () => {
     expect(plan.calls).toHaveLength(2);
   });
 });
+
+describe('the dry run', () => {
+  const ran = (status: 'success' | 'reverted' | 'unavailable', revertReason: string | null = null) => ({
+    status,
+    revertReason,
+    actualInflow: null,
+  });
+
+  it("runs every call on the chain it's sent on, in order, before the user sees the card", async () => {
+    const seen: { chainId: number; calls: number }[] = [];
+    const plan = await planOk(
+      {},
+      fakeContext({
+        simulate: async (chainId, calls) => {
+          seen.push({ chainId, calls: calls.length });
+          return ran('success');
+        },
+      }),
+    );
+
+    expect(seen).toEqual([{ chainId: CHAIN.arcTestnet, calls: plan.calls.length }]);
+    expect(plan.simulation?.status).toBe('success');
+    expect(codes(plan)).not.toContain('simulation_failed');
+  });
+
+  it('shows a revert in red, with the reason, and still hands it to the user to decide', async () => {
+    const plan = await planOk({}, fakeContext({ simulate: async () => ran('reverted', 'ERC20: insufficient allowance') }));
+
+    const warning = plan.warnings.find((w) => w.code === 'simulation_failed');
+    expect(warning?.severity).toBe('danger');
+    expect(warning?.message).toContain('insufficient allowance');
+    // Red never auto-executes: a person looks at it first.
+    expect(evaluatePolicy({ policy: { ...DEFAULT_POLICY, enabled: true }, plan, spentTodayUsd: '0' }).outcome).not.toBe('auto_execute');
+  });
+
+  it("says plainly when it couldn't be checked, without raising an alarm", async () => {
+    const unavailable = await planOk({}, fakeContext({ simulate: async () => ran('unavailable') }));
+    const broken = await planOk(
+      {},
+      fakeContext({
+        simulate: async () => {
+          throw new Error('rpc down');
+        },
+      }),
+    );
+
+    for (const plan of [unavailable, broken]) {
+      expect(plan.simulation?.status).toBe('unavailable');
+      expect(plan.warnings.find((w) => w.code === 'simulation_failed')?.severity).toBe('warn');
+    }
+  });
+});
