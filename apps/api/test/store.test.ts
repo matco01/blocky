@@ -325,7 +325,9 @@ describe('surviving a restart', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+    // Two cold starts of embedded Postgres from disk: about 4s alone, and past
+    // the 5s default when the whole suite runs at once.
+  }, 30_000);
 });
 
 describe('memories', () => {
