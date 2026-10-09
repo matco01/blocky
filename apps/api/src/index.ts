@@ -64,6 +64,31 @@ const explorerTransfers = (address: Parameters<typeof fetchExplorerTransfers>[0]
         })
       : Promise.reject(new Error('No BLOCKSCOUT_API_KEY configured for mainnet activity.'));
 
+/*
+ * For `/health`: enough to tell from outside whether a deploy is the commit
+ * we pushed and whether each chain reads through our provider or a
+ * rate-limited public endpoint. Names only — never a URL, which carries a key.
+ */
+const providerUrls: Record<string, string | undefined> = IS_TESTNET
+  ? { 'Arc Testnet': env.ARC_TESTNET_RPC_URL, 'Base Sepolia': env.BASE_SEPOLIA_RPC_URL, 'Arbitrum Sepolia': env.ARBITRUM_SEPOLIA_RPC_URL }
+  : {
+      Arc: env.ARC_RPC_URL,
+      Ethereum: env.ETHEREUM_RPC_URL,
+      Base: env.BASE_RPC_URL,
+      Arbitrum: env.ARBITRUM_RPC_URL,
+      Optimism: env.OPTIMISM_RPC_URL,
+      Polygon: env.POLYGON_RPC_URL,
+      Unichain: env.UNICHAIN_RPC_URL,
+      Avalanche: env.AVALANCHE_RPC_URL,
+      HyperEVM: env.HYPEREVM_RPC_URL,
+      Robinhood: env.ROBINHOOD_RPC_URL,
+    };
+const health = {
+  commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
+  rpc: Object.fromEntries(Object.entries(providerUrls).map(([chain, url]) => [chain, url ? 'provider' : 'public'])),
+  activityFeed: IS_TESTNET || env.BLOCKSCOUT_API_KEY ? 'complete' : 'blocky-sends-only',
+};
+
 // Blocky's fee on swaps and moves out of Arc. No address configured, no fee.
 const blockyFee = env.BLOCKY_FEE_RECIPIENT ? { recipient: env.BLOCKY_FEE_RECIPIENT, bps: env.BLOCKY_FEE_BPS } : null;
 
@@ -80,6 +105,7 @@ const app = createApp({
   explorerTransfers,
   logRequests: true,
   blockyFee,
+  health,
 });
 
 // Price alerts: one sweep a minute against the shared price snapshot.

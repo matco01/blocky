@@ -82,6 +82,11 @@ export interface AppDeps {
   walletHoldings: (address: Address, tracked: readonly TrackedToken[]) => Promise<TokenHolding[]>;
   /** Drop a wallet's cached holdings, so the next read is fresh. */
   forgetHoldings?: (address: Address) => void;
+  /**
+   * Extra facts for `/health`, to check a deploy from outside: which commit
+   * is running, which chains read through a provider. Never a URL or a key.
+   */
+  health?: Record<string, unknown>;
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>;
   /** How long to wait for a just-submitted transaction to become visible. */
   receiptPolling?: { attempts: number; delayMs: number };
@@ -129,7 +134,7 @@ export function createApp(deps: AppDeps) {
     );
   }
 
-  app.get('/health', (c) => c.json({ ok: true, defaultChain: getChain(DEFAULT_CHAIN).name }));
+  app.get('/health', (c) => c.json({ ok: true, defaultChain: getChain(DEFAULT_CHAIN).name, ...deps.health }));
 
   /* --- The website's waitlist: public, so outside /v1 and its auth --------- */
 
