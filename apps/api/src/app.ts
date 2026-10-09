@@ -464,6 +464,8 @@ export function createApp(deps: AppDeps) {
 
   /** The shortest gap between two forced re-scans of one wallet's other chains. */
   const FRESH_SCAN_MS = 10_000;
+  /** After a move between chains, when to drop the cached scan again: past every quoted arrival time. */
+  const ARRIVAL_RECHECKS_S = [5, 15, 30, 60, 120];
   const lastFreshScan = new Map<string, number>();
 
   /**
@@ -899,6 +901,17 @@ export function createApp(deps: AppDeps) {
       // Money just moved: the next balance read should see it, not a cached
       // scan from before.
       deps.forgetHoldings?.(wallet);
+
+      // A move between chains lands a little after the transaction verified
+      // above: seconds to a minute later, on the other chain. A poll in that
+      // gap would cache "not there yet" for the whole holdings TTL, so the
+      // cache is dropped again while it lands. Each drop is free; it only makes
+      // the next poll read fresh.
+      if (plan.route) {
+        for (const seconds of ARRIVAL_RECHECKS_S) {
+          setTimeout(() => deps.forgetHoldings?.(wallet), seconds * 1000).unref?.();
+        }
+      }
 
       /*
        * A recipient becomes "known" only here: after a send the user approved

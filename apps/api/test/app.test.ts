@@ -9,7 +9,7 @@ import {
   type Receipt,
 } from '@blocky/wallet-core';
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkPriceAlerts } from '../src/alerts';
 import { createApp, type AppDeps } from '../src/app';
 import type { IdentityProvider } from '../src/auth';
@@ -375,6 +375,42 @@ describe('recording a move between chains', () => {
 
     expect(status).toBe(422);
     expect(await store.listExecutions('did:privy:alice')).toEqual([]);
+  });
+
+  it('keeps re-reading the other chains while the money lands there', async () => {
+    const plan = await planBridge();
+    chain.receipts.set(hash('e'), burnReceipt(burn));
+    let forgotten = 0;
+    const tracking = createApp({
+      store,
+      reader,
+      identity,
+      agent,
+      gatewayBalances: () => gateway(),
+      walletHoldings: async () => [],
+      forgetHoldings: () => {
+        forgotten += 1;
+      },
+      explorerTransfers: () => explorer(),
+      receiptPolling: { attempts: 1, delayMs: 0 },
+    });
+
+    vi.useFakeTimers({ toFake: ['setTimeout'], shouldAdvanceTime: true });
+    try {
+      const response = await tracking.request(`/v1/plans/${plan.id}/executions`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer alice-token', 'content-type': 'application/json' },
+        body: JSON.stringify({ txHash: hash('e') }),
+      });
+      expect(response.status).toBe(201);
+      expect(forgotten).toBe(1);
+
+      // Past the last recheck: once on settling, then once per recheck.
+      vi.advanceTimersByTime(121_000);
+      expect(forgotten).toBe(6);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not add anyone to the one-tap list — there is no one else involved', async () => {
