@@ -1,0 +1,47 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# env — never commit secrets
+.env
+.env.*
+!.env.example
+
+# expo
+.expo/
+.expo-shared/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+ios/
+android/
+
+# logs
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# os
+.DS_Store
+Thumbs.db
+
+# embedded dev database
+.data/
+
+# local tooling and media — never part of the app
+.claude/
+*.mp4
+*.mov
+
+# --- EAS only: replaces .gitignore for builds, so everything above is repeated.
+# Not part of the app.
+promo/
+apps/web/public/
+docs/
+.data/
