@@ -64,6 +64,24 @@ import { createRequest, insightsFor, linkMatchingRequest, monthStart, moneyWarni
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
 import { DuplicateExecutionError, type Store } from './store';
 
+/**
+ * How much anyone can talk to Blocky. Every message is a paid AI call, and
+ * signing up only takes an email, so without these one script could run up the
+ * bill. Generous for a person: nobody chats about their money 30 times in ten
+ * minutes, or 300 times in a day.
+ */
+export interface ChatLimits {
+  burst: number;
+  burstWindowMs: number;
+  daily: number;
+}
+
+export const CHAT_LIMITS: ChatLimits = {
+  burst: 30,
+  burstWindowMs: 10 * 60 * 1000,
+  daily: 300,
+};
+
 export interface AppDeps {
   store: Store;
   reader: ChainReader;
@@ -87,6 +105,8 @@ export interface AppDeps {
    * is running, which chains read through a provider. Never a URL or a key.
    */
   health?: Record<string, unknown>;
+  /** Override the chat limits (tests use small numbers). */
+  chatLimits?: Partial<ChatLimits>;
   explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>;
   /** How long to wait for a just-submitted transaction to become visible. */
   receiptPolling?: { attempts: number; delayMs: number };
@@ -960,9 +980,39 @@ export function createApp(deps: AppDeps) {
       .default([]),
   });
 
+  // Per user, in memory: one server, like the waitlist. A restart
+  // forgets the counts, which only ever errs towards letting a person talk.
+  const chatLimits = { ...CHAT_LIMITS, ...deps.chatLimits };
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const chatHits = new Map<string, number[]>();
+
+  /** Records a message if it's allowed; otherwise says which limit it hit. */
+  function chatAllowed(userId: string): 'ok' | 'burst' | 'daily' {
+    const now = Date.now();
+    const day = (chatHits.get(userId) ?? []).filter((at) => now - at < DAY_MS);
+    const burst = day.filter((at) => now - at < chatLimits.burstWindowMs);
+    if (day.length >= chatLimits.daily) return 'daily';
+    if (burst.length >= chatLimits.burst) return 'burst';
+    day.push(now);
+    chatHits.set(userId, day);
+    if (chatHits.size > 10_000) {
+      for (const [key, hits] of chatHits) if (!hits.some((at) => now - at < DAY_MS)) chatHits.delete(key);
+    }
+    return 'ok';
+  }
+
   app.post('/v1/agent/chat', async (c) => {
     if (!deps.agent) {
       return c.json({ error: 'Agent is not configured — set ANTHROPIC_API_KEY' }, 503);
+    }
+
+    const limited = chatAllowed(c.get('user').id);
+    if (limited !== 'ok') {
+      const message = {
+        burst: 'That’s a lot of messages in a short time. Give Blocky a few minutes and try again.',
+        daily: 'You’ve reached today’s message limit. Blocky will be ready again tomorrow.',
+      }[limited];
+      return c.json({ error: 'rate_limited', message }, 429);
     }
 
     const wallet = walletOf(c);

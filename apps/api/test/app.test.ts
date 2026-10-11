@@ -11,7 +11,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkPriceAlerts } from '../src/alerts';
-import { createApp, type AppDeps } from '../src/app';
+import { createApp, type AppDeps, type ChatLimits } from '../src/app';
 import type { IdentityProvider } from '../src/auth';
 import { openDatabase, type Database } from '../src/db/client';
 import { createStore, type Store } from '../src/store';
@@ -614,6 +614,58 @@ describe('agent chat', () => {
 
     expect(status).toBe(400);
   });
+});
+
+describe('chat limits', () => {
+  // Every message is a paid AI call, and signing up only takes an email.
+  function limitedApp(limits: Partial<ChatLimits>) {
+    agent = async () => ({ kind: 'reply', reply: 'ok', plan: null, decision: null, plans: [], status: 'ok', usage: {} as never, appearance: null, followUp: null });
+    const limitedApi = createApp({
+      store,
+      reader,
+      identity,
+      agent,
+      gatewayBalances: () => gateway(),
+      walletHoldings: async () => [],
+      explorerTransfers: () => explorer(),
+      chatLimits: limits,
+    });
+    return (token: string) =>
+      limitedApi.request('/v1/agent/chat', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'hi', history: [] }),
+      });
+  }
+
+  it('slows one person down after a burst, with a message the app can show', async () => {
+    const chat = limitedApp({ burst: 3 });
+    for (let i = 0; i < 3; i++) expect((await chat('alice-token')).status).toBe(200);
+
+    const refused = await chat('alice-token');
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toMatchObject({ error: 'rate_limited', message: expect.stringMatching(/few minutes/) });
+  });
+
+  it('counts each person separately', async () => {
+    const chat = limitedApp({ burst: 2 });
+    await chat('alice-token');
+    await chat('alice-token');
+
+    expect((await chat('alice-token')).status).toBe(429);
+    expect((await chat('mallory-token')).status).toBe(200);
+  });
+
+  it('stops for the day at the daily limit', async () => {
+    const chat = limitedApp({ burst: 100, daily: 2 });
+    await chat('alice-token');
+    await chat('alice-token');
+
+    const refused = await chat('alice-token');
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toMatchObject({ message: expect.stringMatching(/tomorrow/) });
+  });
+
 });
 
 describe('re-quoting an expired plan', () => {
