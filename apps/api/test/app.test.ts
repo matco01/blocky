@@ -630,11 +630,11 @@ describe('chat limits', () => {
       explorerTransfers: () => explorer(),
       chatLimits: limits,
     });
-    return (token: string) =>
+    return (token: string, body: unknown = { message: 'hi', history: [] }) =>
       limitedApi.request('/v1/agent/chat', {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ message: 'hi', history: [] }),
+        body: JSON.stringify(body),
       });
   }
 
@@ -663,7 +663,14 @@ describe('chat limits', () => {
 
     const refused = await chat('alice-token');
     expect(refused.status).toBe(429);
-    expect(await refused.json()).toMatchObject({ message: expect.stringMatching(/tomorrow/) });
+    expect(await refused.json()).toMatchObject({ message: expect.stringMatching(/within a day/) });
+  });
+
+  it('does not count a request it turns away as invalid', async () => {
+    const chat = limitedApp({ burst: 1 });
+    for (let i = 0; i < 3; i++) expect((await chat('alice-token', { history: [] })).status).toBe(400);
+
+    expect((await chat('alice-token')).status).toBe(200);
   });
 
 });
@@ -859,6 +866,16 @@ describe('payment requests', () => {
     expect((await call(`/v1/requests/${id}/pay`, { token: 'alice-token', method: 'POST' })).status).toBe(403);
     expect((await call(`/v1/requests/${id}/decline`, { token: 'mallory-token', method: 'POST' })).body.status).toBe('declined');
     expect((await call(`/v1/requests/${id}/pay`, { token: 'mallory-token', method: 'POST' })).status).toBe(409);
+  });
+
+  it('shows a request asked of someone only to them and the one asking', async () => {
+    const asked = (await call('/v1/requests', { token: 'alice-token', method: 'POST', body: { payer: 'mallory', amountUsd: '3' } })).body.request.id;
+    const open = (await call('/v1/requests', { token: 'alice-token', method: 'POST', body: { amountUsd: '3' } })).body.request.id;
+
+    expect((await call(`/v1/requests/${asked}`, { token: 'mallory-token' })).status).toBe(200);
+    expect((await call(`/v1/requests/${asked}`, { token: 'newbie-token' })).status).toBe(404);
+    // A link is meant to be passed around.
+    expect((await call(`/v1/requests/${open}`, { token: 'newbie-token' })).status).toBe(200);
   });
 
   it('refuses to ask someone who is not on Blocky', async () => {

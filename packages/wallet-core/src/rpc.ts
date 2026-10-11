@@ -324,14 +324,24 @@ export function createChainReader(config: RpcConfig): ChainReader {
  * balance", not viem's multi-line report with the calldata in it. Null when the
  * contract gave no reason.
  */
-function revertReason(error: Error): string | null {
+export function revertReason(error: Error): string | null {
+  // viem decodes the reason onto the error (or one it wraps): use that first.
+  for (let e: unknown = error, depth = 0; e && depth < 6; e = (e as { cause?: unknown }).cause, depth++) {
+    const reason = (e as { reason?: unknown }).reason;
+    if (typeof reason === 'string' && reason.trim()) return clean(reason);
+  }
+  // Otherwise the reason, when there is one, follows "reason:" — on the same
+  // line or the next. viem's own boilerplate ("The contract function
+  // "<unknown>" returned no data") is never a reason and never shown.
   const short = 'shortMessage' in error && typeof error.shortMessage === 'string' ? error.shortMessage : error.message;
-  const reason = short
-    .split('\n')[0]!
-    .replace(/^.*reverted with the following reason:\s*/i, '')
-    .replace(/^execution reverted:?\s*/i, '')
-    .trim();
-  return reason && !/^(execution reverted|unknown reason)\.?$/i.test(reason) ? reason.slice(0, 160) : null;
+  const match = short.match(/reason:\s*([\s\S]+)/i) ?? short.match(/^execution reverted:\s*(.+)$/im);
+  return match ? clean(match[1]!.split('\n')[0]!) : null;
+}
+
+function clean(reason: string): string | null {
+  const text = reason.trim();
+  if (!text || /^(execution reverted|unknown reason)\.?$/i.test(text) || /<unknown>|returned no data|contract function/i.test(text)) return null;
+  return text.slice(0, 160);
 }
 
 /** Every endpoint the server can be given. Each network reads only its own. */

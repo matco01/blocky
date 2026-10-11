@@ -280,7 +280,11 @@ export function createApp(deps: AppDeps) {
 
   app.get('/v1/requests/:id', async (c) => {
     const request = await store.getPaymentRequest(c.req.param('id'));
-    if (!request) return c.json({ error: 'not_found', message: 'That request is gone.' }, 404);
+    // A link anyone can pay is anyone's to see; one asked of a person is theirs and the asker's.
+    const me = c.get('user').id;
+    if (!request || (request.payerId !== null && me !== request.payerId && me !== request.requesterId)) {
+      return c.json({ error: 'not_found', message: 'That request is gone.' }, 404);
+    }
     return c.json({ request });
   });
 
@@ -985,6 +989,7 @@ export function createApp(deps: AppDeps) {
   const chatLimits = { ...CHAT_LIMITS, ...deps.chatLimits };
   const DAY_MS = 24 * 60 * 60 * 1000;
   const chatHits = new Map<string, number[]>();
+  let lastSweep = Date.now();
 
   /** Records a message if it's allowed; otherwise says which limit it hit. */
   function chatAllowed(userId: string): 'ok' | 'burst' | 'daily' {
@@ -995,7 +1000,10 @@ export function createApp(deps: AppDeps) {
     if (burst.length >= chatLimits.burst) return 'burst';
     day.push(now);
     chatHits.set(userId, day);
-    if (chatHits.size > 10_000) {
+    // Forget people who've been quiet a day, at most hourly so a busy
+    // server isn't walking every user on every message.
+    if (now - lastSweep > 60 * 60 * 1000) {
+      lastSweep = now;
       for (const [key, hits] of chatHits) if (!hits.some((at) => now - at < DAY_MS)) chatHits.delete(key);
     }
     return 'ok';
@@ -1006,21 +1014,22 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: 'Agent is not configured — set ANTHROPIC_API_KEY' }, 503);
     }
 
-    const limited = chatAllowed(c.get('user').id);
-    if (limited !== 'ok') {
-      const message = {
-        burst: 'That’s a lot of messages in a short time. Give Blocky a few minutes and try again.',
-        daily: 'You’ve reached today’s message limit. Blocky will be ready again tomorrow.',
-      }[limited];
-      return c.json({ error: 'rate_limited', message }, 429);
-    }
-
     const wallet = walletOf(c);
     if (wallet instanceof Response) return wallet;
 
     const parsed = ChatBodySchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: 'Invalid request', issues: parsed.error.issues }, 400);
+    }
+
+    // Counted only once the message is real, so a bad request costs nothing.
+    const limited = chatAllowed(c.get('user').id);
+    if (limited !== 'ok') {
+      const message = {
+        burst: 'That’s a lot of messages in a short time. Give Blocky a few minutes and try again.',
+        daily: 'You’ve reached the daily message limit. Blocky will be ready again within a day.',
+      }[limited];
+      return c.json({ error: 'rate_limited', message }, 429);
     }
 
     // A conversation must open with the user. Anything before the first user

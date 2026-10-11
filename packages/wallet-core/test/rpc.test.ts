@@ -1,6 +1,8 @@
 import { AddressSchema } from '@blocky/shared';
 import { describe, expect, it } from 'vitest';
+import { ContractFunctionExecutionError, ContractFunctionRevertedError, ContractFunctionZeroDataError } from 'viem';
 import { rpcConfigFromEnv } from '../src';
+import { revertReason } from '../src/rpc';
 
 /**
  * The checksum trap.
@@ -82,5 +84,29 @@ describe('rpcConfigFromEnv on mainnet', () => {
     for (const id of [1, 10, 130, 137, 8453, 42161, 43114]) {
       expect(urls[id as keyof typeof urls]).toMatch(/^https:\/\//);
     }
+  });
+});
+
+/**
+ * What a failed dry-run says on the card. viem decodes the revert reason onto
+ * the error it wraps, and its own wording ("<unknown>", "returned no data")
+ * must never reach a person.
+ */
+describe('revert reasons from a dry-run', () => {
+  it('keeps the decoded reason, which viem puts on the second line', () => {
+    const inner = new ContractFunctionRevertedError({ abi: [], functionName: '<unknown>', message: 'ERC20: transfer amount exceeds balance' });
+    const outer = new ContractFunctionExecutionError(inner, { abi: [], functionName: '<unknown>', args: [] });
+
+    expect(revertReason(outer)).toBe('ERC20: transfer amount exceeds balance');
+  });
+
+  it('reads the reason from the message when nothing is decoded', () => {
+    expect(revertReason(new Error('execution reverted: STF'))).toBe('STF');
+  });
+
+  it('shows nothing rather than viem’s own wording', () => {
+    expect(revertReason(new ContractFunctionZeroDataError({ functionName: '<unknown>' }))).toBeNull();
+    expect(revertReason(new Error('The contract function "<unknown>" reverted.'))).toBeNull();
+    expect(revertReason(new Error('execution reverted'))).toBeNull();
   });
 });

@@ -70,7 +70,12 @@ const explorerTransfers = (address: Parameters<typeof fetchExplorerTransfers>[0]
  * rate-limited public endpoint. Names only — never a URL, which carries a key.
  */
 const providerUrls: Record<string, string | undefined> = IS_TESTNET
-  ? { 'Arc Testnet': env.ARC_TESTNET_RPC_URL, 'Base Sepolia': env.BASE_SEPOLIA_RPC_URL, 'Arbitrum Sepolia': env.ARBITRUM_SEPOLIA_RPC_URL }
+  ? // Testnet URLs default to the public endpoints, so only a set variable means ours.
+    {
+      'Arc Testnet': process.env.ARC_TESTNET_RPC_URL,
+      'Base Sepolia': process.env.BASE_SEPOLIA_RPC_URL,
+      'Arbitrum Sepolia': process.env.ARBITRUM_SEPOLIA_RPC_URL,
+    }
   : {
       Arc: env.ARC_RPC_URL,
       Ethereum: env.ETHEREUM_RPC_URL,

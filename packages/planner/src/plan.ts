@@ -563,6 +563,10 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
    * to confirm. Measured against a small trade of the same thing at the same
    * moment — see `sizeImpactBps` — not against a price feed.
    */
+  // The dry-run needs only the calls, so it runs alongside the price checks.
+  const calls = [...route.calls, ...(feeCall ? [feeCall] : []), ...(topUpCall ? [topUpCall] : [])];
+  const simulating = dryRun(ctx, calls);
+
   const swapped = received.kind !== 'usdc' || sells;
   const impactBps =
     swapped && route.provider === 'across-swap' && bridgedUsd !== null
@@ -623,8 +627,7 @@ async function planBridge(intent: BridgeIntent, ctx: PlannerContext): Promise<Pl
   ];
 
   const fromElsewhere = source.id !== DEFAULT_CHAIN ? source.name : null;
-  const calls = [...route.calls, ...(feeCall ? [feeCall] : []), ...(topUpCall ? [topUpCall] : [])];
-  const simulation = await dryRun(ctx, calls);
+  const simulation = await simulating;
   warnings.push(...simulationWarnings(simulation));
 
   return {

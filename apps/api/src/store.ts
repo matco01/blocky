@@ -932,8 +932,12 @@ export function createStore(db: Db): Store {
       if (!pot) return null;
       // Signed: "-20" takes money out.
       const delta = deltaUsd.trim().startsWith('-') ? -parseUsd(deltaUsd.trim().slice(1)) : parseUsd(deltaUsd.trim());
-      const next = parseUsd(pot.savedUsd) + delta;
-      await db.update(pots).set({ savedUsd: formatUsd(next > 0n ? next : 0n) }).where(eq(pots.id, id));
+      // In the database, not read-then-write, so two quick taps both count.
+      const signed = delta < 0n ? `-${formatUsd(-delta)}` : formatUsd(delta);
+      await db
+        .update(pots)
+        .set({ savedUsd: sql`greatest(${pots.savedUsd} + ${signed}::numeric, 0)` })
+        .where(eq(pots.id, id));
       return potRow(userId, id);
     },
 
