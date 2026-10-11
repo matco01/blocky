@@ -8,8 +8,9 @@ import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
 import { confirmWithBiometrics } from '../../lib/biometrics';
+import { clearChat } from '../../lib/chatStore';
 import { config } from '../../lib/config';
 import { useWallet } from '../../lib/wallet';
 import { useTheme } from '../../theme';
@@ -86,6 +87,45 @@ export function AccountPage({ page, onPageChange }: PageProps) {
     const result = await WebBrowser.openAuthSessionAsync(`${config.websiteUrl}/export/#${fragment}`, 'blocky://');
     if (result.type === 'success' && result.url.includes('export=done')) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    }
+  }
+
+  /**
+   * Google Play and the App Store both require it. The wallet lives behind the
+   * login, so the server refuses while it holds money; the person can export
+   * their key and then go ahead.
+   */
+  function confirmDelete() {
+    Alert.alert(
+      'Delete your account?',
+      'This deletes your Blocky account, your history, pots and contacts, and the login to your wallet. It can’t be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => void deleteAccount(false) },
+      ],
+    );
+  }
+
+  async function deleteAccount(keyExported: boolean) {
+    const approval = await confirmWithBiometrics('Confirm it’s you to delete your account');
+    if (!approval.ok) {
+      if (approval.message) Alert.alert('Delete account', approval.message);
+      return;
+    }
+    try {
+      await api.deleteAccount(keyExported);
+      clearChat();
+      await logout();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'has_money') {
+        Alert.alert('Your wallet isn’t empty', error.message, [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Export key', onPress: () => void exportKey() },
+          { text: 'I’ve exported it, delete', style: 'destructive', onPress: () => void deleteAccount(true) },
+        ]);
+        return;
+      }
+      Alert.alert('Delete account', error instanceof Error ? error.message : 'Something went wrong. Try again.');
     }
   }
 
@@ -174,8 +214,8 @@ export function AccountPage({ page, onPageChange }: PageProps) {
           value="Who sees what, and what Blocky can't do"
           chevron
           onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_URL)}
-          last
         />
+        <Row icon="trash-outline" label="Delete account" value="Your account, data and wallet login" chevron onPress={confirmDelete} last />
       </Section>
 
       {/* --- Sign out ------------------------------------------------------- */}

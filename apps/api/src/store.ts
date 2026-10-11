@@ -276,6 +276,8 @@ export interface Store {
   /** Claim a username. `taken` when someone else has it; `invalid` when it breaks the rules. */
   setUsername(userId: string, username: string): Promise<'ok' | 'taken' | 'invalid'>;
   getUsername(userId: string): Promise<string | null>;
+  /** Everything Blocky keeps about a person; every table cascades from the user row. */
+  deleteUser(userId: string): Promise<void>;
   findUserByUsername(username: string): Promise<PublicUser | null>;
   /** The Blocky user behind a wallet, if any — so a payment to them can tell them. */
   findUserByWallet(address: Address): Promise<PublicUser | null>;
@@ -717,6 +719,10 @@ export function createStore(db: Db): Store {
         return 'taken';
       }
       return 'ok';
+    },
+
+    async deleteUser(userId) {
+      await db.delete(users).where(eq(users.id, userId));
     },
 
     async getUsername(userId) {

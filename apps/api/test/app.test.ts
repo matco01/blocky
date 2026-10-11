@@ -36,6 +36,7 @@ const TOKENS: Record<string, { userId: string; wallet: string | null }> = {
 let database: Database;
 let store: Store;
 let walletLookups: number;
+let deletedLogins: string[];
 
 let chain: {
   balance: bigint | Error;
@@ -52,6 +53,9 @@ const identity: IdentityProvider = {
   async embeddedWalletAddress(userId) {
     walletLookups++;
     return (Object.values(TOKENS).find((t) => t.userId === userId)?.wallet ?? null) as `0x${string}` | null;
+  },
+  async deleteUser(userId) {
+    deletedLogins.push(userId);
   },
 };
 
@@ -144,6 +148,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await database.db.execute(sql`TRUNCATE executions, plans, sessions, contacts, policies, users CASCADE`);
   walletLookups = 0;
+  deletedLogins = [];
   chain = { balance: 100_000_000n, receipts: new Map() };
   gateway = async () => ({ totalUsd: '0', perChain: [] });
   explorer = async () => [];
@@ -187,6 +192,52 @@ describe('authentication', () => {
 
     expect(status).toBe(409);
     expect(body.error).toBe('wallet_not_ready');
+  });
+});
+
+describe('deleting an account', () => {
+  const remove = (body: unknown = {}) => call('/v1/me', { token: 'alice-token', method: 'DELETE', body });
+
+  it('refuses while the wallet holds money, since the wallet goes with the login', async () => {
+    const { status, body } = await remove();
+
+    expect(status).toBe(409);
+    expect(body).toMatchObject({ error: 'has_money', message: expect.stringMatching(/\$100\.00.*export your private key/) });
+    expect(deletedLogins).toEqual([]);
+  });
+
+  it('counts money waiting in Gateway too', async () => {
+    chain.balance = 0n;
+    gateway = async () => ({ totalUsd: '5', perChain: [] });
+
+    expect((await remove()).status).toBe(409);
+  });
+
+  it('refuses when the balance can’t be read, rather than guess it’s empty', async () => {
+    chain.balance = new Error('rpc down') as never;
+
+    expect((await remove()).status).toBe(503);
+    expect(deletedLogins).toEqual([]);
+  });
+
+  it('deletes everything Blocky keeps, then the login, once the wallet is empty', async () => {
+    await call('/v1/me/username', { token: 'alice-token', method: 'PUT', body: { username: 'alice' } });
+    await call('/v1/pots', { token: 'alice-token', method: 'POST', body: { name: 'Trip' } });
+    await planSend('1');
+    chain.balance = 0n;
+
+    const { status } = await remove();
+
+    expect(status).toBe(200);
+    expect(deletedLogins).toEqual(['did:privy:alice']);
+    expect(await store.getUser('did:privy:alice')).toBeNull();
+    expect(await store.listPots('did:privy:alice')).toEqual([]);
+    expect(await store.findUserByUsername('alice')).toBeNull();
+  });
+
+  it('goes ahead with money in it once they say the key is exported', async () => {
+    expect((await remove({ keyExported: true })).status).toBe(200);
+    expect(deletedLogins).toEqual(['did:privy:alice']);
   });
 });
 

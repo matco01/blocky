@@ -223,6 +223,54 @@ export function createApp(deps: AppDeps) {
     });
   });
 
+  /**
+   * Delete the account: Blocky's records, then the login. The wallet lives
+   * behind that login, so an account that still holds anything is refused
+   * unless the person says they've exported their key — otherwise deleting
+   * would lose the money for good. A balance that can't be read is a refusal
+   * too, never a guess that it's empty.
+   */
+  app.delete('/v1/me', async (c) => {
+    const body = z.object({ keyExported: z.boolean().optional() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: 'invalid_request' }, 400);
+    const user = c.get('user');
+
+    if (user.walletAddress && !body.data.keyExported) {
+      const wallet = user.walletAddress;
+      const worth = await Promise.all([
+        readUsdcBalance(reader, DEFAULT_CHAIN, wallet),
+        deps.gatewayBalances(wallet),
+        store.listTrackedTokens(user.id).then((tracked) => deps.walletHoldings(wallet, tracked)),
+      ]).catch(() => null);
+      if (!worth) {
+        return c.json({ error: 'balance_unavailable', message: 'Couldn’t check your balance just now, so nothing was deleted. Try again in a minute.' }, 503);
+      }
+      const [usdc, gateway, holdings] = worth;
+      const totalUsd =
+        usdc.amount + parseUsd(gateway.totalUsd) + holdings.reduce((sum, h) => sum + (h.usd ? parseUsd(h.usd) : 0n), 0n);
+      // Dust is ignored; a token bought by contract has no price but is still theirs.
+      if (totalUsd >= parseUsd('0.01') || holdings.some((h) => h.address && BigInt(h.amount) > 0n)) {
+        return c.json(
+          {
+            error: 'has_money',
+            message: `Your wallet still holds ${displayUsd(formatUsd(totalUsd))}. Move it out or export your private key first — deleting your account deletes the wallet.`,
+          },
+          409,
+        );
+      }
+    }
+
+    await store.deleteUser(user.id);
+    try {
+      await deps.identity.deleteUser(user.id);
+    } catch (error) {
+      // Blocky's records are gone; the login can be deleted again by retrying.
+      console.error('identity deleteUser failed', error);
+      return c.json({ error: 'partly_deleted', message: 'Your Blocky data is deleted, but your login wasn’t. Try once more.' }, 502);
+    }
+    return c.json({ deleted: true });
+  });
+
   /* ------------------------------------------------------------------------ */
   /*  Usernames — paying people by name                                        */
   /* ------------------------------------------------------------------------ */

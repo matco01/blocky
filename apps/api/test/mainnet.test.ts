@@ -49,6 +49,7 @@ const identity: IdentityProvider = {
   async embeddedWalletAddress() {
     return WALLET;
   },
+  async deleteUser() {},
 };
 
 const reader = {

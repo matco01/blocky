@@ -262,6 +262,10 @@ export const api = {
   lookupUser: (username: string) =>
     request(`/v1/users/${encodeURIComponent(username)}`, z.object({ username: z.string(), walletAddress: z.string() })),
 
+  /** `keyExported`: they've confirmed they hold the key, so money left in the wallet isn't lost. */
+  deleteAccount: (keyExported = false) =>
+    request('/v1/me', z.object({ deleted: z.boolean() }), { method: 'DELETE', body: JSON.stringify({ keyExported }) }),
+
   setUsername: (username: string) =>
     request('/v1/me/username', z.object({ username: z.string() }), { method: 'PUT', body: JSON.stringify({ username }) }),
 

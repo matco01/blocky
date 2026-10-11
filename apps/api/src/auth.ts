@@ -21,6 +21,8 @@ export interface IdentityProvider {
   verifyAccessToken(token: string): Promise<string | null>;
   /** The user's Privy embedded Ethereum wallet, or null if they have none yet. */
   embeddedWalletAddress(userId: string): Promise<Address | null>;
+  /** Deletes the login, and with it the embedded wallet's share Privy holds. Not undoable. */
+  deleteUser(userId: string): Promise<void>;
 }
 
 export interface AuthenticatedUser {
@@ -42,6 +44,10 @@ export function createPrivyIdentity(options: { appId: string; appSecret: string 
       } catch {
         return null;
       }
+    },
+
+    async deleteUser(userId) {
+      await privy.users().delete(userId);
     },
 
     async embeddedWalletAddress(userId) {
