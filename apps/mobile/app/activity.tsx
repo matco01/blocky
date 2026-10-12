@@ -2,6 +2,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 import { ActivityRow } from '../components/ActivityRow';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
@@ -22,6 +23,7 @@ export default function ActivityScreen() {
 
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
+  const [open, setOpen] = useState<ActivityItem | null>(null);
 
   const fetchActivity = useCallback(async () => {
     try {
@@ -75,7 +77,18 @@ export default function ActivityScreen() {
           </View>
         ) : null}
 
-        {load.state === 'ready' ? load.items.map((item) => <ActivityRow key={item.id} item={item} />) : null}
+        {load.state === 'ready'
+          ? byDay(load.items).map(([day, items]) => (
+              <View key={day}>
+                <Text variant="label" tone="secondary" style={{ marginTop: theme.space.lg, marginBottom: theme.space.xs }}>
+                  {day}
+                </Text>
+                {items.map((item) => (
+                  <ActivityRow key={item.id} item={item} onPress={() => setOpen(item)} />
+                ))}
+              </View>
+            ))
+          : null}
 
         {load.state === 'ready' && !load.complete ? (
           <Text variant="caption" tone="tertiary" style={[styles.center, { marginTop: theme.space.lg }]}>
@@ -83,8 +96,34 @@ export default function ActivityScreen() {
           </Text>
         ) : null}
       </ScrollView>
+
+      <ActivityDetailSheet item={open} onClose={() => setOpen(null)} />
     </View>
   );
+}
+
+/** Newest first, grouped under "Today", "Yesterday", then the date. */
+function byDay(items: readonly ActivityItem[]): [string, ActivityItem[]][] {
+  const groups = new Map<string, ActivityItem[]>();
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 86_400_000);
+  const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+
+  for (const item of items) {
+    const date = new Date(item.timestamp);
+    const label = sameDay(date, today)
+      ? 'Today'
+      : sameDay(date, yesterday)
+        ? 'Yesterday'
+        : date.toLocaleDateString(undefined, {
+            day: 'numeric',
+            month: 'long',
+            ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}),
+          });
+    groups.set(label, [...(groups.get(label) ?? []), item]);
+  }
+
+  return [...groups];
 }
 
 const styles = StyleSheet.create({

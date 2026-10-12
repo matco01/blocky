@@ -1,6 +1,6 @@
-import { ENTRY_POINT_V07, isCrossChainContract } from '@blocky/wallet-core';
-import { formatUsd, type Address } from '@blocky/shared';
-import type { Execution } from './store';
+import { ENTRY_POINT_V07, getChain, isCrossChainContract } from '@blocky/wallet-core';
+import { formatUsd, type Address, type ChainId } from '@blocky/shared';
+import type { Contact, Execution, PublicUser, StoredPlan } from './store';
 
 /**
  * The activity feed: what moved in and out of the wallet.
@@ -38,6 +38,142 @@ export interface ActivityItem {
   /** Our summary for sends we planned; null for anything we only saw on-chain. */
   summary: string | null;
   timestamp: string;
+  /** What the detail sheet shows when the row is tapped. Filled by `describeActivity`. */
+  details?: ActivityDetails;
+}
+
+/** An amount of something, somewhere: "0.002 ETH on Base". */
+export interface AssetLine {
+  amount: string;
+  symbol: string;
+  chain: string;
+  /** Dollar value at the time, when we had a price. */
+  usd: string | null;
+}
+
+/**
+ * Everything the app can say about one row, in words. Built from the plan for
+ * a send Blocky made, so a swap says what went in and what came out; for money
+ * that only showed up on-chain, from the transfer itself.
+ */
+export interface ActivityDetails {
+  /** What left the wallet. */
+  sent: AssetLine | null;
+  /** What arrived — on the user's side for a swap or a move, the recipient's for a send. */
+  received: AssetLine | null;
+  /** The other side in words: "@sam", "Mum", "maria.eth", "Your wallet on Base". Null when all we have is an address. */
+  party: string | null;
+  /** All fees together, for sends Blocky made. */
+  feeUsd: string | null;
+  /** The network the transaction ran on. */
+  network: string;
+  /** Who carried it between chains: "Circle (CCTP)", "Across". */
+  via: string | null;
+  /** Asked for in chat, or from the Send screen. Null for anything only seen on-chain. */
+  origin: 'agent' | 'manual' | null;
+  /** The transaction on a block explorer. */
+  explorerUrl: string;
+}
+
+const ROUTE_NAMES: Record<string, string> = {
+  cctp: 'Circle (CCTP)',
+  across: 'Across',
+  'across-swap': 'Across',
+  'gas.zip': 'Gas.zip',
+};
+
+export interface DescribeContext {
+  homeChain: ChainId;
+  getPlan(planId: string): Promise<StoredPlan | null>;
+  contacts: readonly Contact[];
+  findUserByWallet(address: Address): Promise<PublicUser | null>;
+}
+
+/**
+ * Add the detail sheet's facts to each row. One plan read per Blocky send, and
+ * one name lookup per distinct address, so a full feed stays a few dozen
+ * cheap database reads. A lookup that fails costs that row its extra detail,
+ * never the feed.
+ */
+export async function describeActivity(
+  items: readonly ActivityItem[],
+  executions: readonly Execution[],
+  ctx: DescribeContext,
+): Promise<ActivityItem[]> {
+  const byHash = new Map(executions.map((execution) => [execution.txHash, execution]));
+
+  // A name for each address: a contact's label first, then a Blocky username.
+  const names = new Map<string, string | null>();
+  await Promise.all(
+    [...new Set(items.map((item) => item.counterparty.toLowerCase()))].map(async (address) => {
+      const contact = ctx.contacts.find((c) => c.address.toLowerCase() === address);
+      if (contact) return names.set(address, contact.label);
+      const user = await ctx.findUserByWallet(address as Address).catch(() => null);
+      names.set(address, user ? `@${user.username}` : null);
+    }),
+  );
+
+  return Promise.all(
+    items.map(async (item): Promise<ActivityItem> => {
+      const execution = byHash.get(item.txHash);
+      const stored = execution ? await ctx.getPlan(execution.planId).catch(() => null) : null;
+      const chainId = execution?.chainId ?? ctx.homeChain;
+      const chain = getChain(chainId);
+      const explorerUrl = `${chain.explorerUrl}/tx/${item.txHash}`;
+      const named = names.get(item.counterparty.toLowerCase()) ?? null;
+
+      if (!stored) {
+        // Only seen on-chain: USDC on the home chain, the amount the explorer reported.
+        const line: AssetLine = { amount: item.amount, symbol: 'USDC', chain: chain.name, usd: item.amount };
+        return {
+          ...item,
+          details: {
+            sent: item.direction === 'sent' ? line : null,
+            received: item.direction === 'received' ? line : null,
+            party: named,
+            feeUsd: null,
+            network: chain.name,
+            via: null,
+            origin: execution?.origin ?? null,
+            explorerUrl,
+          },
+        };
+      }
+
+      const { plan, origin } = stored;
+      const out = plan.outflow[0];
+      const into = plan.inflow[0];
+      const line = (delta: typeof out): AssetLine | null =>
+        delta
+          ? {
+              amount: delta.displayAmount,
+              symbol: delta.token.symbol,
+              chain: getChain(delta.token.chainId).name,
+              usd: delta.usdValue,
+            }
+          : null;
+      const between = plan.intentType === 'bridge';
+      const destination = into ? getChain(into.token.chainId).name : null;
+
+      return {
+        ...item,
+        details: {
+          sent: line(out),
+          received: line(into),
+          party: between
+            ? destination && destination !== chain.name
+              ? `Your wallet on ${destination}`
+              : 'Your wallet'
+            : (plan.recipient?.contactLabel ?? named ?? plan.recipient?.ensName ?? null),
+          feeUsd: plan.fee.totalUsd,
+          network: chain.name,
+          via: plan.route ? (ROUTE_NAMES[plan.route.provider] ?? plan.route.provider) : null,
+          origin,
+          explorerUrl,
+        },
+      };
+    }),
+  );
 }
 
 export interface ExplorerTransfer {

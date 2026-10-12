@@ -791,6 +791,34 @@ describe('activity', () => {
     expect(body.items[0]).toMatchObject({ direction: 'sent', counterparty: SAM, amount: '10' });
   });
 
+  it('says what went, on which network, what it cost and where to look it up', async () => {
+    const plan = await planSend('10');
+    chain.receipts.set(hash('8'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
+    await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('8') } });
+
+    const { body } = await call('/v1/activity', { token: 'alice-token' });
+    const details = body.items[0].details;
+
+    expect(details.sent).toMatchObject({ amount: '10', symbol: 'USDC', chain: 'Arc Testnet' });
+    expect(details.feeUsd).toBe(plan.fee.totalUsd);
+    expect(details.network).toBe('Arc Testnet');
+    expect(details.origin).toBe('manual');
+    expect(details.explorerUrl).toMatch(new RegExp(`/tx/${hash('8')}$`));
+  });
+
+  it('calls a move between chains a move to your own wallet, and names who carried it', async () => {
+    const plan = await planBridge();
+    chain.receipts.set(hash('9'), burnReceipt({ depositor: ALICE_WALLET, mintRecipient: ALICE_WALLET, amount: 20_000_000n, domain: 6, maxFee: 54_565n }));
+    await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('9') } });
+
+    const { body } = await call('/v1/activity', { token: 'alice-token' });
+    const details = body.items[0].details;
+
+    expect(details.party).toBe('Your wallet on Base Sepolia');
+    expect(details.received).toMatchObject({ symbol: 'USDC', chain: 'Base Sepolia' });
+    expect(details.via).toBe('Circle (CCTP)');
+  });
+
   it('marks the feed incomplete when the explorer is down, rather than empty', async () => {
     explorer = async () => {
       throw new Error('down');

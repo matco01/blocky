@@ -47,7 +47,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { stream } from 'hono/streaming';
 import { z } from 'zod';
-import { mergeActivity, type ExplorerTransfer } from './activity';
+import { describeActivity, mergeActivity, type ExplorerTransfer } from './activity';
 import type { AgentResponse, ChatTurn } from './agent';
 import { authenticate, type AuthenticatedUser, type IdentityProvider } from './auth';
 import {
@@ -650,16 +650,25 @@ export function createApp(deps: AppDeps) {
     const wallet = walletOf(c);
     if (wallet instanceof Response) return wallet;
 
-    const [executions, transfers] = await Promise.all([
-      store.listExecutions(c.get('user').id),
+    const userId = c.get('user').id;
+    const [executions, transfers, contacts] = await Promise.all([
+      store.listExecutions(userId),
       deps.explorerTransfers(wallet).then(
         (value) => ({ ok: true as const, value }),
         () => ({ ok: false as const }),
       ),
+      store.listContacts(userId).catch(() => []),
     ]);
 
+    const items = await describeActivity(mergeActivity(wallet, executions, transfers.ok ? transfers.value : []), executions, {
+      homeChain: DEFAULT_CHAIN,
+      getPlan: (planId) => store.getPlan(userId, planId),
+      contacts,
+      findUserByWallet: (address) => store.findUserByWallet(address),
+    });
+
     return c.json({
-      items: mergeActivity(wallet, executions, transfers.ok ? transfers.value : []),
+      items,
       // When the explorer is down the feed still shows our own sends, and says
       // it is partial rather than implying nothing was received.
       complete: transfers.ok,

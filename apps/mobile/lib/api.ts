@@ -70,6 +70,16 @@ const BalanceHistorySchema = z.object({
   snapshots: z.array(z.object({ spendableUsd: z.string(), investmentsUsd: z.string(), takenAt: z.string() })),
 });
 
+/** An amount of something, somewhere: "0.002 ETH on Base". */
+const AssetLineSchema = z.object({
+  amount: z.string(),
+  symbol: z.string(),
+  chain: z.string(),
+  usd: z.string().nullable(),
+});
+
+export type AssetLine = z.infer<typeof AssetLineSchema>;
+
 const ActivityItemSchema = z.object({
   id: z.string(),
   direction: z.enum(['sent', 'received']),
@@ -81,6 +91,19 @@ const ActivityItemSchema = z.object({
   title: z.string().nullable().default(null),
   summary: z.string().nullable(),
   timestamp: z.string(),
+  /** The detail sheet's facts. Absent from older servers: the sheet falls back to the row's own. */
+  details: z
+    .object({
+      sent: AssetLineSchema.nullable(),
+      received: AssetLineSchema.nullable(),
+      party: z.string().nullable(),
+      feeUsd: z.string().nullable(),
+      network: z.string(),
+      via: z.string().nullable(),
+      origin: z.enum(['agent', 'manual']).nullable(),
+      explorerUrl: z.string(),
+    })
+    .optional(),
 });
 
 const ActivitySchema = z.object({

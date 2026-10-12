@@ -2,48 +2,93 @@ import { displayUsd, shortAddress } from '@blocky/shared';
 import { StyleSheet, View } from 'react-native';
 import type { ActivityItem } from '../lib/api';
 import { useTheme } from '../theme';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
+import { PressableScale } from './PressableScale';
 import { Text } from './Text';
 
+/** What kind of thing happened, from what left and what arrived. */
+export type ActivityKind = 'sent' | 'received' | 'bought' | 'sold' | 'swapped' | 'moved';
+
 /**
- * One line of history, written for a person: "Sent to 0x5a30…0003", not a
- * method selector and a hash.
+ * One row of history in words, shared by the row and its detail sheet: "Bought
+ * AAPL", "Moved to Base", "Sent to @sam" — never a method selector and a hash.
  */
-export function ActivityRow({ item }: { item: ActivityItem }) {
+export function describe(item: ActivityItem): { kind: ActivityKind; title: string; icon: IconName } {
+  const { sent, received, party } = item.details ?? { sent: null, received: null, party: null };
+  const outsider = shortAddress(item.counterparty);
+
+  if (item.direction === 'received') {
+    return { kind: 'received', title: `Received from ${party ?? outsider}`, icon: 'arrow-down' };
+  }
+
+  // A move or a trade: something left, something else (or the same thing elsewhere) arrived.
+  if (sent && received && party?.startsWith('Your wallet')) {
+    if (sent.symbol === received.symbol) return { kind: 'moved', title: `Moved to ${received.chain}`, icon: 'git-compare-outline' };
+    if (sent.symbol === 'USDC') return { kind: 'bought', title: `Bought ${received.symbol}`, icon: 'trending-up' };
+    if (received.symbol === 'USDC') return { kind: 'sold', title: `Sold ${sent.symbol}`, icon: 'trending-down' };
+    return { kind: 'swapped', title: `Swapped ${sent.symbol} for ${received.symbol}`, icon: 'swap-horizontal' };
+  }
+
+  return { kind: 'sent', title: item.title ?? `Sent to ${party ?? outsider}`, icon: 'arrow-up' };
+}
+
+/**
+ * One line of history. Tapping it opens the detail sheet: what moved, where,
+ * to whom, what it cost, and the transaction itself.
+ */
+export function ActivityRow({ item, onPress }: { item: ActivityItem; onPress?: () => void }) {
   const theme = useTheme();
+  const { kind, title, icon } = describe(item);
 
-  const sent = item.direction === 'sent';
+  const incoming = kind === 'received';
   const failed = item.status === 'reverted';
-
-  const title =
-    item.title ?? (sent ? `Sent to ${shortAddress(item.counterparty)}` : `Received from ${shortAddress(item.counterparty)}`);
-  const amount = `${sent ? '−' : '+'}${displayUsd(item.amount)}`;
+  // A trade isn't money leaving: the dollars became something else of yours.
+  const sign = incoming ? '+' : kind === 'sent' ? '−' : '';
+  const amount = `${sign}${displayUsd(item.amount)}`;
+  const secondary =
+    item.details?.received && kind !== 'sent' && kind !== 'received' && kind !== 'moved'
+      ? `${trim(item.details.received.amount)} ${item.details.received.symbol}`
+      : null;
 
   return (
-    <View style={[styles.row, { paddingVertical: theme.space.md }]}>
-      <View style={[styles.square, { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radius.md }]}>
-        <Icon name={sent ? 'arrow-up' : 'arrow-down'} size={20} tone={sent ? 'secondary' : 'positive'} />
-      </View>
+    <PressableScale onPress={onPress} disabled={!onPress} haptic="none" scaleTo={0.98} accessibilityLabel={`${title}, ${amount}`}>
+      <View style={[styles.row, { paddingVertical: theme.space.md }]}>
+        <View style={[styles.square, { backgroundColor: incoming ? theme.colors.accentTint : theme.colors.surfaceMuted, borderRadius: theme.radius.md }]}>
+          <Icon name={icon} size={20} tone={incoming ? 'positive' : 'secondary'} />
+        </View>
 
-      <View style={styles.middle}>
-        <Text variant="bodyStrong" numberOfLines={1}>
-          {title}
-        </Text>
-        <Text variant="caption" tone={failed ? 'danger' : 'tertiary'}>
-          {failed ? 'Failed — nothing was sent' : item.status === 'pending' ? 'Confirming…' : when(item.timestamp)}
-        </Text>
-      </View>
+        <View style={styles.middle}>
+          <Text variant="bodyStrong" numberOfLines={1}>
+            {title}
+          </Text>
+          <Text variant="caption" tone={failed ? 'danger' : 'tertiary'} numberOfLines={1}>
+            {failed ? 'Failed — nothing was sent' : item.status === 'pending' ? 'Confirming…' : when(item.timestamp)}
+          </Text>
+        </View>
 
-      <Text
-        variant="bodyStrong"
-        tone={failed ? 'tertiary' : sent ? 'primary' : 'positive'}
-        tabular
-        style={failed ? styles.struck : undefined}
-      >
-        {amount}
-      </Text>
-    </View>
+        <View style={styles.right}>
+          <Text
+            variant="bodyStrong"
+            tone={failed ? 'tertiary' : incoming ? 'positive' : 'primary'}
+            tabular
+            style={failed ? styles.struck : undefined}
+          >
+            {amount}
+          </Text>
+          {secondary ? (
+            <Text variant="caption" tone="tertiary" tabular numberOfLines={1}>
+              {secondary}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    </PressableScale>
   );
+}
+
+/** "0.002006100000" → "0.0020061": a token amount without the trailing zeros. */
+export function trim(amount: string): string {
+  return amount.includes('.') ? amount.replace(/0+$/, '').replace(/\.$/, '') : amount;
 }
 
 function when(iso: string): string {
@@ -72,6 +117,11 @@ const styles = StyleSheet.create({
   middle: {
     flex: 1,
     gap: 2,
+  },
+  right: {
+    alignItems: 'flex-end',
+    gap: 2,
+    maxWidth: '45%',
   },
   struck: {
     textDecorationLine: 'line-through',
