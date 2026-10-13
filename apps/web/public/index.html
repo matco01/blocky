@@ -8,11 +8,63 @@
   <meta name="theme-color" content="#7DBE5A">
   <meta name="color-scheme" content="light">
 
+  <link rel="canonical" href="https://blocky.page/">
+
   <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Blocky">
+  <meta property="og:url" content="https://blocky.page/">
   <meta property="og:title" content="Blocky — money, in plain words">
   <meta property="og:description" content="A money app you talk to. Nothing moves until you approve it.">
-  <meta property="og:image" content="/img/icon.png">
+  <meta property="og:image" content="https://blocky.page/img/icon.png">
   <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Blocky — money, in plain words">
+  <meta name="twitter:description" content="A money app you talk to. Nothing moves until you approve it.">
+  <meta name="twitter:image" content="https://blocky.page/img/icon.png">
+
+  <!-- Who Blocky is, for search engines and AI assistants. Keep in step with the FAQ below. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://blocky.page/#org",
+        "name": "Blocky",
+        "url": "https://blocky.page/",
+        "logo": "https://blocky.page/img/icon.png",
+        "email": "hello@blocky.page"
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://blocky.page/#site",
+        "name": "Blocky",
+        "alternateName": ["Blocky app", "Blocky money app"],
+        "url": "https://blocky.page/",
+        "publisher": { "@id": "https://blocky.page/#org" }
+      },
+      {
+        "@type": "MobileApplication",
+        "name": "Blocky",
+        "url": "https://blocky.page/",
+        "image": "https://blocky.page/img/icon.png",
+        "description": "Blocky is a money app you talk to. Pay friends, save, invest and track your spending by just saying what you want. Nothing moves until you approve it.",
+        "applicationCategory": "FinanceApplication",
+        "operatingSystem": "Android",
+        "publisher": { "@id": "https://blocky.page/#org" }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          { "@type": "Question", "name": "Is Blocky a bank?", "acceptedAnswer": { "@type": "Answer", "text": "No. Blocky is software that helps you manage a wallet only you control. We never hold your money, so there's nothing for us to freeze, lend out or lose." } },
+          { "@type": "Question", "name": "Do I need to know anything about crypto?", "acceptedAnswer": { "@type": "Answer", "text": "No. Your balance is in dollars, and you talk to Blocky about money, not technology. Underneath, it runs on digital dollars (USDC) and open networks. That's why sending is instant and global, and you never have to touch it." } },
+          { "@type": "Question", "name": "Can the AI move my money on its own?", "acceptedAnswer": { "@type": "Answer", "text": "No. The AI can only propose. Every proposal is checked against your limits and shown to you as a card with the amount, the recipient and the fee. It only goes through when you approve it with your fingerprint or face." } },
+          { "@type": "Question", "name": "What happens to my money if Blocky shuts down?", "acceptedAnswer": { "@type": "Answer", "text": "Nothing. Your money sits in your own wallet on a public network, not with us. Export your key from the app and open your wallet in another app like MetaMask." } },
+          { "@type": "Question", "name": "When can I get Blocky?", "acceptedAnswer": { "@type": "Answer", "text": "Blocky is in a private beta on Android, and we're letting people in from the waitlist in waves. iPhone is next. Join the list at blocky.page and we'll email you when your spot opens." } }
+        ]
+      }
+    ]
+  }
+  </script>
 
   <link rel="icon" type="image/png" href="/img/favicon.png">
   <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">

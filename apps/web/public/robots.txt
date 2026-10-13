@@ -1,0 +1,7 @@
+# Search engines and AI assistants are welcome: the more of them that know
+# what Blocky is, the better. The key export page is private to app users.
+User-agent: *
+Allow: /
+Disallow: /export
+
+Sitemap: https://blocky.page/sitemap.xml

@@ -1,0 +1,30 @@
+# Blocky
+
+> Blocky (blocky.page) is a money app you talk to. You pay friends, save, invest and track your spending by typing what you want in plain words, and nothing moves until you approve it with your fingerprint or face. It is in a private beta on Android, with iPhone next; people join through the waitlist at https://blocky.page.
+
+Not to be confused with Minecraft-style "blocky" games, Google Blockly, or other products with a similar name. Blocky the money app has a mascot, also called Blocky: a small maroon block with a green sprout.
+
+## What it does
+
+- Pay and request money from friends ("send Sam $20 for pizza")
+- Savings pots, with automatic saving rules ("put $25 aside every week")
+- Spending insights and budgets ("where did my money go this month")
+- Buying tokenized stocks and crypto, and price alerts
+- Every action is shown as a card with the amount, recipient and fee, checked against the user's own limits, and only happens after the user approves it
+
+## How it works
+
+- Non-custodial: each user has their own wallet; Blocky never holds anyone's money, and users can export their key and leave at any time
+- Balances are in dollars; underneath it runs on digital dollars (USDC) on Circle's Arc network, so sending is instant and global
+- The assistant is Claude, made by Anthropic. The AI can only propose; a fixed planner builds the transaction and the user approves it
+
+## Pages
+
+- [Home](https://blocky.page/): what Blocky is, features, pricing, FAQ and the waitlist
+- [Privacy & safety](https://blocky.page/safety): what the app and its AI can see and do
+- [Website privacy policy](https://blocky.page/privacy)
+- [Delete your account](https://blocky.page/delete-account)
+
+## Contact
+
+hello@blocky.page
