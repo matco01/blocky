@@ -1,7 +1,7 @@
 import { displayUsd, formatUsd, parseUsd } from '@blocky/shared';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState, type ReactNode } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlockPressable } from '../components/BlockPressable';
 import { Button } from '../components/Button';
@@ -41,6 +41,7 @@ export default function InsightsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState<BudgetCategory | null>(null);
   const [draft, setDraft] = useState('');
+  const [picking, setPicking] = useState(false);
 
   const fetchInsights = useCallback(async () => {
     try {
@@ -99,14 +100,17 @@ export default function InsightsScreen() {
         {/* Which month: the one control everything below answers to. */}
         <View style={styles.monthRow}>
           <MonthArrow icon="chevron-back" label="Previous month" onPress={() => setMonth(shiftMonth(month, -1))} />
-          <View style={styles.monthName}>
-            <Text variant="heading">{monthName(month)}</Text>
+          <PressableScale onPress={() => setPicking(true)} accessibilityLabel={`${monthName(month)}, choose a month`} haptic="light" scaleTo={0.96} style={styles.monthName}>
+            <View style={[styles.row, { gap: 4 }]}>
+              <Text variant="heading">{monthName(month)}</Text>
+              <Icon name="chevron-down" size={18} tone="secondary" />
+            </View>
             {atLatest ? (
               <Text variant="caption" tone="tertiary">
                 So far this month
               </Text>
             ) : null}
-          </View>
+          </PressableScale>
           <MonthArrow icon="chevron-forward" label="Next month" disabled={atLatest} onPress={() => setMonth(shiftMonth(month, 1))} />
         </View>
 
@@ -147,7 +151,6 @@ export default function InsightsScreen() {
               <View style={[styles.stats, { gap: theme.space.sm }]}>
                 <Stat label="Received" value={insights.receivedUsd} tone="positive" />
                 {parseUsd(insights.soldUsd) > 0n ? <Stat label="Sold" value={insights.soldUsd} /> : null}
-                <Stat label="Fees" value={insights.feesUsd} />
               </View>
             </View>
 
@@ -264,7 +267,75 @@ export default function InsightsScreen() {
           </>
         ) : null}
       </ScrollView>
+
+      <MonthPicker
+        visible={picking}
+        month={month}
+        latest={thisMonth}
+        onPick={(picked) => {
+          setPicking(false);
+          if (picked !== month) {
+            setData(null);
+            setMonth(picked);
+          }
+        }}
+        onClose={() => setPicking(false)}
+      />
     </View>
+  );
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const EARLIEST_YEAR = 2024;
+
+/** A year at a time, twelve months to tap: faster than arrowing back month by month. */
+function MonthPicker({ visible, month, latest, onPick, onClose }: { visible: boolean; month: string; latest: string; onPick: (month: string) => void; onClose: () => void }) {
+  const theme = useTheme();
+  const latestYear = Number(latest.slice(0, 4));
+  const [year, setYear] = useState(Number(month.slice(0, 4)));
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onShow={() => setYear(Number(month.slice(0, 4)))}>
+      <Pressable style={[styles.backdrop, { backgroundColor: theme.colors.scrim ?? 'rgba(0,0,0,0.35)' }]} onPress={onClose} accessibilityLabel="Close">
+        <Pressable style={[styles.picker, { backgroundColor: theme.colors.surface, borderRadius: theme.radius.xxl, padding: theme.space.lg, gap: theme.space.md }]} onPress={() => {}}>
+          <View style={styles.monthRow}>
+            <MonthArrow icon="chevron-back" label="Previous year" disabled={year <= EARLIEST_YEAR} onPress={() => setYear(year - 1)} />
+            <Text variant="heading" tabular>
+              {year}
+            </Text>
+            <MonthArrow icon="chevron-forward" label="Next year" disabled={year >= latestYear} onPress={() => setYear(year + 1)} />
+          </View>
+          <View style={styles.grid}>
+            {MONTHS.map((name, i) => {
+              const value = `${year}-${String(i + 1).padStart(2, '0')}`;
+              const future = value > latest;
+              const selected = value === month;
+              return (
+                <PressableScale
+                  key={name}
+                  onPress={() => onPick(value)}
+                  disabled={future}
+                  accessibilityLabel={`${name} ${year}`}
+                  haptic="light"
+                  scaleTo={0.94}
+                  style={[
+                    styles.cell,
+                    {
+                      borderRadius: theme.radius.md,
+                      backgroundColor: selected ? theme.colors.ink : value === latest ? theme.colors.surfaceMuted : 'transparent',
+                    },
+                  ]}
+                >
+                  <Text variant="bodyStrong" tone={future ? 'tertiary' : 'primary'} style={selected ? { color: theme.colors.inkText } : undefined}>
+                    {name}
+                  </Text>
+                </PressableScale>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -407,4 +478,8 @@ const styles = StyleSheet.create({
   track: { height: 8, borderRadius: 4, overflow: 'hidden' },
   fill: { height: 8, borderRadius: 4 },
   center: { textAlign: 'center' },
+  backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  picker: { width: '100%', maxWidth: 360 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
+  cell: { width: '31%', height: 48, alignItems: 'center', justifyContent: 'center' },
 });

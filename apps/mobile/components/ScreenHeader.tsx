@@ -17,10 +17,10 @@ const FEATURE_KEY = {
 /**
  * The header of a modal screen: a bold title and, optionally, a close square.
  *
- * With a `feature`, it is one of the website's feature cards instead: a big
- * rounded colour block, the title set large and tight, and one plain line
- * under it saying what the screen is for. The colour says which part of
- * Blocky you're in, the same colour the website gives it.
+ * With a `feature`, it is a slim bar in one of the website's feature colours:
+ * just the title and the close square. The colour says which part of Blocky
+ * you're in, the same colour the website gives it. `subtitle` is read out to
+ * screen readers rather than shown, to keep the bar small.
  */
 export function ScreenHeader({
   title,
@@ -42,7 +42,7 @@ export function ScreenHeader({
       haptic="none"
       scaleTo={0.92}
       style={[
-        styles.close,
+        feature ? styles.closeSmall : styles.close,
         {
           backgroundColor: feature ? theme.colors.surface : theme.colors.surfaceMuted,
           borderRadius: theme.radius.md,
@@ -64,20 +64,22 @@ export function ScreenHeader({
 
   return (
     <View
-      style={{
-        backgroundColor: theme.colors[FEATURE_KEY[feature]],
-        borderRadius: theme.radius.xxl,
-        padding: theme.space.xl,
-        gap: theme.space.sm,
-      }}
+      style={[
+        styles.row,
+        {
+          backgroundColor: theme.colors[FEATURE_KEY[feature]],
+          borderRadius: theme.radius.xl,
+          paddingVertical: theme.space.md,
+          paddingLeft: theme.space.lg + 2,
+          paddingRight: theme.space.md,
+          gap: theme.space.md,
+        },
+      ]}
     >
-      <View style={[styles.row, { alignItems: 'flex-start', gap: theme.space.md }]}>
-        <Text variant="display" accessibilityRole="header" style={{ flex: 1, paddingTop: theme.space.xs }}>
-          {title}
-        </Text>
-        {close}
-      </View>
-      {subtitle ? <Text variant="body">{subtitle}</Text> : null}
+      <Text variant="heading" accessibilityRole="header" accessibilityHint={subtitle} style={{ flex: 1 }}>
+        {title}
+      </Text>
+      {close}
     </View>
   );
 }
@@ -91,6 +93,12 @@ const styles = StyleSheet.create({
   close: {
     width: 40,
     height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeSmall: {
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
   },
