@@ -213,6 +213,41 @@ export function createApp(deps: AppDeps) {
     },
   );
 
+  /*
+   * Crash reports from the app: what broke and where, written to the server
+   * log and nothing else. Public, because an app can break before sign-in;
+   * small and rate-limited, so it can't be used to flood the log. No user ID,
+   * no balances, no chat: just the error.
+   */
+  const CrashBodySchema = z.object({
+    message: z.string().max(500),
+    stack: z.string().max(4000).optional(),
+    where: z.string().max(120).optional(),
+    fatal: z.boolean().optional(),
+    version: z.string().max(40).optional(),
+    platform: z.string().max(20).optional(),
+  });
+  const crashHits = new Map<string, number[]>();
+
+  app.post(
+    '/crash',
+    bodyLimit({ maxSize: 8 * 1024, onError: (c) => c.json({ error: 'too_large' }, 413) }),
+    async (c) => {
+      const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+      const now = Date.now();
+      const recent = (crashHits.get(ip) ?? []).filter((at) => now - at < 60 * 60 * 1000);
+      if (recent.length >= 30) return c.json({ ok: true });
+      recent.push(now);
+      crashHits.set(ip, recent);
+      if (crashHits.size > 5_000) crashHits.clear();
+
+      const parsed = CrashBodySchema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.json({ error: 'invalid' }, 400);
+      console.error(`[app-crash] ${JSON.stringify(parsed.data)}`);
+      return c.json({ ok: true });
+    },
+  );
+
   app.get('/v1/me', async (c) => {
     const user = c.get('user');
     return c.json({
@@ -1227,7 +1262,7 @@ export function createApp(deps: AppDeps) {
   });
 
   app.onError((err, c) => {
-    console.error(err);
+    console.error(`[api-error] ${c.req.method} ${c.req.routePath}`, err);
     return c.json({ error: 'Internal error' }, 500);
   });
 

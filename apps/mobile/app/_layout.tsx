@@ -14,7 +14,9 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { CrashBoundary } from '../components/CrashBoundary';
 import { setTokenGetter } from '../lib/api';
+import { installCrashReporting } from '../lib/crash';
 import { checkOnboarding, resetOnboarding, useOnboarding } from '../lib/onboarding';
 import { signingChains } from '../lib/chain';
 import { config } from '../lib/config';
@@ -26,6 +28,8 @@ import { ThemeProvider, useTheme } from '../theme';
  * Privy wraps everything, and the auth gate lives at the router level: the app
  * screens are not merely hidden from a logged-out user, they are not routable.
  */
+installCrashReporting();
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -43,7 +47,9 @@ export default function RootLayout() {
           }}
         >
           <ThemeProvider>
-            <Gate />
+            <CrashBoundary>
+              <Gate />
+            </CrashBoundary>
           </ThemeProvider>
         </PrivyProvider>
       </SafeAreaProvider>

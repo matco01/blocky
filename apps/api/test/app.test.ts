@@ -1087,6 +1087,17 @@ describe('requests from strangers', () => {
   });
 });
 
+describe('crash reports', () => {
+  it('takes a crash report from the app without sign-in', async () => {
+    const { status } = await call('/crash', { method: 'POST', body: { message: 'Cannot read property of undefined', where: 'screen', version: '0.1.1', platform: 'android' } });
+    expect(status).toBe(200);
+  });
+
+  it('refuses anything that is not a crash report', async () => {
+    expect((await call('/crash', { method: 'POST', body: { hello: 'world' } })).status).toBe(400);
+  });
+});
+
 describe('waitlist', () => {
   beforeEach(async () => {
     await database.db.execute(sql`TRUNCATE waitlist`);
