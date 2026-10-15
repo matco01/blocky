@@ -1,0 +1,36 @@
+name: CI
+
+# Typecheck and test every package on each push and pull request to main.
+# The promo films, docs and the static site's pages don't affect the code.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['promo/**', 'docs/**', '**/*.md', 'apps/web/public/**']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['promo/**', 'docs/**', '**/*.md', 'apps/web/public/**']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Expo generates this locally and git ignores it; the mobile typecheck needs it.
+      - run: echo '/// <reference types="expo/types" />' > apps/mobile/expo-env.d.ts
+
+      - run: npm run typecheck
+
+      - run: npm test
