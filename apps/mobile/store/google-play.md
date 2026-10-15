@@ -76,9 +76,8 @@ plainly that it's mainnet with a few real dollars.
 
 ## Privacy policy URL
 
-https://blocky.page/privacy, but **that page only covers the website and waitlist**,
-and says the app's policy is coming. It has to cover the app before you submit.
-The facts are already on https://blocky.page/safety.
+https://blocky.page/privacy covers the app and the website. Terms of use:
+https://blocky.page/terms.
 
 ## Account deletion URL
 

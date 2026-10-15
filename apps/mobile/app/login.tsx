@@ -1,6 +1,7 @@
 import { useLoginWithEmail, useLoginWithOAuth } from '@privy-io/expo';
 import { useLoginWithPasskey } from '@privy-io/expo/passkey';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import * as WebBrowser from 'expo-web-browser';
 import { AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
 import Animated, {
   Easing,
@@ -14,6 +15,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
 import { IntroHero } from '../components/IntroHero';
+import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { config } from '../lib/config';
 import { useTheme } from '../theme';
@@ -183,6 +185,18 @@ export default function LoginScreen() {
               }
             />
           ) : null}
+
+          <Text variant="caption" tone="tertiary" style={{ textAlign: 'center' }}>
+            By continuing you agree to the{' '}
+            <Text variant="caption" tone="secondary" style={{ textDecorationLine: 'underline' }} onPress={() => void WebBrowser.openBrowserAsync('https://blocky.page/terms')}>
+              Terms
+            </Text>{' '}
+            and{' '}
+            <Text variant="caption" tone="secondary" style={{ textDecorationLine: 'underline' }} onPress={() => void WebBrowser.openBrowserAsync('https://blocky.page/privacy')}>
+              Privacy policy
+            </Text>
+            .
+          </Text>
         </Animated.View>
       </ScrollView>
 
