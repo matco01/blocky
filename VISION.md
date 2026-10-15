@@ -92,6 +92,41 @@ add and withdraw money, and shops or delivery services Blocky can order from.
 None of it changes the core: one conversation, plain words, and nothing moves
 without the user.
 
+### The wallet every AI can pay with
+
+AI assistants can plan a trip or find the right thing to buy, but they can't
+pay; no bank will let them near an account. Blocky already has the missing
+piece: any AI can *propose* a payment, it arrives as a Blocky card with all
+the usual checks, and the user approves with a fingerprint. That makes Blocky
+the one wallet every assistant can ask, and the place AI shopping gets paid
+for, not just another app next to Revolut.
+
+**First step: a Blocky MCP server.** MCP is the standard Claude and other
+assistants use to plug into tools. Blocky publishes one with a
+`request_payment` tool: *"Claude, pay Maya back the $30 from dinner"* and the
+card pops up on the phone to approve. It needs nothing new: what Blocky can
+pay today (people, any wallet, anyone who takes stablecoins), the same
+planner, checks and fingerprint. An AI that can't plug in opens a
+`blocky.page/pay` link instead.
+
+**Paying shops: the Blocky card, one-time cards per purchase.** Shops want a
+card, so this waits for the Blocky card:
+
+- The card comes from **Bridge through Privy**, issued by **Stripe Issuing**.
+  It spends straight from the user's own wallet: nothing is preloaded, and each
+  purchase pulls exactly its amount through an allowance the wallet approved.
+- When an AI wants to buy something, the user approves the card on their
+  phone, and only then Blocky creates a **single-use virtual card** for that
+  amount at that shop (Stripe's *Issuing for agents*). The AI checks out with
+  it; it is worthless afterwards. The AI never sees a card it could use again.
+- Later, the card networks' own agent tokens (Visa Intelligent Commerce,
+  Mastercard Agent Pay) through the same issuer.
+
+The AI never holds money or keys, and never pays without the fingerprint:
+the rule from today carries over unchanged. What it needs from us: the
+company, approval from Bridge and Stripe, and a place in Stripe's agent
+preview.
+
 ---
 
 ## What this means when we build
