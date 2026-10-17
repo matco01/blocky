@@ -264,10 +264,10 @@ hex outside it.
   Circle's published addresses and checked against the live network. Any new
   chain or token goes in the same way: from published addresses, verified live,
   never guessed from a testnet.
-- **Dry-run simulation is not wired up yet.** Plain transfers never need one;
-  a plan that would (a swap or a route through a contract) carries a
-  `simulation_failed` warning (`warn`, not `danger`). See "A note on severity"
-  below before letting anything execute unattended.
+- **Dry runs cover moves between chains only.** Swaps, stock buys and moves
+  off Arc are simulated with `eth_simulateV1` before the card is shown (see
+  "Dry runs" below). Plain transfers never are — there is nothing in an ERC-20
+  `transfer` a dry run would catch that the balance and gas checks don't.
 - **Development uses public endpoints**: Arc's public RPC and the other
   chains' public endpoints are rate-limited. Use provider URLs before real
   traffic.
@@ -293,9 +293,12 @@ vendor chain SDKs are confined to `wallet-core`. What leaves it is either prose
 for the user or a validated `Intent` — never calldata, never a key, and never a
 decision about whether something may run.
 
-It runs **Claude Sonnet 5.5 at `low` effort**. Turning "send Sam twenty" into one of three
-typed intents is closer to classification than reasoning, and effort is the
-lever that most directly sets what a turn costs.
+It runs **Claude Haiku 5.5 at `medium` effort** (`AGENT_MODEL` / `AGENT_EFFORT`
+in [`agent.ts`](../packages/agent/src/agent.ts)). Turning "send Sam twenty" into
+one of three typed intents is closer to classification than reasoning, and
+Haiku does it at about a twentieth of Sonnet's price — roughly $0.0005 a plain
+message. Web search is now most of what a news question costs. If you change
+the model, update `PRICE_PER_MTOK` beside it so the cost log stays right.
 
 Three things in [`agent.ts`](../packages/agent/src/agent.ts) are load-bearing:
 
@@ -426,13 +429,34 @@ portfolio, and a flat cost however many people are looking. Prices value
 holdings and size fees paid in a gas token; they never decide how much of
 something is sent.
 
+### Dry runs
+
+Every plan that moves value between chains — a move off Arc, a swap into a gas
+token, a stock buy or sale — is simulated with `eth_simulateV1` before the card
+is shown: its calls in order, from the user's wallet, against the latest
+block, so the `approve` is in place for the call after it. It takes
+100–250 ms. The simulation lives in
+[`planner-context.ts`](../apps/api/src/planner-context.ts) behind the optional
+`PlannerContext.simulate`; the warnings it produces are in
+[`warnings.ts`](../packages/planner/src/warnings.ts).
+
+Tuned against false alarms, so red keeps meaning something:
+
+- **A revert is `danger`**, and is reported only when a second run agrees — a
+  pool that moved for a moment or a node a block behind doesn't trip it. The
+  card shows the reason, and the plan can never auto-execute.
+- **Anything short of a clean answer is `warn`**: no `eth_simulateV1` on that
+  chain (Avalanche through Alchemy, for one), the endpoint down, or slower than
+  `SIMULATION_TIMEOUT_MS`. The card says it couldn't be checked in advance.
+
 ### A note on severity
 
 `evaluatePolicy` escalates to human confirmation on `danger` warnings only.
-A missing dry run is a `warn`, so a small transfer to a known recipient still
-auto-executes without ever having been simulated. That is deliberate for now —
-`warn` severity is not meant to block — but it is the kind of default worth
-revisiting before real money moves.
+A dry run that couldn't run is a `warn`, so it doesn't by itself stop a plan
+inside the user's limits from being offered as one tap. That is deliberate —
+`warn` severity is not meant to block, and making "unchecked" red would teach
+people to tap past the red that means "this will fail". Plain transfers are
+never simulated at all, for the reason above.
 
 ## Recipients: contacts and ENS
 
