@@ -128,7 +128,25 @@ export default function SendScreen() {
     }
   }
 
+  /*
+   * One approval at a time. A second tap while the first is still waiting on
+   * the fingerprint, or still signing, would otherwise start a second send of
+   * the same plan — the server records a plan once, but by then both could be
+   * on-chain.
+   */
+  const inFlight = useRef(false);
+
   async function send(plan: Plan) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await approveAndSend(plan);
+    } finally {
+      inFlight.current = false;
+    }
+  }
+
+  async function approveAndSend(plan: Plan) {
     // A stale quote is re-quoted, never signed.
     if (isPlanExpired(plan)) {
       await requote(plan);

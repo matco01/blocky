@@ -50,9 +50,9 @@ const BalanceSchema = z.object({
       perChain: z.array(z.object({ chainId: z.number(), balanceUsd: z.string() })),
     })
     .nullable(),
-  /** What sits on other chains: their gas token, and USDC moved there. Not spendable through a plan. */
   /** Set aside in savings pots. Absent from older servers. */
   potsUsd: z.string().optional(),
+  /** What sits on other chains: their gas token, and USDC moved there. Not spendable through a plan. */
   otherHoldings: z.array(
     z.object({
       chainId: z.number(),
@@ -210,6 +210,21 @@ export class ApiError extends Error {
 const UNREACHABLE = "Can't reach Blocky right now. Check your connection.";
 
 /**
+ * The longest any request may take, reply included. React Native's fetch never
+ * gives up on its own, so a connection that dies mid-request — Wi-Fi handing
+ * over to mobile data — would otherwise leave a spinner up for good. Long
+ * enough for a plan that prices several routes on slow providers.
+ */
+const REQUEST_TIMEOUT_MS = 45_000;
+
+/** An abort signal that fires after {@link REQUEST_TIMEOUT_MS}, and the switch that stops it. */
+function deadline() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+/**
  * Every error the Blocky API sends carries an `error` code. A failure without
  * one came from something in between — the host's edge answering while the
  * server restarts or redeploys ("Application not found"), a proxy, a captive
@@ -237,22 +252,29 @@ async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit
 
 async function attempt<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
   const token = await getToken();
+  const timeout = deadline();
 
   let response: Response;
+  let body: unknown;
   try {
     response = await fetch(`${config.apiUrl}${path}`, {
       ...init,
+      signal: timeout.signal,
       headers: {
         'content-type': 'application/json',
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...init?.headers,
       },
     });
+    body = await response.json().catch(() => null);
   } catch {
     throw new ApiError(UNREACHABLE, 0, null, true);
+  } finally {
+    timeout.clear();
   }
 
-  const body: unknown = await response.json().catch(() => null);
+  // Cut off while the reply was still arriving: as unreachable as no reply at all.
+  if (timeout.signal.aborted) throw new ApiError(UNREACHABLE, 0, null, true);
 
   if (!response.ok) {
     if (!isFromBlocky(body)) throw new ApiError(UNREACHABLE, response.status, null, true);
@@ -332,11 +354,19 @@ export const api = {
   /** A month's statement as CSV text. */
   statement: async (month: string) => {
     const token = await getToken();
-    const response = await fetch(`${config.apiUrl}/v1/statements/${month}.csv`, {
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-    });
-    if (!response.ok) throw new ApiError('Could not make that statement.', response.status);
-    return response.text();
+    const timeout = deadline();
+    try {
+      const response = await fetch(`${config.apiUrl}/v1/statements/${month}.csv`, {
+        signal: timeout.signal,
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) throw new ApiError('Could not make that statement.', response.status);
+      return await response.text();
+    } catch (error) {
+      throw error instanceof ApiError ? error : new ApiError(UNREACHABLE, 0, null, true);
+    } finally {
+      timeout.clear();
+    }
   },
 
   pots: () => request('/v1/pots', z.object({ pots: z.array(PotSchema) })).then((r) => r.pots),
@@ -358,8 +388,10 @@ export const api = {
   setPolicy: (policy: Policy) =>
     request('/v1/policy', PolicySchema, { method: 'PUT', body: JSON.stringify(policy) }),
 
-  /** Ask the server to plan a send. It resolves, prices and checks it; nothing is signed. */
-  /** A manual send. `asset` picks what and from which chain; omitted, it's USDC on Arc. */
+  /**
+   * A manual send: the server resolves, prices and checks it; nothing is
+   * signed. `asset` picks what and from which chain; omitted, it's USDC on Arc.
+   */
   planSend: (recipient: RecipientRef, amount: AmountSpec, asset?: { symbol: string; chainId: number }) =>
     request('/v1/plans', z.object({ plan: PlanSchema }), {
       method: 'POST',
@@ -392,12 +424,14 @@ export const api = {
         body: JSON.stringify({ message, history }),
       });
     } catch {
-      throw new ApiError("Can't reach Blocky right now. Check your connection.", 0);
+      throw new ApiError(UNREACHABLE, 0, null, true);
     }
 
     if (!response.ok || !response.body) {
-      const body = (await response.json().catch(() => null)) as { message?: string; error?: string } | null;
-      throw new ApiError(body?.message ?? body?.error ?? 'Something went wrong.', response.status, body?.error ?? null);
+      const body: unknown = await response.json().catch(() => null);
+      // As in `attempt`: an answer without Blocky's error code came from something in between.
+      if (!isFromBlocky(body)) throw new ApiError(UNREACHABLE, response.status, null, true);
+      throw new ApiError(body.message ?? 'Something went wrong.', response.status, body.error);
     }
 
     const reader = response.body.getReader();
@@ -415,7 +449,13 @@ export const api = {
         newline = buffered.indexOf('\n');
         if (!line) continue;
 
-        const event = JSON.parse(line) as { type: string; label?: string; message?: string; response?: unknown };
+        let event: { type: string; label?: string; message?: string; response?: unknown };
+        try {
+          event = JSON.parse(line) as typeof event;
+        } catch {
+          // A line that isn't JSON came from something in between, or a server this app predates.
+          throw new ApiError('Blocky sent a response this version of the app does not understand.', 200);
+        }
         if (event.type === 'activity' && event.label) onActivity?.(event.label);
         if (event.type === 'error') throw new ApiError(event.message ?? 'Something went wrong.', 500);
         if (event.type === 'result') {
@@ -444,18 +484,31 @@ export const api = {
    */
   reportExecution: async (planId: string, txHashes: readonly string[]) => {
     const token = await getToken();
-    const response = await fetch(`${config.apiUrl}/v1/plans/${planId}/executions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ txHashes }),
-    });
+    const timeout = deadline();
 
+    let response: Response;
+    let body: unknown;
+    try {
+      response = await fetch(`${config.apiUrl}/v1/plans/${planId}/executions`, {
+        method: 'POST',
+        signal: timeout.signal,
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ txHashes }),
+      });
+      body = response.status === 202 ? null : await response.json().catch(() => null);
+    } catch {
+      // Reporting is safe to repeat — a plan records at most once — so a
+      // dropped connection is worth trying again (see `reportWithRetry`).
+      throw new ApiError(UNREACHABLE, 0, null, true);
+    } finally {
+      timeout.clear();
+    }
+
+    if (timeout.signal.aborted) throw new ApiError(UNREACHABLE, 0, null, true);
     if (response.status === 202) return { confirmed: false as const };
-
-    const body: unknown = await response.json().catch(() => null);
 
     if (!response.ok) {
       const { message, error } = (body ?? {}) as { message?: string; error?: string };

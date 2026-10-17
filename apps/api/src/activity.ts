@@ -1,4 +1,4 @@
-import { ENTRY_POINT_V07, getChain, isCrossChainContract } from '@blocky/wallet-core';
+import { ENTRY_POINT_V07, getChain, isCrossChainContract, upstream } from '@blocky/wallet-core';
 import { formatUsd, type Address, type ChainId } from '@blocky/shared';
 import type { Contact, Execution, PublicUser, StoredPlan } from './store';
 
@@ -209,7 +209,7 @@ export async function fetchExplorerTransfers(
   const key = options.apiKey ? `&apikey=${encodeURIComponent(options.apiKey)}` : '';
   const url = `${options.apiBase}/addresses/${address}/token-transfers?type=ERC-20&token=${options.token}${key}`;
 
-  const response = await doFetch(url, { headers: { accept: 'application/json' } });
+  const response = await doFetch(url, upstream({ headers: { accept: 'application/json' } }));
 
   if (!response.ok) {
     throw new Error(`Explorer request failed with ${response.status}`);
@@ -245,11 +245,13 @@ export function mergeActivity(
     if (!sent && !received) continue;
 
     /*
-     * Gas, not a send. On Arc the native token is USDC, so a user operation
-     * pays its prefund as a USDC transfer to the EntryPoint — which the
-     * explorer reports like any other transfer, in the same transaction as the
-     * real one. Listing it would put a second row under every send, addressed
-     * to a contract the user has never heard of, usually for $0.00.
+     * Gas, not a send — from when sends went out as ERC-4337 user operations,
+     * and still in older wallets' history. On Arc the native token is USDC, so
+     * a user operation paid its prefund as a USDC transfer to the EntryPoint,
+     * which the explorer reports like any other transfer. Listing it would put
+     * a second row under the send, addressed to a contract the user has never
+     * heard of, usually for $0.00. Sends today are ordinary transactions, which
+     * leave no such transfer.
      *
      * The fee belongs on the confirmation card and nowhere else.
      */

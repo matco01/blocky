@@ -17,6 +17,7 @@
 
 import { cached } from './cache';
 import { STOCKS } from './stocks';
+import { upstream } from './upstream';
 
 const API = 'https://coins.llama.fi/prices/current';
 
@@ -132,7 +133,7 @@ export async function getTokenPricesByAddress(
   if (wanted.length === 0) return new Map();
 
   return cached(fetchImpl, `address-prices:${wanted.join(',')}`, ADDRESS_PRICE_TTL_MS, async () => {
-    const response = await fetchImpl(`${API}/${wanted.join(',')}`);
+    const response = await fetchImpl(`${API}/${wanted.join(',')}`, upstream());
     if (!response.ok) throw new Error(`Price request failed with ${response.status}`);
     const body = (await response.json()) as {
       coins?: Record<string, { price: number; symbol: string; timestamp: number; confidence: number }>;
@@ -180,7 +181,7 @@ const PRICE_KEYS: ReadonlyArray<[symbol: string, key: string]> = [
 
 async function fetchSnapshot(fetchImpl: typeof fetch): Promise<PriceSnapshot> {
   const keys = [...new Set(PRICE_KEYS.map(([, key]) => key))];
-  const response = await fetchImpl(`${API}/${keys.join(',')}`);
+  const response = await fetchImpl(`${API}/${keys.join(',')}`, upstream());
 
   if (!response.ok) {
     throw new Error(`Price request failed with ${response.status}`);

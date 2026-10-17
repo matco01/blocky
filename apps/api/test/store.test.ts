@@ -143,6 +143,36 @@ describe('the daily cap sum', () => {
   });
 });
 
+describe('stale plans', () => {
+  it('prunes quotes nobody will use, and keeps every plan that is history', async () => {
+    const unused = [plan(), plan()];
+    for (const p of unused) await store.putPlan(USER, p, 'agent');
+    // Executed: its plan is the record of what happened.
+    const executed = await execute('5');
+    // Paying a request: its plan is how the request settles.
+    const request = await store.createPaymentRequest({ requesterId: OTHER, payerId: USER, amountUsd: '3', note: null });
+    const paying = plan();
+    await store.putPlan(USER, paying, 'manual');
+    await store.linkRequestPlan(request.id, paying.id);
+
+    // A month on, every one of those quotes has long run out.
+    const later = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    expect(await store.pruneStalePlans(later)).toBe(2);
+
+    for (const p of unused) expect(await store.getPlan(USER, p.id)).toBeNull();
+    expect(await store.getPlan(USER, executed.planId)).not.toBeNull();
+    expect(await store.getPlan(USER, paying.id)).not.toBeNull();
+  });
+
+  it('leaves a quote that has not run out', async () => {
+    const live = plan();
+    await store.putPlan(USER, live, 'agent');
+
+    expect(await store.pruneStalePlans(new Date())).toBe(0);
+    expect(await store.getPlan(USER, live.id)).not.toBeNull();
+  });
+});
+
 describe('executions', () => {
   it('runs a plan at most once', async () => {
     const p = plan();

@@ -188,11 +188,11 @@ export default function LoginScreen() {
 
           <Text variant="caption" tone="tertiary" style={{ textAlign: 'center' }}>
             By continuing you agree to the{' '}
-            <Text variant="caption" tone="secondary" style={{ textDecorationLine: 'underline' }} onPress={() => void WebBrowser.openBrowserAsync('https://blocky.page/terms')}>
+            <Text variant="caption" tone="secondary" style={{ textDecorationLine: 'underline' }} onPress={() => void WebBrowser.openBrowserAsync(`${config.websiteUrl}/terms`)}>
               Terms
             </Text>{' '}
             and{' '}
-            <Text variant="caption" tone="secondary" style={{ textDecorationLine: 'underline' }} onPress={() => void WebBrowser.openBrowserAsync('https://blocky.page/privacy')}>
+            <Text variant="caption" tone="secondary" style={{ textDecorationLine: 'underline' }} onPress={() => void WebBrowser.openBrowserAsync(`${config.websiteUrl}/privacy`)}>
               Privacy policy
             </Text>
             .

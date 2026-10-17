@@ -6,9 +6,9 @@ import { isDecimalString } from './money';
 /* -------------------------------------------------------------------------- */
 
 /**
- * The chains we speak. Scoped to Circle Gateway's supported set, because the
- * unified USDC balance is the product and a chain outside that set would
- * reintroduce the bridging UX we are trying to delete.
+ * The chains we speak: Arc, where the user's dollars live, and the chains
+ * Blocky can move their money to and bring it back from. Each one's tokens,
+ * contracts and routes are in `@blocky/wallet-core`'s chain registry.
  */
 export const CHAIN = {
   ethereum: 1,

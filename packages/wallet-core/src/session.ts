@@ -2,16 +2,18 @@ import { parseUnits, type Address, type ChainId, type Policy } from '@blocky/sha
 import { usdcAddress } from './chains';
 
 /**
- * Session keys: the agent's hands, and the limits on them.
+ * Session permissions: what an agent key would be allowed to do, derived from
+ * the limits the user set.
  *
- * The server-side policy engine in `@blocky/shared` decides what the agent
- * *should* do. This decides what it *can* do, and the difference is the entire
- * safety argument: these permissions are installed in the Kernel validator and
- * enforced by the chain. If our API is compromised tomorrow, an attacker with
- * full server access still cannot exceed the caps encoded here.
+ * ⚠️ Enforced server-side only. These were designed to be installed in an
+ * on-chain validator, where they would hold even against a compromised server
+ * — but Blocky's wallet is a plain embedded wallet with no smart account to
+ * install one on, and the on-chain half is not planned (see "Session keys" in
+ * docs/ENGINEERING.md). Nothing signs with a session key today: every transfer
+ * is signed on the user's own device, behind their fingerprint.
  *
- * So the on-chain limits must be derived from the same policy the user set, and
- * must never be looser. `deriveSessionPermissions` is the only place that
+ * What still holds: the permissions are derived from the same policy the user
+ * set and are never looser. `deriveSessionPermissions` is the only place that
  * translation happens.
  */
 
@@ -91,12 +93,12 @@ export function deriveSessionPermissions(args: {
   }
 
   /*
-   * Swaps stay off until M5. When they land, the target set is the aggregator's
-   * router only, with `approve` scoped to that same router — not a wildcard.
+   * Swaps stay off. If they arrive, the target set is the aggregator's router
+   * only, with `approve` scoped to that same router — not a wildcard.
    */
   if (policy.allowedActions.includes('swap')) {
     void ERC20_APPROVE; // referenced when swap permissions are implemented
-    throw new Error('Swap session permissions are not implemented yet (M5)');
+    throw new Error('Swap session permissions are not implemented yet.');
   }
 
   return {
@@ -121,16 +123,13 @@ export function isSessionExpired(
 /* -------------------------------------------------------------------------- */
 
 /**
- * The server-side mirror of the on-chain validator.
+ * May a session sign these calls? Written as the server-side mirror of an
+ * on-chain validator — which is not installed (see the note at the top of this
+ * file), so today this check is the whole of it.
  *
- * The Kernel validator is the real guarantee — it holds even if this server is
- * fully compromised. This exists so a call that the chain would reject is
- * refused here first, with an explanation, instead of being submitted and
- * failing as an opaque revert the user pays gas for.
- *
- * It must never be *more* permissive than the validator. When in doubt about
- * whether something is allowed, refuse: a false refusal is an inconvenience, a
- * false authorisation is someone's money.
+ * It must never be *more* permissive than a validator would be. When in doubt
+ * about whether something is allowed, refuse: a false refusal is an
+ * inconvenience, a false authorisation is someone's money.
  */
 export type CallAuthorisation =
   | { ok: true }

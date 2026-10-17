@@ -1,6 +1,7 @@
 import type { Address, ChainId, Hex } from '@blocky/shared';
 import { getChain } from './chains';
 import type { Receipt } from './receipts';
+import { upstream } from './upstream';
 
 /**
  * Moving USDC between chains: Circle's CCTP v2, with its Forwarding Service.
@@ -117,6 +118,7 @@ export async function fetchCctpFees(
 
   const response = await fetchImpl(
     `${contracts.api}/v2/burn/USDC/fees/${sourceDomain}/${destinationDomain}?forward=true`,
+    upstream(),
   );
 
   if (!response.ok) {

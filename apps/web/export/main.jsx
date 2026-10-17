@@ -2,8 +2,8 @@
  * blocky.page/export — where a Blocky user takes their private key elsewhere.
  *
  * Privy's mobile SDKs don't export keys, on purpose: export needs a browser's
- * origin isolation. So the app opens this page in a WebView, the user signs in
- * again, and Privy's own modal shows the key. That modal is an iframe on
+ * origin isolation. So the app opens this page in a browser tab, the user signs
+ * in again, and Privy's own modal shows the key. That modal is an iframe on
  * Privy's domain — the key is assembled there, and neither this page, the app
  * nor Blocky's server can read it. That is what keeps Blocky non-custodial.
  *

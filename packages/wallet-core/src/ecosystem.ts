@@ -9,11 +9,15 @@
  */
 
 import { cached } from './cache';
+import { upstream } from './upstream';
 
 const API = 'https://api.llama.fi';
 
 /** The full protocol list is megabytes; TVL rankings barely move within the hour. */
 const PROTOCOLS_TTL_MS = 15 * 60_000;
+
+/** Megabytes take longer than a quote to arrive; still bounded. */
+const PROTOCOLS_TIMEOUT_MS = 20_000;
 const CHAIN = 'Arc';
 
 /** Plenty to answer "what's popular", small enough to stay cheap in context. */
@@ -36,7 +40,7 @@ export function getArcProtocols(fetchImpl: typeof fetch = fetch): Promise<ArcPro
 }
 
 async function fetchArcProtocols(fetchImpl: typeof fetch): Promise<ArcProtocol[]> {
-  const response = await fetchImpl(`${API}/protocols`);
+  const response = await fetchImpl(`${API}/protocols`, upstream({}, PROTOCOLS_TIMEOUT_MS));
 
   if (!response.ok) {
     throw new Error(`Protocol request failed with ${response.status}`);

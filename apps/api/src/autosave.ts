@@ -1,4 +1,5 @@
-import { displayUsd, formatUsd, parseUsd, planOutflowUsd, type Address } from '@blocky/shared';
+import { displayUsd, formatUsd, parseUsd, type Address } from '@blocky/shared';
+import { categorise } from './insights';
 import type { Pot, SaveRule, Store } from './store';
 
 /**
@@ -137,7 +138,13 @@ async function checkIn(store: Store, user: { id: string; walletAddress: Address 
     store.listSaveRules(user.id),
   ]);
 
-  const sentUsd = moves.reduce((sum, move) => sum + parseUsd(planOutflowUsd(move.plan) ?? '0'), 0n);
+  // "You sent" means what Insights means by it: money paid to people. Moving
+  // money between their own wallets isn't sending it, buying and selling have
+  // their own words, and fees are counted apart.
+  const sentUsd = moves.reduce(
+    (sum, { plan }) => (categorise(plan) === 'people' ? sum + parseUsd(plan.outflow[0]?.usdValue ?? '0') : sum),
+    0n,
+  );
   const receivedUsd = received.reduce((sum, entry) => sum + parseUsd(entry.usd), 0n);
   const autoSaved = rules.reduce((sum, rule) => sum + parseUsd(rule.savedSinceCheckInUsd), 0n);
 

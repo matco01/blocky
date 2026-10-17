@@ -1,4 +1,4 @@
-import { parseUsd } from '@blocky/shared';
+import { CHAIN, parseUsd, type Plan } from '@blocky/shared';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { runAutoSave, runCheckIns } from '../src/autosave';
@@ -136,4 +136,65 @@ describe('weekly check-in', () => {
     // Not again the same week.
     expect(await runCheckIns(store)).toBe(0);
   });
+
+  it('counts money sent to people, not money moved between their own wallets', async () => {
+    await landed(sent('25'));
+    await landed(
+      sent('500', {
+        intentType: 'bridge',
+        recipient: null,
+        inflow: [{ token: { ...USDC_ARC, chainId: CHAIN.baseSepolia, address: '0x036cbd53842c5426634e7929541ec2318f3dcf7e' }, amount: '0', displayAmount: '499.9', usdValue: '499.9' }],
+      }),
+    );
+
+    expect(await runCheckIns(store)).toBe(1);
+    const [note] = await store.listNotifications(USER);
+    expect(note?.body).toContain('You sent $25.00.');
+  });
 });
+
+const USDC_ARC = {
+  chainId: CHAIN.arcTestnet,
+  address: '0x3600000000000000000000000000000000000000',
+  symbol: 'USDC',
+  name: 'USD Coin',
+  decimals: 6,
+  logoUrl: null,
+  verified: true,
+} as const;
+
+/** Just enough of a plan to categorise: a send of `usd` to @sam unless overridden. */
+function sent(usd: string, over: Partial<Plan> = {}): Plan {
+  return {
+    id: crypto.randomUUID(),
+    intentType: 'transfer',
+    summary: `Send $${usd}.`,
+    modelRationale: '',
+    outflow: [{ token: USDC_ARC, amount: '0', displayAmount: usd, usdValue: usd }],
+    inflow: [],
+    recipient: { address: '0x2222222222222222222222222222222222222222', display: '@sam', ensName: null, contactLabel: null, known: true, isContract: false },
+    fee: { totalUsd: '0.01', paidIn: 'usdc', breakdown: { networkUsd: '0.01', paymasterUsd: '0', serviceUsd: '0' } },
+    warnings: [],
+    calls: [],
+    simulation: null,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date().toISOString(),
+    ...over,
+  } as Plan;
+}
+
+/** A move that landed: its plan stored, its execution recorded and settled. */
+async function landed(plan: Plan) {
+  await store.putPlan(USER, plan, 'agent');
+  const execution = await store.recordExecution(USER, {
+    planId: plan.id,
+    origin: 'agent',
+    chainId: CHAIN.arcTestnet,
+    txHash: `0x${crypto.randomUUID().replaceAll('-', '').padEnd(64, '0')}`,
+    counterparty: '0x2222222222222222222222222222222222222222',
+    amount: plan.outflow[0]!.displayAmount,
+    outflowUsd: plan.outflow[0]!.usdValue!,
+    summary: plan.summary,
+  });
+  await store.settleExecution(execution.id, 'success');
+}

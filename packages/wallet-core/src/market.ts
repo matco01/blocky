@@ -13,8 +13,12 @@
  */
 
 import { cached } from './cache';
+import { upstream } from './upstream';
 
 const API = 'https://api.coingecko.com/api/v3';
+
+/** Three calls run side by side for one answer; a slow one is dropped, not waited on. */
+const MARKET_TIMEOUT_MS = 8_000;
 
 /** A minute: the market moves, but not in ways a chat reply needs by the second. */
 export const MARKET_TTL_MS = 60_000;
@@ -56,10 +60,10 @@ export function fetchMarketOverview(options: MarketOptions = {}): Promise<Market
 
 async function loadOverview(fetchImpl: typeof fetch, apiKey: string | undefined): Promise<MarketOverview> {
   const get = async (path: string): Promise<any> => {
-    const response = await fetchImpl(`${API}${path}`, {
-      headers: { accept: 'application/json', ...(apiKey ? { 'x-cg-demo-api-key': apiKey } : {}) },
-      signal: AbortSignal.timeout(8_000),
-    });
+    const response = await fetchImpl(
+      `${API}${path}`,
+      upstream({ headers: { accept: 'application/json', ...(apiKey ? { 'x-cg-demo-api-key': apiKey } : {}) } }, MARKET_TIMEOUT_MS),
+    );
     if (!response.ok) throw new Error(`CoinGecko ${path} failed: ${response.status}`);
     return response.json();
   };

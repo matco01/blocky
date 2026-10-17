@@ -2,6 +2,7 @@ import { CHAIN, type Address, type ChainId, type Hex } from '@blocky/shared';
 import { decodeAbiParameters, decodeFunctionData, parseAbi } from 'viem';
 import { getChain } from './chains';
 import type { Receipt } from './receipts';
+import { upstream } from './upstream';
 
 /**
  * Moving USDC between chains through Across.
@@ -97,7 +98,7 @@ export async function fetchAcrossQuote(
     recipient: args.recipient,
   });
 
-  const response = await fetchImpl(`${API}/suggested-fees?${params}`);
+  const response = await fetchImpl(`${API}/suggested-fees?${params}`, upstream());
 
   // Across answers an unsupported route or amount with a 4xx and a message:
   // that is "no route", not an outage.
@@ -343,7 +344,7 @@ export async function fetchAcrossSwapQuote(
     recipient: args.recipient,
   });
 
-  const response = await fetchImpl(`${API}/swap/approval?${params}`);
+  const response = await fetchImpl(`${API}/swap/approval?${params}`, upstream());
   if (response.status >= 400 && response.status < 500) return null;
   if (!response.ok) throw new Error(`Across swap quote failed with ${response.status}`);
 
@@ -476,7 +477,7 @@ export async function fetchAcrossNativeSwapQuote(
     recipient: args.recipient,
   });
 
-  const response = await fetchImpl(`${API}/swap/approval?${params}`);
+  const response = await fetchImpl(`${API}/swap/approval?${params}`, upstream());
   if (response.status >= 400 && response.status < 500) return null;
   if (!response.ok) throw new Error(`Across swap quote failed with ${response.status}`);
 

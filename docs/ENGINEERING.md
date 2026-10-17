@@ -285,6 +285,33 @@ hex outside it.
 - **Cards and fiat are regulated money transmission.** A non-custodial wallet is
   largely fine; issuing cards needs a licensed partner and counsel. That's a
   company decision, not a codebase one.
+- **No address screening yet.** `isAddressFlagged` in
+  [`planner-context.ts`](../apps/api/src/planner-context.ts) always answers
+  `false`: the `address_flagged` warning and its hard denial are built and
+  tested, but nothing feeds them. Wire a sanctions/scam list provider in there
+  before relying on it.
+- **Every third-party read has a deadline.** `upstream()` in
+  [`wallet-core`](../packages/wallet-core/src/upstream.ts) gives each price,
+  quote, fee and explorer call 10 seconds; past that it fails like any other
+  read, which every caller shows as "unavailable", never as zero. Use it for
+  any new provider.
+- **Stored plans are pruned** 30 days after their quote ran out, unless they
+  were executed (an execution's plan is its history) or pay a request.
+
+### Running more than one API instance
+
+The API assumes it is the only one. Before running two:
+
+- **Background jobs** — price alerts, auto-save, the weekly check-in and plan
+  pruning — run on timers in every instance (see `every` in
+  [`index.ts`](../apps/api/src/index.ts)). Two instances would send each alert
+  twice and could count an auto-saved deposit twice. Move them to one worker,
+  or take a Postgres advisory lock per run.
+- **Rate limits** for chat, the waitlist and crash reports are in memory, so
+  each instance would allow its own full quota. Move them to the database (or
+  Redis) first.
+- **Caches** (prices, holdings) are per process. That is only a cost: each
+  instance fetches its own copy.
 
 ## The agent
 
@@ -308,12 +335,14 @@ Three things in [`agent.ts`](../packages/agent/src/agent.ts) are load-bearing:
   is hand-written rather than using the SDK's tool runner.
 - **Malformed intents are handed back, never repaired.** The model gets two
   attempts against real validation errors, then we surface the failure.
-- **One cache breakpoint, on the system block.** The API renders
-  tools → system → messages, so that single breakpoint covers the tool schemas
-  and the prompt — about 4,300 tokens of stable prefix — while the conversation
-  varies freely outside it. Watch `usage.cacheReadTokens`: if it is ever zero on
-  a second turn, something has made the prefix unstable and input cost has
-  roughly tripled. Never interpolate anything into `SYSTEM_PROMPT`.
+- **Two cache breakpoints.** The API renders tools → system → messages, so a
+  breakpoint on the system block covers the tool schemas and the prompt — about
+  7k tokens of stable prefix, identical for every user — with a one-hour TTL,
+  because the next message often comes more than five minutes later. A second,
+  on the conversation, lets each step of a tool loop read the earlier steps from
+  cache. Watch `usage.cacheReadTokens`: if it is ever zero on a second turn,
+  something has made the prefix unstable and input cost has roughly tripled.
+  Never interpolate anything into `SYSTEM_PROMPT`.
 
 Prompt injection is handled by fencing. Token names, ENS records and memos are
 attacker-controlled text that lands in the model's context verbatim, so every

@@ -9,7 +9,7 @@ import {
   type Policy,
 } from '@blocky/shared';
 import type { SessionPermissions, TrackedToken } from '@blocky/wallet-core';
-import { and, desc, eq, gte, inArray, isNull, gt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, gt, lt, sql } from 'drizzle-orm';
 import type { Db } from './db/client';
 import {
   balanceSnapshots,
@@ -207,6 +207,13 @@ export interface Store {
   /** Plans are short-lived; held only between proposal and execution. */
   putPlan(userId: string, plan: Plan, origin: PlanOrigin): Promise<void>;
   getPlan(userId: string, planId: string): Promise<StoredPlan | null>;
+  /**
+   * Delete plans whose quote ran out before `before` and that nobody will need
+   * again: never executed (an execution's plan is its history) and not tied to
+   * a payment request. Every proposal and every re-quote stores one, so without
+   * this the table only ever grows. Returns how many went.
+   */
+  pruneStalePlans(before: Date): Promise<number>;
 
   /**
    * Record a submitted transaction. Throws {@link DuplicateExecutionError} if
@@ -233,12 +240,11 @@ export interface Store {
   isKnownRecipient(userId: string, address: Address): Promise<boolean>;
 
   /**
-   * The agent's session key, and the switch that kills it.
+   * The agent's session, and the switch that kills it.
    *
-   * Revocation here is immediate and server-side. It is not the whole story —
-   * the on-chain validator is what holds if this server is compromised — but it
-   * is the part that responds instantly, and it is what the user's revoke
-   * button actually touches.
+   * Revocation here is immediate and server-side — and, with no on-chain
+   * validator installed, it is the whole of it. It is what the user's revoke
+   * button touches.
    */
   putSession(userId: string, session: SessionRecord): Promise<void>;
   activeSession(userId: string, chainId: ChainId, now?: Date): Promise<SessionRecord | null>;
@@ -504,6 +510,20 @@ export function createStore(db: Db): Store {
         .where(and(eq(plans.id, planId), eq(plans.userId, userId)));
 
       return row ? { plan: row.plan as Plan, origin: row.origin } : null;
+    },
+
+    async pruneStalePlans(before) {
+      const removed = await db
+        .delete(plans)
+        .where(
+          and(
+            lt(plans.expiresAt, before),
+            sql`not exists (select 1 from ${executions} where ${executions.planId} = ${plans.id})`,
+            sql`not exists (select 1 from ${paymentRequests} where ${paymentRequests.planId} = ${plans.id})`,
+          ),
+        )
+        .returning({ id: plans.id });
+      return removed.length;
     },
 
     async recordExecution(userId, execution) {

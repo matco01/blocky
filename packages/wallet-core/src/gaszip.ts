@@ -2,6 +2,7 @@ import { CHAIN, type Address, type ChainId, type Hex } from '@blocky/shared';
 import { acrossSpokePool } from './across';
 import { isCctpTokenMinter } from './cctp';
 import { getChain, usdcUnitsToNative } from './chains';
+import { upstream } from './upstream';
 
 /**
  * Getting a chain's gas token there: Gas.zip.
@@ -90,6 +91,7 @@ export async function fetchGasZipQuote(
   const value = usdcUnitsToNative(args.inputAmount);
   const response = await fetchImpl(
     `${API}/quotes/${args.from}/${value}/${args.to}?from=${args.recipient}&to=${args.recipient}`,
+    upstream(),
   );
 
   const body = (await response.json().catch(() => null)) as {

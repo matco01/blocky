@@ -98,7 +98,7 @@ export interface PlannerDeps {
   reader: ChainReader;
   store: Store;
   userId: string;
-  /** The user's wallet. Privy supplies this for real in M1. */
+  /** The user's wallet, as Privy reports it — never as the client claims it. */
   account: Address;
   /** Null or absent: no fee. */
   blockyFee?: BlockyFeeTerms | null;
@@ -223,9 +223,7 @@ export function createPlannerContext({
       };
     },
 
-    async resolveRecipient(ref: RecipientRef): Promise<ResolvedRecipient | null> {
-      const chainId = DEFAULT_CHAIN;
-
+    async resolveRecipient(ref: RecipientRef, chainId: ChainId = DEFAULT_CHAIN): Promise<ResolvedRecipient | null> {
       const resolved = await addressFor(ref, { account, reader, store, userId });
 
       if (!resolved) return null;
@@ -233,8 +231,11 @@ export function createPlannerContext({
       const [known, isContract] = await Promise.all([
         store.isKnownRecipient(userId, resolved.address),
         reader
+          // Read on the chain the money lands on — code on Arc says nothing about Arbitrum.
           .isContract(chainId, resolved.address)
-          // A failed code read must not silently become "definitely a wallet".
+          // A failed code read counts as a wallet. The contract warning is
+          // advisory, and a recipient the user hasn't paid before already
+          // needs their approval whatever this says.
           .catch(() => false),
       ]);
 

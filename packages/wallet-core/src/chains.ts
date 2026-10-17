@@ -4,10 +4,11 @@ import { IS_TESTNET } from './network';
 /**
  * The chain registry.
  *
- * Scope is Circle Gateway's supported set and nothing else. A chain outside it
- * cannot participate in the unified USDC balance, which would put a bridging
- * step back in front of the user — the exact thing this product exists to
- * remove. Adding a chain here is a product decision, not a config change.
+ * Arc is home; every other chain here is somewhere Blocky can move the user's
+ * money to and bring it back from — through CCTP, Across or Gas.zip — or, for
+ * Robinhood Chain, where stocks live. A chain with no route in and out would
+ * be money that lands somewhere it can't leave, so adding one is a product
+ * decision, not a config change.
  *
  * ⚠️  Token addresses are load-bearing: a wrong one sends real money somewhere
  * unrecoverable. Every mainnet USDC address and Circle domain below was checked

@@ -113,26 +113,46 @@ const app = createApp({
   health,
 });
 
+/*
+ * The jobs Blocky runs on his own. Each waits for its last run to finish
+ * before starting the next: a slow price feed or RPC must not stack runs on
+ * top of each other, where two auto-saves would count one deposit twice and
+ * two alert sweeps would send one alert twice.
+ *
+ * They assume one API instance — see "Running more than one API instance" in
+ * docs/ENGINEERING.md before scaling out.
+ */
+function every(ms: number, name: string, job: () => Promise<unknown>): void {
+  let running = false;
+  const timer = setInterval(() => {
+    if (running) return;
+    running = true;
+    job()
+      .catch((error: unknown) => console.error(`${name} failed`, error))
+      .finally(() => {
+        running = false;
+      });
+  }, ms);
+  timer.unref();
+}
+
+/** Quotes nobody used are kept this long after they run out — long enough for any old chat card to explain itself. */
+const PLAN_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const PLAN_PRUNE_MS = 6 * 60 * 60 * 1000;
+
 // Price alerts: one sweep a minute against the shared price snapshot.
-const alertTimer = setInterval(() => {
-  void checkPriceAlerts(store, async (symbol) => priceAsDecimal(await getTokenPriceUsd(symbol))).catch((error: unknown) =>
-    console.error('price alerts failed', error),
-  );
-}, ALERT_CHECK_MS);
-alertTimer.unref();
+every(ALERT_CHECK_MS, 'price alerts', () =>
+  checkPriceAlerts(store, async (symbol) => priceAsDecimal(await getTokenPriceUsd(symbol))),
+);
 
 // Auto-save rules fill pots on their own; the weekly check-in lands in the inbox.
-const autoSaveTimer = setInterval(() => {
-  void runAutoSave(store, async (address) => (await readUsdcBalance(reader, DEFAULT_CHAIN, address)).amount).catch(
-    (error: unknown) => console.error('auto-save failed', error),
-  );
-}, AUTOSAVE_CHECK_MS);
-autoSaveTimer.unref();
+every(AUTOSAVE_CHECK_MS, 'auto-save', () =>
+  runAutoSave(store, async (address) => (await readUsdcBalance(reader, DEFAULT_CHAIN, address)).amount),
+);
+every(CHECK_IN_SCAN_MS, 'check-ins', () => runCheckIns(store));
 
-const checkInTimer = setInterval(() => {
-  void runCheckIns(store).catch((error: unknown) => console.error('check-ins failed', error));
-}, CHECK_IN_SCAN_MS);
-checkInTimer.unref();
+// Every proposal and re-quote stores a plan; the ones never used are cleared out.
+every(PLAN_PRUNE_MS, 'plan pruning', () => store.pruneStalePlans(new Date(Date.now() - PLAN_RETENTION_MS)));
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, ({ port }) => {
   console.log(

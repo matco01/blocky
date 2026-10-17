@@ -38,8 +38,14 @@ export interface PlannerContext {
    */
   resolveToken(ref: TokenRef, chainId: ChainId): Promise<ResolvedToken | null>;
 
-  /** Resolve a recipient reference to an address. Null means unresolvable. */
-  resolveRecipient(ref: RecipientRef): Promise<ResolvedRecipient | null>;
+  /**
+   * Resolve a recipient reference to an address. Null means unresolvable.
+   *
+   * `chainId` is where the money will land — Arc when omitted. Whether the
+   * address is a contract is a fact about one chain: an ordinary wallet on Arc
+   * can be a contract on Arbitrum, and the other way round.
+   */
+  resolveRecipient(ref: RecipientRef, chainId?: ChainId): Promise<ResolvedRecipient | null>;
 
   /** USD price of one whole token, or null when we have no trustworthy price. */
   priceOf(token: ResolvedToken): Promise<string | null>;
@@ -50,10 +56,10 @@ export interface PlannerContext {
   /**
    * Spendable USDC on a chain, in USD.
    *
-   * Separate from {@link balanceOf} because gas is taken in USDC — natively on
-   * Arc, via Circle Paymaster elsewhere — whatever token the transaction moves.
-   * Deriving it from the transferred token instead would report zero for every
-   * non-USDC transfer and refuse perfectly payable transactions.
+   * Separate from {@link balanceOf} because on Arc gas is taken in USDC
+   * whatever token the transaction moves. Deriving it from the transferred
+   * token instead would report zero for every non-USDC transfer and refuse
+   * perfectly payable transactions.
    */
   usdcBalanceUsd(chainId: ChainId): Promise<string>;
 

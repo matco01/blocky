@@ -1,13 +1,14 @@
 /**
- * @blocky/wallet-core — chains, chain reads, Circle Gateway, prices, session
- * keys, and who pays for gas.
+ * @blocky/wallet-core — chains, chain reads, routes between chains, prices,
+ * session permissions, and who pays for gas.
  *
  * Everything here is read-only or pure. Signing is not: it happens on the
- * device, in `apps/mobile/lib/smart-account.ts`, because that is where the
- * key is — so that file talks to Privy, ZeroDev and viem directly.
+ * device, in `apps/mobile/lib/wallet.ts`, because that is where the key is —
+ * the user's Privy embedded wallet, sending ordinary transactions through viem.
  */
 
 export * from './network';
+export * from './upstream';
 export * from './chains';
 export * from './session';
 export * from './gas';

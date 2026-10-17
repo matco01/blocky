@@ -109,7 +109,8 @@ async function planTransfer(intent: TransferIntent, ctx: PlannerContext): Promis
 
   const [token, recipient] = await Promise.all([
     ctx.resolveToken(intent.token, chainId),
-    ctx.resolveRecipient(intent.recipient),
+    // On the chain the recipient receives it: that's where "is this a contract?" matters.
+    ctx.resolveRecipient(intent.recipient, chainId),
   ]);
 
   if (!token) {

@@ -23,8 +23,8 @@ import { Text } from '../Text';
 import { Tile } from '../Tile';
 
 /** The same page as PRIVACY.md, on the website so it opens whether or not you use GitHub. */
-const PRIVACY_URL = 'https://blocky.page/safety';
-const LEGAL_URL = 'https://blocky.page';
+const PRIVACY_URL = `${config.websiteUrl}/safety`;
+const TERMS_URL = `${config.websiteUrl}/terms`;
 
 /**
  * Account — the second page of the pager, one swipe left of Home.
@@ -216,7 +216,7 @@ export function AccountPage({ page, onPageChange }: PageProps) {
           chevron
           onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_URL)}
         />
-        <Row icon="document-text-outline" label="Terms and privacy policy" value="The rules, in plain words" chevron onPress={() => void WebBrowser.openBrowserAsync(`${LEGAL_URL}/terms`)} />
+        <Row icon="document-text-outline" label="Terms and privacy policy" value="The rules, in plain words" chevron onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)} />
         <Row icon="trash-outline" label="Delete account" value="Your account, data and wallet login" chevron onPress={confirmDelete} last />
       </Section>
 

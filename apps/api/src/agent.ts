@@ -8,6 +8,7 @@ import {
   formatUnits,
   formatUsd,
   parseUsd,
+  planOutflowUsd,
   type Address,
   type Plan,
   type PolicyDecision,
@@ -32,7 +33,7 @@ import {
   IS_TESTNET,
 } from '@blocky/wallet-core';
 import { mergeActivity, type ExplorerTransfer } from './activity';
-import { createRequest, insightsFor, linkMatchingRequest, moneyWarnings, who } from './money';
+import { createRequest, insightsFor, linkMatchingRequest, moneyWarnings, readDollars, who } from './money';
 import { BUDGET_CATEGORIES, monthOf } from './insights';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
 import type { SaveRule, Store } from './store';
@@ -291,10 +292,11 @@ export function agentToolsFor(
       if (!status) return { error: 'That request is for someone else.' };
       await store.settleRequest(id, status);
       if (status === 'declined') {
+        // Worded exactly as when they decline from the app.
         await store.notify(request.requesterId, {
           kind: 'request_declined',
           title: `${who(await store.getUsername(userId))} declined your request`,
-          body: `${request.amountUsd} dollars${request.note ? ` for ${request.note}` : ''}`,
+          body: `${displayUsd(request.amountUsd)}${request.note ? ` for ${request.note}` : ''}`,
           data: { requestId: id },
         });
       }
@@ -323,17 +325,13 @@ export function agentToolsFor(
       const policy = await store.getPolicy(userId);
       const next = { ...policy };
       const refused: string[] = [];
-      const read = (value: string | null) => {
-        const clean = value?.trim().replace(/^\$/, '').replace(/,/g, '') ?? null;
-        return clean !== null && /^\d+(\.\d{1,6})?$/.test(clean) ? clean : null;
-      };
 
-      const perSend = read(limits.perSendUsd);
+      const perSend = readDollars(limits.perSendUsd);
       if (perSend !== null) {
         if (parseUsd(perSend) <= parseUsd(policy.perTxCapUsd)) next.perTxCapUsd = perSend;
         else refused.push('per send');
       }
-      const perDay = read(limits.perDayUsd);
+      const perDay = readDollars(limits.perDayUsd);
       if (perDay !== null) {
         if (parseUsd(perDay) <= parseUsd(policy.dailyCapUsd)) next.dailyCapUsd = perDay;
         else refused.push('per day');
@@ -370,8 +368,8 @@ export function agentToolsFor(
     },
 
     async setPriceAlert(alert) {
-      const price = alert.priceUsd.trim().replace(/^\$/, '').replace(/,/g, '');
-      if (!/^\d+(\.\d{1,6})?$/.test(price) || parseUsd(price) <= 0n) return { error: 'Give the price as a number of dollars.' };
+      const price = readDollars(alert.priceUsd);
+      if (price === null || parseUsd(price) <= 0n) return { error: 'Give the price as a number of dollars.' };
       if (!(await getTokenPriceUsd(alert.symbol).catch(() => null))) {
         return { error: `There's no live price for ${alert.symbol} to watch.` };
       }
@@ -393,8 +391,8 @@ export function agentToolsFor(
 
     async setBudget(category, monthlyUsd) {
       if (!(BUDGET_CATEGORIES as readonly string[]).includes(category)) return { error: 'Budgets are for "people", "investing" or "total".' };
-      const amount = monthlyUsd?.trim().replace(/^\$/, '') ?? null;
-      if (amount !== null && !/^\d+(\.\d{1,6})?$/.test(amount)) return { error: 'Give the budget as a number of dollars.' };
+      const amount = monthlyUsd === null ? null : readDollars(monthlyUsd);
+      if (monthlyUsd !== null && amount === null) return { error: 'Give the budget as a number of dollars.' };
       await store.setBudget(userId, category, amount);
       return { budgets: await store.listBudgets(userId) };
     },
@@ -404,18 +402,20 @@ export function agentToolsFor(
     },
 
     async createPot(name, targetUsd) {
-      const target = targetUsd?.trim().replace(/^\$/, '') ?? null;
-      if (target !== null && !/^\d+(\.\d{1,6})?$/.test(target)) return { error: 'Give the goal as a number of dollars.' };
+      const target = targetUsd === null ? null : readDollars(targetUsd);
+      if (targetUsd !== null && target === null) return { error: 'Give the goal as a number of dollars.' };
       return { pot: await store.createPot(userId, { name, targetUsd: target }) };
     },
 
     async moveToPot(potName, amountUsd) {
       const pot = (await store.listPots(userId)).find((candidate) => candidate.name.toLowerCase() === potName.trim().toLowerCase());
       if (!pot) return { error: `There's no pot called "${potName}".` };
-      const raw = amountUsd.trim().replace('$', '');
-      if (!/^-?\d+(\.\d{1,6})?$/.test(raw)) return { error: 'Give the amount in dollars, negative to take money out.' };
+      // "-20", "-$20" and "$-20" all take money out.
+      const raw = amountUsd.trim().replace(/^\$/, '');
       const out = raw.startsWith('-');
-      const units = parseUsd(raw.replace('-', ''));
+      const dollars = readDollars(out ? raw.slice(1) : raw);
+      if (dollars === null) return { error: 'Give the amount in dollars, negative to take money out.' };
+      const units = parseUsd(dollars);
 
       if (!out) {
         const [{ amount }, pots] = await Promise.all([readUsdcBalance(reader, DEFAULT_CHAIN, account), store.listPots(userId)]);
@@ -443,8 +443,8 @@ export function agentToolsFor(
         return { error: `At most ${MAX_SAVE_RULES} auto-saves. Stop one first.` };
       }
 
-      const amount = amountUsd?.trim().replace(/^\$/, '') ?? null;
-      const validAmount = amount !== null && /^\d+(\.\d{1,6})?$/.test(amount) && parseUsd(amount) > 0n;
+      const amount = readDollars(amountUsd);
+      const validAmount = amount !== null && parseUsd(amount) > 0n;
 
       if (kind === 'percent_in') {
         if (percent === null || !Number.isInteger(percent) || percent < 1 || percent > 100) {
@@ -468,7 +468,7 @@ export function agentToolsFor(
         return { rule: describeRule(rule, pot.name) };
       }
       if (kind === 'sweep_above') {
-        if (amount === null || !/^\d+(\.\d{1,6})?$/.test(amount)) return { error: 'Give the floor to keep free, in dollars.' };
+        if (amount === null) return { error: 'Give the floor to keep free, in dollars.' };
         const rule = await store.addSaveRule(userId, { potId: pot.id, kind, percent: null, amountUsd: amount, everyDays: null, nextRunAt: null });
         return { rule: describeRule(rule, pot.name) };
       }
@@ -680,13 +680,14 @@ export function createAgentHandler(
     const [policy, spentToday] = await Promise.all([store.getPolicy(userId), store.spentTodayUsd(userId)]);
 
     // Judged as if the ones before it were sent too: two sends that each fit
-    // today's limit may not fit it together.
+    // today's limit may not fit it together. Each counts as the daily cap will
+    // count it once it lands — fees included, as the execution records it.
     const plans: AgentResponse['plans'] = [];
     let spent = parseUsd(spentToday);
     for (const { plan } of turn.proposals) {
       const decision = evaluatePolicy({ policy, plan: plan!, spentTodayUsd: formatUsd(spent) });
       plans.push({ plan: plan!, decision });
-      spent += plan!.outflow.reduce((sum, delta) => sum + (delta.usdValue ? parseUsd(delta.usdValue) : 0n), 0n);
+      spent += parseUsd(planOutflowUsd(plan!) ?? plan!.fee.totalUsd);
 
       // Held so the client can approve it by id rather than posting a plan back —
       // a plan that arrives from a client is a plan an attacker can edit.

@@ -1,5 +1,6 @@
 import { formatUsd, parseUsd, type Address, type ChainId, type Hex } from '@blocky/shared';
 import { CHAINS } from './chains';
+import { upstream } from './upstream';
 
 /**
  * Circle Gateway: balances, and the burn intents that move them.
@@ -58,14 +59,17 @@ export async function fetchGatewayBalances(
 
   if (chains.length === 0) return { totalUsd: '0', perChain: [] };
 
-  const response = await doFetch(`${options.testnet ? GATEWAY_API.testnet : GATEWAY_API.mainnet}/balances`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      token: 'USDC',
-      sources: chains.map((chain) => ({ domain: chain.circleDomain, depositor })),
+  const response = await doFetch(
+    `${options.testnet ? GATEWAY_API.testnet : GATEWAY_API.mainnet}/balances`,
+    upstream({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        token: 'USDC',
+        sources: chains.map((chain) => ({ domain: chain.circleDomain, depositor })),
+      }),
     }),
-  });
+  );
 
   if (!response.ok) {
     throw new Error(`Gateway balances request failed with ${response.status}`);
@@ -126,7 +130,7 @@ export async function fetchGatewayInfo(options: {
   const doFetch = options.fetch ?? fetch;
   const base = options.testnet ? GATEWAY_API.testnet : GATEWAY_API.mainnet;
 
-  const response = await doFetch(`${base}/info`);
+  const response = await doFetch(`${base}/info`, upstream());
 
   if (!response.ok) {
     throw new Error(`Gateway info request failed with ${response.status}`);
@@ -318,16 +322,19 @@ export async function requestGatewayTransfer(
   const doFetch = options.fetch ?? fetch;
   const base = options.testnet ? GATEWAY_API.testnet : GATEWAY_API.mainnet;
 
-  const response = await doFetch(`${base}/transfer`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    // A JSON array: Gateway takes up to 16 intents per request. We send one —
-    // batching several burns behind a single approval would mean the user
-    // approved a total rather than each movement.
-    body: JSON.stringify([
-      { burnIntent: serialiseBurnIntent(signed.burnIntent), signature: signed.signature },
-    ]),
-  });
+  const response = await doFetch(
+    `${base}/transfer`,
+    upstream({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // A JSON array: Gateway takes up to 16 intents per request. We send one —
+      // batching several burns behind a single approval would mean the user
+      // approved a total rather than each movement.
+      body: JSON.stringify([
+        { burnIntent: serialiseBurnIntent(signed.burnIntent), signature: signed.signature },
+      ]),
+    }),
+  );
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');

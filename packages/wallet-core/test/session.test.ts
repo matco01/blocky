@@ -42,7 +42,7 @@ describe('permission scope', () => {
   });
 
   it('refuses to mint a swap session until swaps are properly scoped', () => {
-    expect(() => derive({ ...DEFAULT_POLICY, allowedActions: ['swap'] })).toThrow(/M5/);
+    expect(() => derive({ ...DEFAULT_POLICY, allowedActions: ['swap'] })).toThrow(/Swap session permissions are not implemented/);
   });
 });
 

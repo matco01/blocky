@@ -1,7 +1,7 @@
 import { isPlanExpired, type Plan } from '@blocky/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
@@ -64,7 +64,21 @@ export default function SendAllScreen() {
   const update = (index: number, change: Partial<Item>) =>
     setItems((current) => current.map((item, i) => (i === index ? { ...item, ...change } : item)));
 
+  // One approval at a time: a second tap while the first is re-quoting or
+  // waiting on the fingerprint must not send every card twice.
+  const inFlight = useRef(false);
+
   async function approveAll() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await approveAndSendAll();
+    } finally {
+      inFlight.current = false;
+    }
+  }
+
+  async function approveAndSendAll() {
     setError(null);
 
     // A stale quote is re-quoted, never signed — before the fingerprint, so

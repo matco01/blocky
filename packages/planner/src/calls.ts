@@ -58,9 +58,8 @@ export function encodeErc20Transfer(to: Address, amount: bigint): Hex {
 /**
  * The single call behind a token transfer.
  *
- * `value` is zero: this is an ERC-20 movement, not a native one. Blocky's
- * balance is USDC, and a native transfer would be a different code path we do
- * not currently offer.
+ * `value` is zero: this is an ERC-20 movement. Sending a chain's own gas token
+ * (ETH on Arbitrum) is a plain value transfer instead, built in `planTransfer`.
  */
 export function erc20TransferCall(args: {
   chainId: ChainId;

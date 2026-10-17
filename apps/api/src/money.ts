@@ -9,6 +9,19 @@ import type { PaymentRequest, Store } from './store';
  * would spend money set aside in a pot.
  */
 
+/**
+ * A dollar amount as a person or the model writes it — "$1,250.50", "20",
+ * "020" — as a canonical decimal string, or null when it isn't one. Never
+ * negative; at most six decimal places (the USD scale). The one reader for
+ * every dollar amount that arrives as text, so "$20" means the same thing to
+ * a budget, a pot, a request and a limit.
+ */
+export function readDollars(input: string | null | undefined): string | null {
+  const clean = input?.trim().replace(/^\$/, '').replace(/,/g, '').replace(/^0+(?=\d)/, '');
+  if (!clean || !/^\d+(\.\d{1,6})?$/.test(clean)) return null;
+  return formatUsd(parseUsd(clean));
+}
+
 export function monthStart(month: string): Date {
   const [year, m] = month.split('-').map(Number) as [number, number];
   return new Date(Date.UTC(year, m - 1, 1));
@@ -155,7 +168,8 @@ export async function createRequest(
   requesterId: string,
   input: { payer: string | null; amountUsd: string; note: string | null },
 ): Promise<RequestResult> {
-  const amount = /^\d+(\.\d{1,6})?$/.test(input.amountUsd.trim().replace(/^\$/, '')) ? parseUsd(input.amountUsd.trim().replace(/^\$/, '')) : 0n;
+  const dollars = readDollars(input.amountUsd);
+  const amount = dollars === null ? 0n : parseUsd(dollars);
   if (amount <= 0n) return { ok: false, status: 400, message: 'Ask for an amount in dollars, more than nothing.' };
 
   const payer = input.payer ? await store.findUserByUsername(input.payer) : null;

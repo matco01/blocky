@@ -129,6 +129,14 @@ export function createApp(deps: AppDeps) {
   if (deps.logRequests) app.use('*', logger());
   app.use('*', cors({ origin: '*' }));
 
+  // Every /v1 body is a little JSON — the largest, a chat message with its
+  // history, is under 100 KB. Anything bigger is refused before it is read
+  // into memory, signed in or not.
+  app.use(
+    '/v1/*',
+    bodyLimit({ maxSize: 256 * 1024, onError: (c) => c.json({ error: 'too_large', message: 'That request is too large.' }, 413) }),
+  );
+
   /**
    * Authentication: a verified Privy access token, nothing else. The old
    * development header that trusted a user id outright is gone.
@@ -434,10 +442,6 @@ export function createApp(deps: AppDeps) {
   });
 
   /* ------------------------------------------------------------------------ */
-  /*  Notifications                                                            */
-  /* ------------------------------------------------------------------------ */
-
-  /* ------------------------------------------------------------------------ */
   /*  Insights, budgets, statements                                            */
   /* ------------------------------------------------------------------------ */
 
@@ -487,7 +491,10 @@ export function createApp(deps: AppDeps) {
    * outside other pots.
    */
   app.post('/v1/pots/:id/adjust', async (c) => {
-    const body = z.object({ deltaUsd: z.string().regex(/^-?\d+(\.\d{1,6})?$/) }).safeParse(await c.req.json().catch(() => null));
+    // Signed, and canonical like every other amount: "007" is not a number `parseUsd` accepts.
+    const body = z
+      .object({ deltaUsd: z.string().regex(/^-?(0|[1-9]\d*)(\.\d{1,6})?$/) })
+      .safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: 'invalid_amount' }, 400);
     const wallet = walletOf(c);
     if (wallet instanceof Response) return wallet;
@@ -522,6 +529,10 @@ export function createApp(deps: AppDeps) {
     const removed = await store.deletePriceAlert(c.get('user').id, c.req.param('id'));
     return removed ? c.json({ ok: true }) : c.json({ error: 'not_found' }, 404);
   });
+
+  /* ------------------------------------------------------------------------ */
+  /*  Notifications                                                            */
+  /* ------------------------------------------------------------------------ */
 
   app.get('/v1/notifications', async (c) => {
     const items = await store.listNotifications(c.get('user').id);
@@ -612,6 +623,10 @@ export function createApp(deps: AppDeps) {
       if (now - (lastFreshScan.get(key) ?? 0) >= FRESH_SCAN_MS) {
         lastFreshScan.set(key, now);
         deps.forgetHoldings?.(wallet);
+      }
+      // Forget wallets whose window has passed, so the map stays the size of who's active.
+      if (lastFreshScan.size > 5_000) {
+        for (const [seen, at] of lastFreshScan) if (now - at >= FRESH_SCAN_MS) lastFreshScan.delete(seen);
       }
     }
 
@@ -1163,13 +1178,13 @@ export function createApp(deps: AppDeps) {
   /* ------------------------------------------------------------------------ */
 
   /**
-   * Minting derives on-chain permissions from the policy the user actually set —
-   * `deriveSessionPermissions` may only ever narrow it — and the result is what
-   * would be installed in the Kernel validator.
+   * Minting derives permissions from the policy the user actually set —
+   * `deriveSessionPermissions` may only ever narrow it.
    *
-   * ⚠️  The installation itself is not built. Without it these permissions are
-   * enforced server-side only, which is the weaker half of the guarantee: it
-   * stops mistakes, not a compromised server.
+   * ⚠️  Enforced server-side only: there is no on-chain validator to install
+   * them in (the wallet is a plain embedded wallet), and none is planned. That
+   * stops mistakes, not a compromised server — which is why nothing signs with
+   * a session today, and every send is signed on the user's device.
    */
   app.get('/v1/session', async (c) => {
     const session = await store.activeSession(c.get('user').id, DEFAULT_CHAIN);
@@ -1468,7 +1483,6 @@ function planShape(plan: Plan): PlanShape | null {
 async function afterMoneyMoved(args: { store: Store; plan: Plan; userId: string; txHash: string }): Promise<void> {
   const { store, plan, userId, txHash } = args;
   const sender = await store.getUsername(userId);
-  const amount = planOutflowUsd(plan);
 
   await budgetAlerts(store, userId, plan).catch((error: unknown) => console.error('budgetAlerts failed', error));
 
@@ -1487,19 +1501,17 @@ async function afterMoneyMoved(args: { store: Store; plan: Plan; userId: string;
   if (plan.intentType === 'transfer' && plan.recipient) {
     const recipient = await store.findUserByWallet(plan.recipient.address);
     if (recipient && recipient.id !== userId) {
+      // What arrived for them: the amount sent, never the sender's fee on top.
       const [delta] = plan.outflow;
       await store.notify(recipient.id, {
         kind: 'money_received',
-        title: `${who(sender)} sent you ${amount ? displayUsd(amount) : `${delta?.displayAmount} ${delta?.token.symbol}`}`,
+        title: `${who(sender)} sent you ${delta?.usdValue ? displayUsd(delta.usdValue) : `${delta?.displayAmount} ${delta?.token.symbol}`}`,
         body: 'It’s in your wallet.',
         data: { txHash },
       });
     }
   }
 }
-
-
-
 
 /* -------------------------------------------------------------------------- */
 /*  Insights                                                                   */

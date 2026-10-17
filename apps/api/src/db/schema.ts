@@ -25,21 +25,27 @@ import {
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 
 /** A Privy user and the wallet Privy says they own. */
-export const users = pgTable('users', {
-  /** Privy DID. */
-  id: text('id').primaryKey(),
-  /**
-   * Read from Privy's API, never from the client. With EIP-7702 this EOA
-   * address is also the smart account address.
-   */
-  walletAddress: text('wallet_address').notNull(),
-  /**
-   * The name people pay them by — "@sam". Lower case, unique, chosen by the
-   * user. Null until they pick one.
-   */
-  username: text('username').unique(),
-  createdAt: createdAt(),
-});
+export const users = pgTable(
+  'users',
+  {
+    /** Privy DID. */
+    id: text('id').primaryKey(),
+    /**
+     * Read from Privy's API, never from the client: the user's embedded
+     * wallet, the same address on every chain.
+     */
+    walletAddress: text('wallet_address').notNull(),
+    /**
+     * The name people pay them by — "@sam". Lower case, unique, chosen by the
+     * user. Null until they pick one.
+     */
+    username: text('username').unique(),
+    createdAt: createdAt(),
+  },
+  // Who's behind a wallet is asked after every send (to tell them they were
+  // paid) and for every row of the activity feed.
+  (table) => [index('users_wallet_idx').on(table.walletAddress)],
+);
 
 /** The user's agent policy. Absent means `DEFAULT_POLICY`. */
 export const policies = pgTable('policies', {
@@ -230,7 +236,12 @@ export const paymentRequests = pgTable(
     createdAt: createdAt(),
     settledAt: timestamp('settled_at', { withTimezone: true }),
   },
-  (table) => [index('payment_requests_payer_idx').on(table.payerId), index('payment_requests_requester_idx').on(table.requesterId)],
+  (table) => [
+    index('payment_requests_payer_idx').on(table.payerId),
+    index('payment_requests_requester_idx').on(table.requesterId),
+    // Looked up for every execution: did this send pay a request?
+    index('payment_requests_plan_idx').on(table.planId),
+  ],
 );
 
 /** People a user blocked: requests from them are dropped without telling them. */
@@ -280,7 +291,7 @@ export const priceAlerts = pgTable(
     createdAt: createdAt(),
     triggeredAt: timestamp('triggered_at', { withTimezone: true }),
   },
-  (table) => [index('price_alerts_open_idx').on(table.triggeredAt)],
+  (table) => [index('price_alerts_open_idx').on(table.triggeredAt), index('price_alerts_user_idx').on(table.userId)],
 );
 
 /** A monthly limit on one spending category, warned about at 80% and 100%. */

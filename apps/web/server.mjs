@@ -46,8 +46,19 @@ createServer(async (req, res) => {
     return;
   }
 
+  // A malformed escape ("/%E0%A4%A") is a bad request. Thrown out of this async
+  // handler it would be an unhandled rejection, and Node exits on those.
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400, SECURITY);
+    res.end();
+    return;
+  }
+
   // Resolve inside ./public only: a path with ".." in it never leaves it.
-  const relative = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '');
+  const relative = normalize(pathname).replace(/^([/\\])+/, '');
   let file = join(ROOT, relative);
   if (!file.startsWith(ROOT)) file = join(ROOT, 'index.html');
 
