@@ -1,6 +1,7 @@
 import { displayUsd, shortAddress } from '@blocky/shared';
+import { STOCK_CHAIN, getChain, stockBySymbol } from '@blocky/wallet-core';
 import { StyleSheet, View } from 'react-native';
-import type { ActivityItem } from '../lib/api';
+import type { ActivityItem, AssetLine } from '../lib/api';
 import { useTheme } from '../theme';
 import { Icon, type IconName } from './Icon';
 import { PressableScale } from './PressableScale';
@@ -24,12 +25,23 @@ export function describe(item: ActivityItem): { kind: ActivityKind; title: strin
   // A move or a trade: something left, something else (or the same thing elsewhere) arrived.
   if (sent && received && party?.startsWith('Your wallet')) {
     if (sent.symbol === received.symbol) return { kind: 'moved', title: `Moved to ${received.chain}`, icon: 'git-compare-outline' };
-    if (sent.symbol === 'USDC') return { kind: 'bought', title: `Bought ${received.symbol}`, icon: 'trending-up' };
-    if (received.symbol === 'USDC') return { kind: 'sold', title: `Sold ${sent.symbol}`, icon: 'trending-down' };
-    return { kind: 'swapped', title: `Swapped ${sent.symbol} for ${received.symbol}`, icon: 'swap-horizontal' };
+    if (sent.symbol === 'USDC') return { kind: 'bought', title: `Bought ${assetName(received)}`, icon: 'trending-up' };
+    if (received.symbol === 'USDC') return { kind: 'sold', title: `Sold ${assetName(sent)}`, icon: 'trending-down' };
+    return { kind: 'swapped', title: `Swapped ${assetName(sent)} for ${assetName(received)}`, icon: 'swap-horizontal' };
   }
 
   return { kind: 'sent', title: item.title ?? `Sent to ${party ?? outsider}`, icon: 'arrow-up' };
+}
+
+const STOCK_CHAIN_NAME = getChain(STOCK_CHAIN).name;
+
+/**
+ * "Apple", not "AAPL": a listed stock by the company's name, the way people
+ * say it. Only on the chain stocks live on — anyone can call a token "AAPL"
+ * anywhere else, and that one stays its symbol.
+ */
+function assetName(line: AssetLine): string {
+  return (line.chain === STOCK_CHAIN_NAME ? stockBySymbol(line.symbol)?.name : null) ?? line.symbol;
 }
 
 /**
@@ -91,15 +103,18 @@ export function trim(amount: string): string {
   return amount.includes('.') ? amount.replace(/0+$/, '').replace(/\.$/, '') : amount;
 }
 
+/**
+ * When, under a day heading that already says which day: "Just now", "12 min
+ * ago", then the time — never the date again.
+ */
 function when(iso: string): string {
   const date = new Date(iso);
   const minutes = Math.round((Date.now() - date.getTime()) / 60_000);
 
   if (minutes < 1) return 'Just now';
   if (minutes < 60) return `${minutes} min ago`;
-  if (minutes < 60 * 24) return `${Math.round(minutes / 60)} h ago`;
 
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
 const styles = StyleSheet.create({

@@ -65,9 +65,12 @@ export default function NotificationsScreen() {
 
   async function block(request: PaymentRequest) {
     setBusy(request.id);
+    setError(null);
     try {
       await api.blockRequester(request.id);
       await fetchAll();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not block them. Try again.');
     } finally {
       setBusy(null);
     }
@@ -75,9 +78,12 @@ export default function NotificationsScreen() {
 
   async function decline(request: PaymentRequest) {
     setBusy(request.id);
+    setError(null);
     try {
       await api.declineRequest(request.id);
       await fetchAll();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not decline that. Try again.');
     } finally {
       setBusy(null);
     }
@@ -86,7 +92,7 @@ export default function NotificationsScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: topPadding }]}>
-        <ScreenHeader title="Notifications" onClose={() => router.back()} />
+        <ScreenHeader title="Notifications" feature="sand" onClose={() => router.back()} />
       </View>
 
       <ScrollView

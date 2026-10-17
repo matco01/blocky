@@ -35,7 +35,7 @@ export function BlockyCard() {
       <View style={{ gap: 6 }}>
         <View style={styles.contact} />
         <Text variant="label" style={[styles.onCard, styles.muted]}>
-          Spend your USDC balance
+          Spend your balance anywhere
         </Text>
       </View>
     </View>

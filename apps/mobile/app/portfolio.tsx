@@ -285,7 +285,7 @@ export default function PortfolioScreen() {
               chart
               onScrubbingChange={setScrubbing}
               emptyTitle="No investments yet."
-              emptySubtitle="ETH and other assets you hold will show up here."
+              emptySubtitle="Stocks and crypto you buy will show up here. Ask Blocky to buy some."
             />
           </ScrollView>
         </Animated.ScrollView>

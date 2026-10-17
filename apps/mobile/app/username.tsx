@@ -45,7 +45,7 @@ export default function UsernameScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.colors.background, paddingTop: topPadding, paddingBottom: insets.bottom + theme.space.xl }]}>
-      <ScreenHeader title="Your name" onClose={() => router.back()} />
+      <ScreenHeader title="Your name" feature="leaf" onClose={() => router.back()} />
 
       <View style={{ gap: theme.space.md, marginTop: theme.space.xl }}>
         <Text variant="body" tone="secondary">

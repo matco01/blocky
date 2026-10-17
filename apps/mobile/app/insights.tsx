@@ -1,4 +1,4 @@
-import { displayUsd, formatUsd, parseUsd } from '@blocky/shared';
+import { displayUsd, formatUsd, isDecimalString, parseUsd } from '@blocky/shared';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
@@ -41,6 +41,7 @@ export default function InsightsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState<BudgetCategory | null>(null);
   const [draft, setDraft] = useState('');
+  const [budgetError, setBudgetError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
 
   const fetchInsights = useCallback(async () => {
@@ -59,11 +60,22 @@ export default function InsightsScreen() {
   );
 
   async function saveBudget(category: BudgetCategory) {
-    const value = draft.trim().replace('$', '');
-    await api.setBudget(category, value === '' || value === '0' ? null : value).catch(() => {});
-    setEditing(null);
-    setDraft('');
-    await fetchInsights();
+    const value = draft.trim().replace(/^\$/, '').replace(/,/g, '');
+    // Empty or zero removes the budget; anything else has to be dollars.
+    const removing = value === '' || /^0*(\.0*)?$/.test(value);
+    if (!removing && !isDecimalString(value)) {
+      setBudgetError('Enter an amount in dollars, like 200.');
+      return;
+    }
+    try {
+      await api.setBudget(category, removing ? null : value);
+      setEditing(null);
+      setDraft('');
+      setBudgetError(null);
+      await fetchInsights();
+    } catch (cause) {
+      setBudgetError(cause instanceof Error ? cause.message : 'Could not save that budget.');
+    }
   }
 
   async function exportMonth() {
@@ -149,7 +161,8 @@ export default function InsightsScreen() {
               </View>
 
               <View style={[styles.stats, { gap: theme.space.sm }]}>
-                <Stat label="Received" value={insights.receivedUsd} tone="positive" />
+                {/* Only payments from other Blocky users are counted here, so it says so. */}
+                <Stat label="From friends on Blocky" value={insights.receivedUsd} tone="positive" />
                 {parseUsd(insights.soldUsd) > 0n ? <Stat label="Sold" value={insights.soldUsd} /> : null}
               </View>
             </View>
@@ -212,6 +225,7 @@ export default function InsightsScreen() {
                       onPress={() => {
                         setEditing(editing === category ? null : category);
                         setDraft(budget?.monthlyUsd ?? '');
+                        setBudgetError(null);
                       }}
                       accessibilityLabel={`${BUDGET_NAMES[category]} budget`}
                       haptic="none"
@@ -246,7 +260,14 @@ export default function InsightsScreen() {
                     {editing === category ? (
                       <View style={[styles.row, { gap: theme.space.sm, alignItems: 'flex-end' }]}>
                         <View style={{ flex: 1 }}>
-                          <TextField label="A month, in dollars" value={draft} onChangeText={setDraft} keyboardType="decimal-pad" placeholder="0 to remove" />
+                          <TextField
+                            label="A month, in dollars"
+                            value={draft}
+                            onChangeText={setDraft}
+                            keyboardType="decimal-pad"
+                            placeholder="0 to remove"
+                            error={budgetError}
+                          />
                         </View>
                         <Button label="Save" size="compact" onPress={() => void saveBudget(category)} />
                       </View>

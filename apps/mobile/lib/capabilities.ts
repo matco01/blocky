@@ -25,6 +25,7 @@ export const STARTER_CAPABILITIES: Capability[] = [
  */
 export const ALL_CAPABILITIES: Capability[] = [
   // Everyday money
+  { title: 'Add money', action: { kind: 'send', text: 'How do I add money?' } },
   { title: 'Pay a friend', action: { kind: 'prefill', text: 'Pay @' } },
   { title: 'Request money', action: { kind: 'prefill', text: 'Request $' } },
   { title: 'My balance', action: { kind: 'send', text: "What's my balance?" } },

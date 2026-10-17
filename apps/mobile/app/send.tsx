@@ -1,16 +1,19 @@
-import { displayUsd, isDecimalString, isPlanExpired, type ChainId, type Plan, type RecipientRef } from '@blocky/shared';
+import { displayUsd, isDecimalString, isPlanExpired, shortAddress, type ChainId, type Plan, type RecipientRef } from '@blocky/shared';
 import { DEFAULT_CHAIN, STOCK_CHAIN, getChain, stockBySymbol } from '@blocky/wallet-core';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import Animated, { BounceIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
+import { Mascot } from '../components/Mascot';
 import { PlanReview } from '../components/PlanReview';
 import { PressableScale } from '../components/PressableScale';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { StatusBarCover } from '../components/StatusBarCover';
 import { Text } from '../components/Text';
 import { TextField } from '../components/TextField';
 import { Tile } from '../components/Tile';
@@ -83,6 +86,7 @@ export default function SendScreen() {
   // that goes stale or leaves dust behind.
   const [sendMax, setSendMax] = useState(false);
   const assets = useSendAssets(step.name === 'form');
+  const recent = useRecentPeople(step.name === 'form');
   const [assetKey, setAssetKey] = useState<string | null>(null);
   const asset = assets?.find((a) => a.key === assetKey) ?? assets?.[0] ?? null;
   const [planning, setPlanning] = useState(false);
@@ -240,6 +244,7 @@ export default function SendScreen() {
             }}
             assets={assets}
             asset={asset}
+            recent={recent}
             onPickAsset={(key) => {
               setAssetKey(key);
               setSendMax(false);
@@ -276,9 +281,10 @@ export default function SendScreen() {
 
         {step.name === 'done' ? (
           <View style={styles.status}>
-            <View style={[styles.check, { backgroundColor: theme.colors.accentTint, borderRadius: theme.radius.xl }]}>
-              <Icon name="checkmark" size={36} tone="accent" />
-            </View>
+            {/* Blocky hops when a send lands. Only here: failures and the approval stay plain. */}
+            <Animated.View entering={BounceIn.duration(600)}>
+              <Mascot pose="happy" size={112} />
+            </Animated.View>
             <Text variant="title">{planVerb(step.plan) === 'Send' ? 'Sent' : 'On its way'}</Text>
             <Text variant="body" tone="secondary" style={styles.center}>
               {planAmountLabel(step.plan)} {planDestinationLabel(step.plan)}
@@ -364,6 +370,7 @@ export default function SendScreen() {
           ) : null}
         </View>
       </ScrollView>
+      <StatusBarCover modal />
     </KeyboardAvoidingView>
   );
 }
@@ -381,6 +388,7 @@ function SendForm(props: {
   onMax: () => void;
   assets: SendAsset[] | null;
   asset: SendAsset | null;
+  recent: RecentPerson[];
   onPickAsset: (key: string) => void;
   toError: string | null;
   formError: string | null;
@@ -476,7 +484,7 @@ function SendForm(props: {
         label="To"
         value={props.to}
         onChangeText={props.setTo}
-        placeholder="@name, 0x…, name.eth, or a contact"
+        placeholder="@name, contact or address"
         autoCapitalize="none"
         autoCorrect={false}
         error={props.toError ?? props.formError}
@@ -493,8 +501,83 @@ function SendForm(props: {
           </PressableScale>
         }
       />
+
+      {/* Paying someone again is the most common send there is: one tap, not a retype. */}
+      {props.recent.length > 0 && !props.to ? (
+        <View style={{ gap: theme.space.sm }}>
+          <Text variant="label" tone="secondary">
+            Recent
+          </Text>
+          <View style={styles.chips}>
+            {props.recent.map((person) => (
+              <PressableScale
+                key={person.value}
+                onPress={() => props.setTo(person.value)}
+                accessibilityLabel={`Send to ${person.label}`}
+                style={[styles.chip, { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radius.md }]}
+              >
+                <Text variant="label">{person.label}</Text>
+              </PressableScale>
+            ))}
+          </View>
+        </View>
+      ) : null}
     </View>
   );
+}
+
+/** Someone paid before: how they're shown, and what fills the To field. */
+interface RecentPerson {
+  label: string;
+  value: string;
+}
+
+/** About a row of chips. */
+const RECENT_PEOPLE = 6;
+
+/**
+ * The people this wallet paid most recently, newest first, from the same
+ * activity feed the user sees. A name — a contact, an @name, an ENS name —
+ * fills the field as that name, so the review card names them the way the
+ * user knows them; anyone else, by their full address.
+ *
+ * Only money the user sent counts. A poisoner can make a lookalike address
+ * appear in anyone's history by sending them dust, but can't make it appear
+ * as someone they paid.
+ */
+function useRecentPeople(active: boolean): RecentPerson[] {
+  const [people, setPeople] = useState<RecentPerson[]>([]);
+
+  useEffect(() => {
+    if (!active) return;
+    let live = true;
+    api.activity().then(
+      ({ items }) => {
+        if (!live) return;
+        const seen = new Set<string>();
+        const recent: RecentPerson[] = [];
+        for (const item of items) {
+          // Sent to someone, and landed. A titled row is money moved to the
+          // user's own wallet on another chain, not a payment.
+          if (item.direction !== 'sent' || item.status === 'reverted' || item.title) continue;
+          const party = item.details?.party ?? null;
+          if (party?.startsWith('Your wallet')) continue;
+          const value = party ?? item.counterparty;
+          if (seen.has(value.toLowerCase())) continue;
+          seen.add(value.toLowerCase());
+          recent.push({ label: party ?? shortAddress(item.counterparty), value });
+          if (recent.length === RECENT_PEOPLE) break;
+        }
+        setPeople(recent);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [active]);
+
+  return people;
 }
 
 /** Something the wallet can send: what it is, where it is, and what it's worth. */
@@ -639,6 +722,15 @@ const styles = StyleSheet.create({
   maxChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   amountInput: {
     fontFamily: font.extrabold,

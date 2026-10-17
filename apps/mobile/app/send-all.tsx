@@ -4,9 +4,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { BounceIn } from 'react-native-reanimated';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
+import { Mascot } from '../components/Mascot';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { StatusBarCover } from '../components/StatusBarCover';
 import { Text } from '../components/Text';
 import { Tile } from '../components/Tile';
 import { api } from '../lib/api';
@@ -129,75 +132,83 @@ export default function SendAllScreen() {
   }
 
   const title = phase === 'done' ? 'Done' : phase === 'sending' ? 'Sending…' : `Approve ${items.length}`;
+  const allSent = phase === 'done' && items.length > 0 && items.every((item) => item.status.name === 'sent');
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: theme.colors.background }}
-      contentContainerStyle={[styles.content, { paddingTop: topPadding, paddingBottom: insets.bottom + theme.space.xl }]}
-    >
-      <ScreenHeader title={title} onClose={phase === 'sending' ? undefined : () => router.back()} />
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingTop: topPadding, paddingBottom: insets.bottom + theme.space.xl }]}>
+        <ScreenHeader title={title} feature="leaf" onClose={phase === 'sending' ? undefined : () => router.back()} />
 
-      <View style={{ gap: theme.space.md, marginTop: theme.space.lg }}>
-        {items.map((item) => (
-          <Tile key={item.cardId} style={{ padding: theme.space.lg, gap: 4 }}>
-            <View style={styles.row}>
-              <Text variant="label" tone="secondary">
-                {planVerb(item.plan)}
+        {/* Every one landed: Blocky hops. Anything less, and the screen stays plain. */}
+        {allSent ? (
+          <Animated.View entering={BounceIn.duration(600)} style={styles.mascot}>
+            <Mascot pose="happy" size={96} />
+          </Animated.View>
+        ) : null}
+
+        <View style={{ gap: theme.space.md, marginTop: theme.space.lg }}>
+          {items.map((item) => (
+            <Tile key={item.cardId} style={{ padding: theme.space.lg, gap: 4 }}>
+              <View style={styles.row}>
+                <Text variant="label" tone="secondary">
+                  {planVerb(item.plan)}
+                </Text>
+                <StatusLabel status={item.status} />
+              </View>
+              <Text variant="bodyStrong">
+                {planAmountLabel(item.plan)} {planDestinationLabel(item.plan)}
               </Text>
-              <StatusLabel status={item.status} />
-            </View>
-            <Text variant="bodyStrong">
-              {planAmountLabel(item.plan)} {planDestinationLabel(item.plan)}
-            </Text>
-            {planArrivalLabel(item.plan) ? (
+              {planArrivalLabel(item.plan) ? (
+                <Text variant="caption" tone="tertiary">
+                  {planArrivalLabel(item.plan)}
+                </Text>
+              ) : null}
+              {planGasTopUpLabel(item.plan) ? (
+                <Text variant="caption" tone="tertiary">
+                  {planGasTopUpLabel(item.plan)}
+                </Text>
+              ) : null}
               <Text variant="caption" tone="tertiary">
-                {planArrivalLabel(item.plan)}
+                Fees {planFeeLabel(item.plan)}
               </Text>
-            ) : null}
-            {planGasTopUpLabel(item.plan) ? (
-              <Text variant="caption" tone="tertiary">
-                {planGasTopUpLabel(item.plan)}
-              </Text>
-            ) : null}
-            <Text variant="caption" tone="tertiary">
-              Fees {planFeeLabel(item.plan)}
+              {item.status.name === 'failed' ? (
+                <Text variant="caption" tone="warning">
+                  {item.status.message}
+                </Text>
+              ) : null}
+              {item.status.name === 'unconfirmed' ? (
+                <Text variant="caption" tone="warning">
+                  Submitted, still confirming. Check Activity before trying it again.
+                </Text>
+              ) : null}
+            </Tile>
+          ))}
+
+          {items.length === 0 ? (
+            <Text variant="body" tone="secondary" style={styles.center}>
+              Those proposals are no longer here. Ask Blocky again.
             </Text>
-            {item.status.name === 'failed' ? (
-              <Text variant="caption" tone="warning">
-                {item.status.message}
-              </Text>
-            ) : null}
-            {item.status.name === 'unconfirmed' ? (
-              <Text variant="caption" tone="warning">
-                Submitted, still confirming. Check Activity before trying it again.
-              </Text>
-            ) : null}
-          </Tile>
-        ))}
+          ) : null}
 
-        {items.length === 0 ? (
-          <Text variant="body" tone="secondary" style={styles.center}>
-            Those proposals are no longer here. Ask Blocky again.
-          </Text>
-        ) : null}
+          {error ? (
+            <Text variant="body" tone="warning" style={styles.center}>
+              {error}
+            </Text>
+          ) : null}
+        </View>
 
-        {error ? (
-          <Text variant="body" tone="warning" style={styles.center}>
-            {error}
-          </Text>
-        ) : null}
-      </View>
-
-      <View style={{ gap: theme.space.md, marginTop: theme.space.xxl }}>
-        {phase === 'review' && items.length > 0 ? (
-          <>
-            <Button label={`Approve all ${items.length}`} haptic="heavy" disabled={!ready} onPress={() => void approveAll()} />
-            <Button label="Cancel" variant="quiet" onPress={() => router.back()} />
-          </>
-        ) : null}
-        {phase === 'done' ? <Button label="Done" onPress={() => router.back()} /> : null}
-      </View>
-    </ScrollView>
+        <View style={{ gap: theme.space.md, marginTop: theme.space.xxl }}>
+          {phase === 'review' && items.length > 0 ? (
+            <>
+              <Button label={`Approve all ${items.length}`} haptic="heavy" disabled={!ready} onPress={() => void approveAll()} />
+              <Button label="Cancel" variant="quiet" onPress={() => router.back()} />
+            </>
+          ) : null}
+          {phase === 'done' ? <Button label="Done" onPress={() => router.back()} /> : null}
+        </View>
+      </ScrollView>
+      <StatusBarCover modal />
+    </View>
   );
 }
 
@@ -248,5 +259,9 @@ const styles = StyleSheet.create({
   },
   center: {
     textAlign: 'center',
+  },
+  mascot: {
+    alignItems: 'center',
+    marginTop: 16,
   },
 });

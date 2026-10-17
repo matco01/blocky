@@ -27,6 +27,7 @@ import { Mascot } from '../Mascot';
 import { PageDots, type PageProps } from '../PageDots';
 import { PressableScale } from '../PressableScale';
 import { Text } from '../Text';
+import { Tile } from '../Tile';
 import { ApiError, api } from '../../lib/api';
 import {
   ALL_CAPABILITIES,
@@ -35,6 +36,7 @@ import {
   type Capability,
 } from '../../lib/capabilities';
 import { matchAppearanceCommand, resolveAppearance } from '../../lib/appearanceCommand';
+import { homeChainName } from '../../lib/chain';
 import { useChat } from '../../lib/chat';
 import { handOffPlan, useSentPlans } from '../../lib/handoff';
 import { useKeyboardVisible } from '../../lib/keyboard';
@@ -333,6 +335,8 @@ export function HomePage({ page, onPageChange }: PageProps) {
               <Mascot pose="neutral" size={96} idle />
               <Text variant="bodyStrong">Hi! What do you want to do?</Text>
             </View>
+            {/* A new wallet's first step, before anything else can happen. */}
+            {balance.state === 'ready' && parseUsd(balance.balance) === 0n ? <AddMoneyCard /> : null}
             <CapabilityChips capabilities={STARTER_CAPABILITIES} onPick={pickCapability} />
           </View>
         ) : (
@@ -415,6 +419,27 @@ export function HomePage({ page, onPageChange }: PageProps) {
         />
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * For a wallet with nothing in it yet: what to do first, and where. Paying,
+ * saving and investing all start with money in the wallet, and a new user
+ * shouldn't have to work out how it gets there.
+ */
+function AddMoneyCard() {
+  const theme = useTheme();
+
+  return (
+    <Tile style={{ padding: theme.space.lg, gap: theme.space.md }}>
+      <View style={{ gap: 2 }}>
+        <Text variant="bodyStrong">Add money to get started</Text>
+        <Text variant="body" tone="secondary">
+          Friends on Blocky can pay your @name, or send USDC on {homeChainName} from another wallet.
+        </Text>
+      </View>
+      <Button label="Add money" size="compact" onPress={() => router.push('/receive')} />
+    </Tile>
   );
 }
 

@@ -19,6 +19,7 @@ import { Button } from '../Button';
 import { Icon, type IconName } from '../Icon';
 import { PageDots, type PageProps } from '../PageDots';
 import { PressableScale } from '../PressableScale';
+import { StatusBarCover } from '../StatusBarCover';
 import { Text } from '../Text';
 import { Tile } from '../Tile';
 
@@ -138,98 +139,100 @@ export function AccountPage({ page, onPageChange }: PageProps) {
   }
 
   return (
-    <ScrollView
-      style={{ backgroundColor: theme.colors.background }}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + theme.space.sm, paddingBottom: insets.bottom + theme.space.xxl },
-      ]}
-    >
-      <View style={styles.header}>
-        <Text variant="title">Account</Text>
-        <View style={styles.dots} pointerEvents="box-none">
-          <PageDots page={page} onPageChange={onPageChange} />
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + theme.space.sm, paddingBottom: insets.bottom + theme.space.xxl },
+        ]}
+      >
+        <View style={styles.header}>
+          <Text variant="title">Account</Text>
+          <View style={styles.dots} pointerEvents="box-none">
+            <PageDots page={page} onPageChange={onPageChange} />
+          </View>
         </View>
-      </View>
 
-      {email && 'address' in email ? (
-        <Text variant="body" tone="secondary" style={{ marginTop: theme.space.xs }}>
-          {email.address}
-        </Text>
-      ) : null}
+        {email && 'address' in email ? (
+          <Text variant="body" tone="secondary" style={{ marginTop: theme.space.xs }}>
+            {email.address}
+          </Text>
+        ) : null}
 
-      {/* --- Card ----------------------------------------------------------- */}
-      <View style={{ marginTop: theme.space.xl, gap: theme.space.md }}>
-        <BlockyCard />
-        <Text variant="caption" tone="tertiary" style={styles.center}>
-          A card that spends your USDC anywhere cards are accepted. Coming soon.
-        </Text>
-      </View>
-
-      {/* --- Wallet --------------------------------------------------------- */}
-      <Section title="Wallet">
-        <Row
-          icon="at-outline"
-          label="Username"
-          value={username ? `@${username}` : 'Pick a name friends pay you by'}
-          chevron
-          onPress={() => router.push('/username')}
-        />
-        <Row
-          icon="wallet-outline"
-          label="Address"
-          value={address ? shortAddress(address) : 'Setting up…'}
-          action={copied ? 'Copied' : 'Copy'}
-          onPress={address ? copyAddress : undefined}
-        />
-        <Row icon="receipt-outline" label="Activity" value="Everything sent and received" chevron onPress={() => router.push('/activity')} />
-        <Row icon="stats-chart-outline" label="Insights" value="Where your money went, budgets" chevron onPress={() => router.push('/insights')} />
-        <Row icon="wallet-outline" label="Savings pots" value="Money set aside" chevron onPress={() => router.push('/pots')} />
-        <Row
-          icon="shield-checkmark-outline"
-          label="Spending limits"
-          value={policy ? `${displayUsd(policy.perTxCapUsd)} per send · ${displayUsd(policy.dailyCapUsd)} a day` : '—'}
-          chevron
-          onPress={() => router.push('/limits')}
-          last
-        />
-      </Section>
-
-      {/* --- Preferences ---------------------------------------------------- */}
-      <Section title="Preferences">
-        <ToggleRow
-          icon="color-palette-outline"
-          label="Dark mode"
-          value={theme.appearance === 'dark'}
-          onValueChange={(value) => theme.setAppearance(value ? 'dark' : 'light')}
-          last
-        />
-      </Section>
-
-      {/* --- Security ------------------------------------------------------- */}
-      <Section title="Security">
-        <Row icon="key-outline" label="Export private key" value="Move your wallet to another app" chevron onPress={() => void exportKey()} />
-        <Row
-          icon="lock-closed-outline"
-          label="Privacy & safety"
-          value="Who sees what, and what Blocky can't do"
-          chevron
-          onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_URL)}
-        />
-        <Row icon="document-text-outline" label="Terms and privacy policy" value="The rules, in plain words" chevron onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)} />
-        <Row icon="trash-outline" label="Delete account" value="Your account, data and wallet login" chevron onPress={confirmDelete} last />
-      </Section>
-
-      {/* --- Sign out ------------------------------------------------------- */}
-      <View style={{ marginTop: theme.space.xxl, gap: theme.space.lg, alignItems: 'center' }}>
-        <View style={{ alignSelf: 'stretch' }}>
-          <Button label="Sign out" variant="danger" haptic="none" onPress={confirmSignOut} />
+        {/* --- Card ----------------------------------------------------------- */}
+        <View style={{ marginTop: theme.space.xl, gap: theme.space.md }}>
+          <BlockyCard />
+          <Text variant="caption" tone="tertiary" style={styles.center}>
+            A card that spends your dollars anywhere cards are accepted.
+          </Text>
         </View>
-        <Text variant="caption" tone="tertiary">
-          Blocky {version}
-        </Text>
-      </View>
-    </ScrollView>
+
+        {/* --- Wallet --------------------------------------------------------- */}
+        <Section title="Wallet">
+          <Row
+            icon="at-outline"
+            label="Username"
+            value={username ? `@${username}` : 'Pick a name friends pay you by'}
+            chevron
+            onPress={() => router.push('/username')}
+          />
+          <Row
+            icon="wallet-outline"
+            label="Address"
+            value={address ? shortAddress(address) : 'Setting up…'}
+            action={copied ? 'Copied' : 'Copy'}
+            onPress={address ? copyAddress : undefined}
+          />
+          <Row icon="receipt-outline" label="Activity" value="Everything sent and received" chevron onPress={() => router.push('/activity')} />
+          <Row icon="stats-chart-outline" label="Insights" value="Where your money went, budgets" chevron onPress={() => router.push('/insights')} />
+          <Row icon="leaf-outline" label="Savings pots" value="Money set aside" chevron onPress={() => router.push('/pots')} />
+          <Row
+            icon="shield-checkmark-outline"
+            label="Spending limits"
+            value={policy ? `${displayUsd(policy.perTxCapUsd)} per send · ${displayUsd(policy.dailyCapUsd)} a day` : '—'}
+            chevron
+            onPress={() => router.push('/limits')}
+            last
+          />
+        </Section>
+
+        {/* --- Preferences ---------------------------------------------------- */}
+        <Section title="Preferences">
+          <ToggleRow
+            icon="color-palette-outline"
+            label="Dark mode"
+            value={theme.appearance === 'dark'}
+            onValueChange={(value) => theme.setAppearance(value ? 'dark' : 'light')}
+            last
+          />
+        </Section>
+
+        {/* --- Security ------------------------------------------------------- */}
+        <Section title="Security">
+          <Row icon="key-outline" label="Export private key" value="Move your wallet to another app" chevron onPress={() => void exportKey()} />
+          <Row
+            icon="lock-closed-outline"
+            label="Privacy & safety"
+            value="Who sees what, and what Blocky can't do"
+            chevron
+            onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_URL)}
+          />
+          <Row icon="document-text-outline" label="Terms and privacy policy" value="The rules, in plain words" chevron onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)} />
+          <Row icon="trash-outline" label="Delete account" value="Your account, data and wallet login" chevron onPress={confirmDelete} last />
+        </Section>
+
+        {/* --- Sign out ------------------------------------------------------- */}
+        <View style={{ marginTop: theme.space.xxl, gap: theme.space.lg, alignItems: 'center' }}>
+          <View style={{ alignSelf: 'stretch' }}>
+            <Button label="Sign out" variant="danger" haptic="none" onPress={confirmSignOut} />
+          </View>
+          <Text variant="caption" tone="tertiary">
+            Blocky {version}
+          </Text>
+        </View>
+      </ScrollView>
+      <StatusBarCover />
+    </View>
   );
 }
 
