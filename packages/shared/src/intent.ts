@@ -25,15 +25,20 @@ import {
 const IntentBase = {
   /**
    * The model's own one-line description of what it believes it is doing.
-   * Shown in the confirmation card *alongside* — never instead of — the
-   * planner's computed summary, so a mismatch is visible to the user.
+   *
+   * A check on the model that code reads, never the user. The model writes
+   * this and the proposal both, so one that was tricked would write a
+   * reassuring sentence beside the wrong address — shown on the approval
+   * screen, that sentence would help the trick. Instead the API compares it
+   * with the proposal (`destinationMismatch`) and sends back one whose stated
+   * destination isn't where the money would go, before any card exists.
    */
   rationale: z
     .string()
     .min(1)
     .max(280)
-    // The user sees this beside the planner's own summary, as a check on it. A
-    // stand-in checks nothing, and has come with careless proposals — send it back.
+    // Only worth checking when it says something. A stand-in checks nothing,
+    // and has come with careless proposals — send it back.
     .refine((text) => !/^\s*(placeholder|todo|tbd|n\/a|none|test|\.+|-+)\s*$/i.test(text), {
       message: 'Write what you actually mean to do, in a sentence — not a placeholder.',
     }),

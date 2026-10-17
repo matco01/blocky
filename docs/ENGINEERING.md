@@ -400,10 +400,17 @@ Things worth knowing before changing it:
   32-byte words; the file where a wrong byte sends money to the wrong place is
   not the file to add a dependency to. It throws on overflow rather than
   wrapping.
-- **The summary is computed, not echoed.** `summary` comes from resolved facts
-  and `modelRationale` is carried through untouched, so a model that has
-  misunderstood the request produces a visible mismatch on the confirmation card
-  rather than a convincing story.
+- **The summary is computed, not echoed.** `summary` comes from resolved facts,
+  never from the model's words — it is what the activity feed, statements and
+  the agent's own history say about a move.
+- **The rationale is checked by code, never shown to the user.** The model
+  writes the proposal and its explanation both, so a tricked model would write
+  a reassuring sentence beside the wrong address — right where the user
+  approves, if it were on the card. So the card shows only the planner's
+  facts, and the rationale is compared with the proposal instead:
+  `destinationMismatch` in [`agent.ts`](../apps/api/src/agent.ts) sends back a
+  move whose rationale names a different chain from its destination, before
+  any card exists. It is kept on the plan as `modelRationale`, for the record.
 - **Unresolvable means ask, never guess.** An unknown token, an unresolvable
   recipient or a USD amount for an unpriced token all fail with a message the
   agent can say out loud. None of them fall back to a best match.

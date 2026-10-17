@@ -57,9 +57,9 @@ import { destinationWarnings, feeWarnings, recipientWarnings, simulationWarnings
  *
  * This is the deterministic half of the system. The model said what the user
  * wants; everything from here is our own code reading real state and doing
- * arithmetic. Where the two disagree, the Plan wins and the user sees both —
- * which is why `modelRationale` is carried through unchanged rather than
- * being rewritten into the summary.
+ * arithmetic. Where the two disagree, the Plan wins: the card shows only what
+ * this code worked out. The model's own account is carried through unchanged
+ * as `modelRationale`, for the record, and never rewritten into the summary.
  */
 
 /**
@@ -1036,12 +1036,12 @@ function networkFee(gas: { mode: Fee['paidIn']; totalUsd: string; networkUsd: st
 }
 
 /**
- * The headline on the confirmation card.
+ * The plan in one line, for the activity feed, statements and the agent's own
+ * history.
  *
  * Computed here from resolved facts, deliberately independent of anything the
- * model wrote. The user sees this next to `modelRationale`, so a model that has
- * misunderstood the request produces a visible mismatch rather than a
- * convincing story.
+ * model wrote: a record of what was actually built, so a model that has
+ * misunderstood the request can't turn its own story into the record.
  */
 function summariseTransfer(outflow: AssetDelta, recipient: ResolvedRecipient, fee: Fee, chainName: string | null): string {
   const value = outflow.usdValue === null ? '' : ` (${displayUsd(outflow.usdValue)})`;

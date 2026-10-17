@@ -14,9 +14,10 @@ import {
  * A Plan is the deterministic, fully-resolved answer to an Intent.
  *
  * Built server-side from real quotes and real chain state. Everything the
- * confirmation card shows comes from here, and nothing here comes from the
- * model. If the model and the planner disagree about what is happening, the
- * planner wins and the user sees both.
+ * confirmation card shows comes from here, and none of it from the model —
+ * the model's own account rides along as `modelRationale`, for the record,
+ * and is never shown. If the model and the planner disagree about what is
+ * happening, the planner wins.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -175,9 +176,13 @@ export const PlanSchema = z.object({
   id: z.string().uuid(),
   intentType: z.enum(INTENT_TYPES),
 
-  /** Planner-authored summary. This is the headline on the confirmation card. */
+  /**
+   * The plan in one line, written by the planner from resolved facts: what the
+   * activity feed and statements say about this move, and what the agent is
+   * told it proposed.
+   */
   summary: z.string().min(1).max(280),
-  /** The model's stated rationale, carried through for comparison. */
+  /** The model's own account of the proposal — kept for the record and re-quotes, never shown to the user. */
   modelRationale: z.string().max(280),
 
   /** What leaves the user's wallet. */
