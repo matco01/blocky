@@ -1,4 +1,4 @@
-import { ARC_PUBLIC_RPC, DEFAULT_CHAIN, IS_TESTNET, chainsOnNetwork, getChain } from '@blocky/wallet-core';
+import { ARC_PUBLIC_RPC, ARC_TESTNET_PUBLIC_RPC, DEFAULT_CHAIN, IS_TESTNET, chainsOnNetwork, getChain } from '@blocky/wallet-core';
 import type { Chain } from 'viem';
 import {
   arbitrum,
@@ -25,11 +25,12 @@ import {
  * picks which (testnet unless it says exactly `mainnet`), and the other
  * network's chains are never listed.
  *
- * viem's mainnet Arc definition ships without an RPC endpoint, so Arc's own
- * public one is filled in.
+ * viem's mainnet Arc definition ships without an RPC endpoint, and its testnet
+ * one lists a domain that no longer resolves, so Arc's own public endpoints
+ * are filled in for both.
  */
 export const homeChain: Chain = IS_TESTNET
-  ? arcTestnet
+  ? { ...arcTestnet, rpcUrls: { default: { http: [ARC_TESTNET_PUBLIC_RPC] } } }
   : {
       ...arc,
       rpcUrls: { default: { http: [ARC_PUBLIC_RPC] } },

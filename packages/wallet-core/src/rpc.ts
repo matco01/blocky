@@ -415,6 +415,13 @@ export function rpcConfigFromEnv(env: RpcEnv, network: Network = NETWORK): RpcCo
 export const ARC_PUBLIC_RPC = 'https://rpc.mainnet.arc.io';
 
 /**
+ * Arc testnet's public endpoint. viem's Arc Testnet definition still lists
+ * `rpc.testnet.arc.network`, which no longer resolves since Arc moved to
+ * arc.io — so this is filled in wherever that definition would be used.
+ */
+export const ARC_TESTNET_PUBLIC_RPC = 'https://rpc.testnet.arc.io';
+
+/**
  * Spendable USDC in a wallet on one chain: base units, and the same amount as
  * a dollar string (USDC's 6 decimals are the dollar scale).
  *

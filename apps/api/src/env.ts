@@ -32,9 +32,12 @@ const EnvSchema = z.object({
 
   /**
    * Arc testnet, the home chain. Defaults to Circle's public endpoint, which is
-   * rate-limited — fine for development, not for real traffic.
+   * rate-limited — fine for development, not for real traffic. The same URL as
+   * wallet-core's `ARC_TESTNET_PUBLIC_RPC`, written out rather than imported:
+   * importing wallet-core here would load its network switch before the
+   * `.env` above is read.
    */
-  ARC_TESTNET_RPC_URL: z.string().url().default('https://rpc.testnet.arc.network'),
+  ARC_TESTNET_RPC_URL: z.string().url().default('https://rpc.testnet.arc.io'),
 
   /** Base Sepolia. Defaults to Base's own public endpoint — fine for development. */
   BASE_SEPOLIA_RPC_URL: z.string().url().default('https://sepolia.base.org'),
