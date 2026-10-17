@@ -8,13 +8,15 @@ import {
   type Plan,
   type Policy,
 } from '@blocky/shared';
-import type { SessionPermissions, TrackedToken } from '@blocky/wallet-core';
-import { and, desc, eq, gte, inArray, isNull, gt, lt, sql } from 'drizzle-orm';
+import type { SessionPermissions, TrackedToken, UsdcTransfer } from '@blocky/wallet-core';
+import { and, desc, eq, gte, inArray, isNull, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from './db/client';
 import {
   balanceSnapshots,
   blockedUsers,
   budgets,
+  chainCursors,
+  chainTransfers,
   contacts,
   executions,
   memories,
@@ -24,6 +26,7 @@ import {
   policies,
   pots,
   priceAlerts,
+  pushTokens,
   saveRules,
   sessions,
   trackedTokens,
@@ -153,6 +156,43 @@ export interface Notification {
   createdAt: string;
 }
 
+export interface NewNotification {
+  kind: string;
+  title: string;
+  body: string;
+  data?: unknown;
+  /** Told at most once: another notification with the same key for the same user is dropped. */
+  key?: string;
+  /** When it happened, if not now: money read off the chain is dated by its block. */
+  at?: Date;
+}
+
+/** A USDC transfer to or from a Blocky wallet, as the chain watcher read it. */
+export interface ChainTransfer {
+  txHash: string;
+  logIndex: number;
+  from: Address;
+  to: Address;
+  /** 6-decimal base units. */
+  value: bigint;
+  /** When the block was made. */
+  timestamp: string;
+}
+
+/** How far the chain watcher has read — see `chainCursors` in the schema. */
+export interface ChainCursor {
+  /** The last block the live watch has read. */
+  block: number;
+  /** The next block of history to read; history is done once this passes `historyTo`. */
+  historyNext: number;
+  historyTo: number;
+  /** When the live watch last read the chain successfully. */
+  updatedAt: Date;
+}
+
+/** Devices one account can push to. A new sign-in past this drops the longest-unused. */
+export const MAX_PUSH_DEVICES = 10;
+
 export interface PriceAlert {
   id: string;
   userId: string;
@@ -225,6 +265,8 @@ export interface Store {
   ): Promise<Execution>;
   settleExecution(executionId: string, status: 'success' | 'reverted', now?: Date): Promise<void>;
   listExecutions(userId: string, limit?: number): Promise<Execution[]>;
+  /** Whether a transaction was sent through Blocky — reported by the app that sent it. */
+  isBlockyTransaction(txHash: string): Promise<boolean>;
   getExecution(userId: string, executionId: string): Promise<Execution | null>;
 
   /**
@@ -282,7 +324,7 @@ export interface Store {
   /** Claim a username. `taken` when someone else has it; `invalid` when it breaks the rules. */
   setUsername(userId: string, username: string): Promise<'ok' | 'taken' | 'invalid'>;
   getUsername(userId: string): Promise<string | null>;
-  /** Everything Blocky keeps about a person; every table cascades from the user row. */
+  /** Everything Blocky keeps about a person: every table cascades from the user row, and the watcher's record of their wallet goes with it. */
   deleteUser(userId: string): Promise<void>;
   findUserByUsername(username: string): Promise<PublicUser | null>;
   /** The Blocky user behind a wallet, if any — so a payment to them can tell them. */
@@ -314,9 +356,37 @@ export interface Store {
   findRequestByPlan(planId: string): Promise<PaymentRequest | null>;
   settleRequest(id: string, status: 'paid' | 'declined' | 'cancelled', txHash?: string): Promise<void>;
 
-  notify(userId: string, notification: { kind: string; title: string; body: string; data?: unknown }): Promise<void>;
+  /** Tell a user something. False when one with the same `key` was already told, and nothing new was stored. */
+  notify(userId: string, notification: NewNotification): Promise<boolean>;
   listNotifications(userId: string, limit?: number): Promise<Notification[]>;
   markNotificationsRead(userId: string): Promise<void>;
+
+  /** Push tokens: one per device, held by whoever signed in on it last. */
+  savePushToken(userId: string, token: string, platform: 'ios' | 'android', now?: Date): Promise<void>;
+  /** Only the caller's own: signing out of one account can't silence another. */
+  deletePushToken(userId: string, token: string): Promise<boolean>;
+  listPushTokens(userId: string): Promise<string[]>;
+  /** Tokens Expo says no longer reach a device — the app was uninstalled. */
+  forgetPushTokens(tokens: readonly string[]): Promise<void>;
+
+  /*
+   * Money on the chain. The watcher stores every USDC transfer that touches a
+   * Blocky wallet; the activity feed reads them back.
+   */
+
+  /** The Blocky users behind any of these wallets. */
+  usersByWallets(wallets: readonly Address[]): Promise<Array<{ id: string; walletAddress: Address; username: string | null }>>;
+  /** Store transfers the watcher read. One already stored is skipped, so reading a range twice is harmless. */
+  recordTransfers(chainId: ChainId, transfers: readonly UsdcTransfer[]): Promise<void>;
+  /** A wallet's transfers on a chain, newest first. */
+  listTransfers(chainId: ChainId, wallet: Address, limit?: number): Promise<ChainTransfer[]>;
+  getChainCursor(chainId: ChainId): Promise<ChainCursor | null>;
+  /** A chain's first cursor — unless it has one already. Returns whichever is stored. */
+  startChainCursor(chainId: ChainId, cursor: Omit<ChainCursor, 'updatedAt'>, now?: Date): Promise<ChainCursor>;
+  /** The live watch has read through `block` (never moves it back), and was fine at `now`. */
+  advanceChainCursor(chainId: ChainId, block: number, now?: Date): Promise<void>;
+  /** History has been read up to, not including, `next`. */
+  advanceChainHistory(chainId: ChainId, next: number): Promise<void>;
 
   addPriceAlert(userId: string, alert: { symbol: string; direction: 'above' | 'below'; thresholdUsd: string }): Promise<PriceAlert>;
   listPriceAlerts(userId: string): Promise<PriceAlert[]>;
@@ -381,6 +451,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Postgres reports a unique-constraint violation with this SQLSTATE. */
 const UNIQUE_VIOLATION = '23505';
 
+/** Rows or values per statement, well under Postgres's 65,535 parameters. */
+const SQL_BATCH = 1000;
+
 export function createStore(db: Db): Store {
   async function readPolicy(userId: string): Promise<Policy> {
     const [row] = await db.select().from(policies).where(eq(policies.userId, userId));
@@ -408,6 +481,11 @@ export function createStore(db: Db): Store {
       ...(actions.length === 1 && actions[0] === 'transfer' ? { allowedActions: DEFAULT_POLICY.allowedActions } : {}),
       ...(tokens !== null ? { tokenAllowlist: DEFAULT_POLICY.tokenAllowlist } : {}),
     };
+  }
+
+  async function readChainCursor(chainId: ChainId): Promise<ChainCursor | null> {
+    const [row] = await db.select().from(chainCursors).where(eq(chainCursors.chainId, chainId));
+    return row ? { block: row.block, historyNext: row.historyNext, historyTo: row.historyTo, updatedAt: row.updatedAt } : null;
   }
 
   async function loadRequest(id: string): Promise<PaymentRequest | null> {
@@ -568,6 +646,11 @@ export function createStore(db: Db): Store {
         .limit(limit);
 
       return rows.map(toExecution);
+    },
+
+    async isBlockyTransaction(txHash) {
+      const [row] = await db.select({ id: executions.id }).from(executions).where(eq(executions.txHash, txHash.toLowerCase())).limit(1);
+      return Boolean(row);
     },
 
     async getExecution(userId, executionId) {
@@ -742,7 +825,17 @@ export function createStore(db: Db): Store {
     },
 
     async deleteUser(userId) {
-      await db.delete(users).where(eq(users.id, userId));
+      await db.transaction(async (tx) => {
+        const [gone] = await tx.delete(users).where(eq(users.id, userId)).returning({ wallet: users.walletAddress });
+        if (!gone) return;
+        // The watcher's record of their money goes too — except where the other
+        // side is still a Blocky user, whose history it also is.
+        await tx.execute(sql`
+          DELETE FROM ${chainTransfers} t
+          WHERE (t.from_address = ${gone.wallet} OR t.to_address = ${gone.wallet})
+            AND NOT EXISTS (SELECT 1 FROM ${users} u WHERE u.wallet_address IN (t.from_address, t.to_address))
+        `);
+      });
     },
 
     async getUsername(userId) {
@@ -862,14 +955,22 @@ export function createStore(db: Db): Store {
     },
 
     async notify(userId, notification) {
-      await db.insert(notifications).values({
-        id: crypto.randomUUID(),
-        userId,
-        kind: notification.kind,
-        title: notification.title.slice(0, 120),
-        body: notification.body.slice(0, 400),
-        data: notification.data ?? null,
-      });
+      const stored = await db
+        .insert(notifications)
+        .values({
+          id: crypto.randomUUID(),
+          userId,
+          kind: notification.kind,
+          title: notification.title.slice(0, 120),
+          body: notification.body.slice(0, 400),
+          data: notification.data ?? null,
+          dedupeKey: notification.key ?? null,
+          ...(notification.at ? { createdAt: notification.at } : {}),
+        })
+        // The (user, key) index: told once already.
+        .onConflictDoNothing()
+        .returning({ id: notifications.id });
+      return stored.length > 0;
     },
 
     async listNotifications(userId, limit = 50) {
@@ -895,6 +996,120 @@ export function createStore(db: Db): Store {
         .update(notifications)
         .set({ readAt: new Date() })
         .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
+    },
+
+    async savePushToken(userId, token, platform, now = new Date()) {
+      await db
+        .insert(pushTokens)
+        .values({ token, userId, platform, updatedAt: now })
+        .onConflictDoUpdate({ target: pushTokens.token, set: { userId, platform, updatedAt: now } });
+
+      // A script registering tokens can't grow one account's list without end.
+      const stale = await db
+        .select({ token: pushTokens.token })
+        .from(pushTokens)
+        .where(eq(pushTokens.userId, userId))
+        .orderBy(desc(pushTokens.updatedAt))
+        .offset(MAX_PUSH_DEVICES);
+      if (stale.length > 0) await db.delete(pushTokens).where(inArray(pushTokens.token, stale.map((row) => row.token)));
+    },
+
+    async deletePushToken(userId, token) {
+      const removed = await db
+        .delete(pushTokens)
+        .where(and(eq(pushTokens.token, token), eq(pushTokens.userId, userId)))
+        .returning({ token: pushTokens.token });
+      return removed.length > 0;
+    },
+
+    async listPushTokens(userId) {
+      const rows = await db.select({ token: pushTokens.token }).from(pushTokens).where(eq(pushTokens.userId, userId));
+      return rows.map((row) => row.token);
+    },
+
+    async forgetPushTokens(tokens) {
+      if (tokens.length === 0) return;
+      await db.delete(pushTokens).where(inArray(pushTokens.token, [...tokens]));
+    },
+
+    async usersByWallets(wallets) {
+      const unique = [...new Set(wallets.map((wallet) => wallet.toLowerCase()))];
+      const found: Array<{ id: string; walletAddress: Address; username: string | null }> = [];
+      for (let i = 0; i < unique.length; i += SQL_BATCH) {
+        const rows = await db
+          .select({ id: users.id, walletAddress: users.walletAddress, username: users.username })
+          .from(users)
+          .where(inArray(users.walletAddress, unique.slice(i, i + SQL_BATCH)));
+        found.push(...rows.map((row) => ({ ...row, walletAddress: row.walletAddress as Address })));
+      }
+      return found;
+    },
+
+    async recordTransfers(chainId, transfers) {
+      for (let i = 0; i < transfers.length; i += SQL_BATCH) {
+        await db
+          .insert(chainTransfers)
+          .values(
+            transfers.slice(i, i + SQL_BATCH).map((transfer) => ({
+              chainId,
+              txHash: transfer.txHash.toLowerCase(),
+              logIndex: transfer.logIndex,
+              blockNumber: transfer.blockNumber,
+              fromAddress: transfer.from.toLowerCase(),
+              toAddress: transfer.to.toLowerCase(),
+              amount: formatUsd(transfer.amount),
+              at: transfer.at,
+            })),
+          )
+          .onConflictDoNothing();
+      }
+    },
+
+    async listTransfers(chainId, wallet, limit = 100) {
+      const address = wallet.toLowerCase();
+      const rows = await db
+        .select()
+        .from(chainTransfers)
+        .where(
+          and(
+            eq(chainTransfers.chainId, chainId),
+            or(eq(chainTransfers.fromAddress, address), eq(chainTransfers.toAddress, address)),
+          ),
+        )
+        .orderBy(desc(chainTransfers.blockNumber), desc(chainTransfers.logIndex))
+        .limit(limit);
+      return rows.map((row) => ({
+        txHash: row.txHash,
+        logIndex: row.logIndex,
+        from: row.fromAddress as Address,
+        to: row.toAddress as Address,
+        value: parseUsd(row.amount),
+        timestamp: row.at.toISOString(),
+      }));
+    },
+
+    getChainCursor: readChainCursor,
+
+    async startChainCursor(chainId, cursor, now = new Date()) {
+      await db
+        .insert(chainCursors)
+        .values({ chainId, block: cursor.block, historyNext: cursor.historyNext, historyTo: cursor.historyTo, updatedAt: now })
+        .onConflictDoNothing();
+      return (await readChainCursor(chainId))!;
+    },
+
+    async advanceChainCursor(chainId, block, now = new Date()) {
+      await db
+        .update(chainCursors)
+        .set({ block: sql`greatest(${chainCursors.block}, ${block})`, updatedAt: now })
+        .where(eq(chainCursors.chainId, chainId));
+    },
+
+    async advanceChainHistory(chainId, next) {
+      await db
+        .update(chainCursors)
+        .set({ historyNext: sql`greatest(${chainCursors.historyNext}, ${next})` })
+        .where(eq(chainCursors.chainId, chainId));
     },
 
     async addPriceAlert(userId, alert) {

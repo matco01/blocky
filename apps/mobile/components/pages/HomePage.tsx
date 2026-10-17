@@ -40,6 +40,7 @@ import { homeChainName } from '../../lib/chain';
 import { useChat } from '../../lib/chat';
 import { handOffPlan, useSentPlans } from '../../lib/handoff';
 import { useKeyboardVisible } from '../../lib/keyboard';
+import { onPushArrived } from '../../lib/push';
 import { isResetPhrase } from '../../lib/resetPhrase';
 import { font, useTheme } from '../../theme';
 
@@ -194,6 +195,9 @@ export function HomePage({ page, onPageChange }: PageProps) {
     const subscription = AppState.addEventListener('change', (state) => setAppActive(state === 'active'));
     return () => subscription.remove();
   }, []);
+
+  // A push landed with the app open — money in, most likely: show it now, not at the next poll.
+  useEffect(() => onPushArrived(() => void fetchBalance()), [fetchBalance]);
 
   // Poll only while Home is actually on screen — not behind Account, another
   // route, or a backgrounded app — and faster while the wallet is being created.

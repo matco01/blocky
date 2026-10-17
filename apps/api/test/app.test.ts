@@ -15,11 +15,13 @@ import { createApp, type AppDeps, type ChatLimits } from '../src/app';
 import type { IdentityProvider } from '../src/auth';
 import { openDatabase, type Database } from '../src/db/client';
 import { createStore, type Store } from '../src/store';
+import type { WalletTransfers } from '../src/activity';
+import { walletTransfers } from '../src/watcher';
 
 /**
- * The HTTP surface, end to end, against a real (embedded) Postgres. Privy, the
- * chain and the explorer are faked — each fake is the smallest thing that lets
- * a test state exactly the condition it is about.
+ * The HTTP surface, end to end, against a real (embedded) Postgres. Privy and
+ * the chain are faked — each fake is the smallest thing that lets a test state
+ * exactly the condition it is about.
  */
 
 const USDC = '0x3600000000000000000000000000000000000000';
@@ -43,7 +45,7 @@ let chain: {
   receipts: Map<string, Receipt>;
 };
 let gateway: () => Promise<{ totalUsd: string; perChain: [] }>;
-let explorer: () => Promise<[]>;
+let transfers: (address: Address) => Promise<WalletTransfers>;
 let agent: AppDeps['agent'];
 
 const identity: IdentityProvider = {
@@ -87,6 +89,15 @@ const reader: ChainReader = {
   async lookupEns() {
     return null;
   },
+  async blockNumber() {
+    return 0;
+  },
+  async blockTime() {
+    return new Date(0);
+  },
+  async getLogs() {
+    return [];
+  },
 };
 
 function app() {
@@ -97,7 +108,7 @@ function app() {
     agent,
     gatewayBalances: () => gateway(),
     walletHoldings: async () => [],
-    explorerTransfers: () => explorer(),
+    walletTransfers: (address) => transfers(address),
     receiptPolling: { attempts: 1, delayMs: 0 },
   };
   return createApp(deps);
@@ -151,7 +162,7 @@ beforeEach(async () => {
   deletedLogins = [];
   chain = { balance: 100_000_000n, receipts: new Map() };
   gateway = async () => ({ totalUsd: '0', perChain: [] });
-  explorer = async () => [];
+  transfers = async () => ({ transfers: [], complete: true });
   agent = null;
 });
 
@@ -239,6 +250,29 @@ describe('deleting an account', () => {
     expect((await remove({ keyExported: true })).status).toBe(200);
     expect(deletedLogins).toEqual(['did:privy:alice']);
   });
+
+  it('takes the record of their wallet’s money and their phones with it — but not another user’s history', async () => {
+    await database.db.execute(sql`TRUNCATE chain_transfers`);
+    await call('/v1/me', { token: 'mallory-token' });
+    await call('/v1/push-token', { token: 'alice-token', method: 'PUT', body: { token: 'ExponentPushToken[abcdefghijklmnopqrstuv]', platform: 'android' } });
+    const moved = (n: number, from: string, to: string) => ({
+      txHash: hash(String(n)),
+      logIndex: 0,
+      blockNumber: n,
+      from: from as Address,
+      to: to as Address,
+      amount: 1_000_000n,
+      at: new Date(),
+    });
+    await store.recordTransfers(CHAIN.arcTestnet, [moved(1, SAM, ALICE_WALLET), moved(2, ALICE_WALLET, MALLORY_WALLET)]);
+
+    expect((await remove({ keyExported: true })).status).toBe(200);
+
+    expect(await store.listTransfers(CHAIN.arcTestnet, ALICE_WALLET as Address)).toEqual([
+      expect.objectContaining({ from: ALICE_WALLET, to: MALLORY_WALLET }),
+    ]);
+    expect(await store.listPushTokens('did:privy:alice')).toEqual([]);
+  });
 });
 
 describe('balance', () => {
@@ -289,7 +323,7 @@ describe('balance', () => {
       gatewayBalances: () => gateway(),
       walletHoldings: async () => [],
       forgetHoldings: (address) => forgotten.push(address),
-      explorerTransfers: () => explorer(),
+      walletTransfers: (address) => transfers(address),
     });
     const get = (path: string) => shared.request(path, { headers: { authorization: 'Bearer alice-token' } });
 
@@ -442,7 +476,7 @@ describe('recording a move between chains', () => {
       forgetHoldings: () => {
         forgotten += 1;
       },
-      explorerTransfers: () => explorer(),
+      walletTransfers: (address) => transfers(address),
       receiptPolling: { attempts: 1, delayMs: 0 },
     });
 
@@ -678,7 +712,7 @@ describe('chat limits', () => {
       agent,
       gatewayBalances: () => gateway(),
       walletHoldings: async () => [],
-      explorerTransfers: () => explorer(),
+      walletTransfers: (address) => transfers(address),
       chatLimits: limits,
     });
     return (token: string, body: unknown = { message: 'hi', history: [] }) =>
@@ -780,7 +814,7 @@ describe('re-quoting an expired plan', () => {
 });
 
 describe('activity', () => {
-  it('shows a recorded send even before the explorer indexes it', async () => {
+  it('shows a recorded send even before the watcher reads its block', async () => {
     const plan = await planSend('10');
     chain.receipts.set(hash('7'), transferReceipt(ALICE_WALLET, SAM, 10_000_000n));
     await call(`/v1/plans/${plan.id}/executions`, { token: 'alice-token', method: 'POST', body: { txHash: hash('7') } });
@@ -819,8 +853,8 @@ describe('activity', () => {
     expect(details.via).toBe('Circle (CCTP)');
   });
 
-  it('marks the feed incomplete when the explorer is down, rather than empty', async () => {
-    explorer = async () => {
+  it('marks the feed incomplete when the transfers can’t be read, rather than empty', async () => {
+    transfers = async () => {
       throw new Error('down');
     };
 
@@ -828,6 +862,74 @@ describe('activity', () => {
 
     expect(status).toBe(200);
     expect(body.complete).toBe(false);
+  });
+
+  it('shows money received, as the chain watcher stored it, with the sender’s name', async () => {
+    await database.db.execute(sql`TRUNCATE chain_transfers, chain_cursors`);
+    await call('/v1/me', { token: 'alice-token' });
+    await call('/v1/me', { token: 'mallory-token' });
+    await claim('mallory-token', 'mallory');
+    transfers = (address) => walletTransfers(store, CHAIN.arcTestnet, address);
+    await store.startChainCursor(CHAIN.arcTestnet, { block: 100, historyNext: 101, historyTo: 100 });
+    await store.recordTransfers(CHAIN.arcTestnet, [
+      { txHash: hash('c'), logIndex: 3, blockNumber: 90, from: MALLORY_WALLET as Address, to: ALICE_WALLET as Address, amount: 12_500_000n, at: new Date() },
+    ]);
+
+    const { body } = await call('/v1/activity', { token: 'alice-token' });
+
+    expect(body.complete).toBe(true);
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({ direction: 'received', counterparty: MALLORY_WALLET, amount: '12.5', txHash: hash('c') });
+    expect(body.items[0].details.party).toBe('@mallory');
+  });
+
+  it('says the feed may be missing something until the watcher has read history', async () => {
+    await database.db.execute(sql`TRUNCATE chain_transfers, chain_cursors`);
+    transfers = (address) => walletTransfers(store, CHAIN.arcTestnet, address);
+    // History runs from block 1 to 100 and has only reached 50.
+    await store.startChainCursor(CHAIN.arcTestnet, { block: 100, historyNext: 50, historyTo: 100 });
+
+    const { body } = await call('/v1/activity', { token: 'alice-token' });
+
+    expect(body.complete).toBe(false);
+  });
+});
+
+describe('push tokens', () => {
+  const TOKEN = 'ExponentPushToken[abcdefghijklmnopqrstuv]';
+
+  it('remembers a phone to push to, and forgets it when it signs out', async () => {
+    await call('/v1/me', { token: 'alice-token' });
+
+    expect((await call('/v1/push-token', { token: 'alice-token', method: 'PUT', body: { token: TOKEN, platform: 'android' } })).status).toBe(200);
+    expect(await store.listPushTokens('did:privy:alice')).toEqual([TOKEN]);
+
+    const { body } = await call('/v1/push-token', { token: 'alice-token', method: 'DELETE', body: { token: TOKEN } });
+    expect(body.removed).toBe(true);
+    expect(await store.listPushTokens('did:privy:alice')).toEqual([]);
+  });
+
+  it('moves a phone to whoever signed in on it last', async () => {
+    await call('/v1/push-token', { token: 'alice-token', method: 'PUT', body: { token: TOKEN, platform: 'android' } });
+    await call('/v1/push-token', { token: 'mallory-token', method: 'PUT', body: { token: TOKEN, platform: 'android' } });
+
+    expect(await store.listPushTokens('did:privy:alice')).toEqual([]);
+    expect(await store.listPushTokens('did:privy:mallory')).toEqual([TOKEN]);
+  });
+
+  it('won’t let one account sign another’s phone out', async () => {
+    await call('/v1/push-token', { token: 'alice-token', method: 'PUT', body: { token: TOKEN, platform: 'ios' } });
+
+    const { body } = await call('/v1/push-token', { token: 'mallory-token', method: 'DELETE', body: { token: TOKEN } });
+
+    expect(body.removed).toBe(false);
+    expect(await store.listPushTokens('did:privy:alice')).toEqual([TOKEN]);
+  });
+
+  it('refuses anything that isn’t an Expo push token', async () => {
+    const { status } = await call('/v1/push-token', { token: 'alice-token', method: 'PUT', body: { token: 'https://evil.example', platform: 'android' } });
+
+    expect(status).toBe(400);
   });
 });
 

@@ -20,6 +20,7 @@ import { installCrashReporting } from '../lib/crash';
 import { checkOnboarding, resetOnboarding, useOnboarding } from '../lib/onboarding';
 import { signingChains } from '../lib/chain';
 import { config } from '../lib/config';
+import { usePush } from '../lib/push';
 import { ThemeProvider, useTheme } from '../theme';
 
 /**
@@ -86,6 +87,9 @@ function Gate() {
     if (user) checkOnboarding(user.id);
     else resetOnboarding();
   }, [user]);
+
+  // Once they're in: where to push their news, and what a tapped notification opens.
+  usePush(isReady && Boolean(user) && onboarding === 'done');
 
   if (!isReady || (!fontsLoaded && !fontError)) {
     return (

@@ -341,6 +341,14 @@ export const api = {
 
   markNotificationsRead: () => request('/v1/notifications/read', z.object({ ok: z.boolean() }), { method: 'POST' }),
 
+  /** Where to push this account's notifications: this phone. */
+  savePushToken: (token: string, platform: 'ios' | 'android') =>
+    request('/v1/push-token', z.object({ ok: z.boolean() }), { method: 'PUT', body: JSON.stringify({ token, platform }) }),
+
+  /** Stop pushing to this phone — on sign-out, so the next person to sign in isn't told the last one's news. */
+  deletePushToken: (token: string) =>
+    request('/v1/push-token', z.object({ removed: z.boolean() }), { method: 'DELETE', body: JSON.stringify({ token }) }),
+
   /* --- Insights and pots ------------------------------------------------- */
 
   insights: (month?: string) => request(`/v1/insights${month ? `?month=${month}` : ''}`, InsightsSchema),

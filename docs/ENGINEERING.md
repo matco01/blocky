@@ -104,7 +104,7 @@ computer's LAN address, not `localhost`.
 |---|---|---|
 | Privy | Login + the embedded wallet | [dashboard.privy.io](https://dashboard.privy.io) |
 | Anthropic | The agent | [console.anthropic.com](https://console.anthropic.com) |
-| Blockscout *(mainnet)* | API key for the activity feed on mainnet | [dev.blockscout.com](https://dev.blockscout.com) |
+| Firebase *(Android push)* | `google-services.json`, and an FCM key uploaded to Expo — see "Push notifications" | [console.firebase.google.com](https://console.firebase.google.com) |
 
 In the Privy dashboard: enable **email** login, enable **Ethereum embedded
 wallets**, and add the app identifier `com.blocky.wallet` as an allowed mobile
@@ -146,7 +146,8 @@ sender, Circle's CCTP contracts, and Gateway's balance API.
 
 > **Arc's decimals trap.** The same USDC is visible at **18 decimals** natively
 > (`eth_getBalance`, gas prices, fees) and at **6 decimals** through the ERC-20
-> at `0x3600…`. Mixing them is a 10¹² error. `nativeToUsdcUnits` and
+> at `0x3600…`. Mixing them is a 10¹² error. `nativeToUsdcUnits` (a fee,
+> rounded up), `nativeToUsdcUnitsDown` (money that moved) and
 > `usdcUnitsToNative` in [`chains.ts`](../packages/wallet-core/src/chains.ts) are
 > the only code allowed to cross scales. Never add a native balance to an ERC-20
 > balance — it is the same money counted twice.
@@ -170,6 +171,83 @@ sender, Circle's CCTP contracts, and Gateway's balance API.
    its word for it: the receipt must contain exactly the planned USDC transfer
    — right token contract, sender, recipient and amount — or nothing is
    recorded. A plan executes at most once.
+
+## Money coming in: the chain watcher
+
+A node can't answer "every transfer to this address" — that is what explorers
+and indexers are for. Blocky only needs it for its own users' wallets, so it
+keeps that index itself, in [`watcher.ts`](../apps/api/src/watcher.ts), through
+the endpoint the API already reads Arc with. No explorer, no indexer, no other
+API. It is how the activity feed knows about money received, and how a user
+hears they were paid with the app closed.
+
+- **What it reads.** Every USDC movement on Arc emits exactly one `Transfer`
+  from a system address, `0xfff…fffe`, at 18 decimals — a native send and an
+  ERC-20 transfer alike. An ERC-20 transfer *also* emits the token contract's
+  own copy at 6 decimals, so reading the token would miss native sends and
+  reading both would count every token transfer twice. Gas emits nothing.
+  Checked on testnet and mainnet; [`arc-transfers.ts`](../packages/wallet-core/src/arc-transfers.ts)
+  does the reading.
+- **The live edge**, every 15 seconds: one `eth_getLogs` for all of those in the
+  blocks since last time, six blocks (3 s) behind the newest — an endpoint is a
+  pool of nodes, and one a block behind silently answers for less than was
+  asked. The database says which addresses are Blocky users'; those transfers
+  go into `chain_transfers`, and the recipient is told ("@sam sent you
+  $20.00"), in the inbox and as a push. Its position is kept in
+  `chain_cursors`; after downtime it catches up 2,000 blocks a run.
+- **History**, once: the first start notes where the live edge began and reads
+  back to the oldest account (found by a binary search on block times), 5,000
+  blocks at a time, filtered to Blocky's wallets. Nobody is told about history.
+  `/health` shows `chainWatcher.historyBlocksLeft`; until it reaches 0 — and
+  whenever the live edge hasn't read the chain for two minutes — the feed says
+  some incoming activity may be missing.
+- **Told once.** A send made through Blocky is announced by the sender's own
+  report (`afterMoneyMoved`, which knows the request it paid), so the watcher
+  stays quiet about transactions Blocky recorded. Both use the key
+  `received:<tx>`, and whichever comes second is dropped. Under a cent is
+  never announced: it's dust, or address poisoning.
+- **Endpoint limits.** Providers cap `eth_getLogs` differently — Arc's public
+  endpoint answers 5,000 blocks but not 10,000, and some of its nodes stop at
+  2,000 results — and word the refusal differently. `readLogs` halves a refused
+  range until it fits. A rate limit is not a refusal: the run fails and the
+  same range is read next time, logged at most once a minute.
+- **Scale.** The live edge's cost grows with Arc's USDC traffic, not with
+  Blocky's users: a few dozen logs a run today. If that gets heavy, filter it
+  by wallet as history does, or move to a provider's webhooks.
+
+## Push notifications
+
+Everything that tells a user something goes through `store.notify`.
+[`push.ts`](../apps/api/src/push.ts) wraps it, so every new notification also
+goes to the user's phones through Expo's push service, which relays to Google
+(FCM) and Apple (APNs). A repeat dropped by its key isn't pushed, and anything
+that happened more than an hour ago goes to the inbox only.
+
+- **Tokens.** The app registers its Expo push token (`PUT /v1/push-token`) once
+  notifications are allowed, and removes it on sign-out (`DELETE`). A phone
+  belongs to one account at a time, an account to at most ten phones. Expo's
+  tickets, and its receipts 15 minutes later, name phones the app was
+  uninstalled from; their tokens are dropped.
+- **Asking.** The app never asks at launch. It asks where it means something —
+  Receive ("Tell me the moment it arrives"), the inbox, and Account →
+  Notifications — and a tap opens Activity on the payment for money received,
+  the inbox for everything else ([`push.ts`](../apps/mobile/lib/push.ts)).
+- **Setup.** Android push needs Firebase:
+  1. In the [Firebase console](https://console.firebase.google.com), create a
+     project and add an Android app with the package `com.blocky.wallet`.
+     Download its `google-services.json` into `apps/mobile/` and commit it —
+     it holds public identifiers only. [`app.config.js`](../apps/mobile/app.config.js)
+     picks it up when it's there.
+  2. Firebase → Project settings → Service accounts → **Generate new private
+     key**. Upload that file at expo.dev → Project settings → Credentials →
+     Android → `com.blocky.wallet` → FCM V1 service account key (or with `eas
+     credentials`). Never commit it.
+  3. Rebuild the app. iOS needs an APNs key, which EAS sets up on the first iOS
+     build.
+
+  Until then the app works the same and the inbox has everything; the phone
+  just doesn't buzz. `EXPO_ACCESS_TOKEN` is needed only if "enhanced push
+  security" is turned on for the Expo project.
 
 ## Gas, and why it works with zero ETH
 
@@ -292,11 +370,15 @@ hex outside it.
   before relying on it.
 - **Every third-party read has a deadline.** `upstream()` in
   [`wallet-core`](../packages/wallet-core/src/upstream.ts) gives each price,
-  quote, fee and explorer call 10 seconds; past that it fails like any other
+  quote, fee and push call 10 seconds; past that it fails like any other
   read, which every caller shows as "unavailable", never as zero. Use it for
   any new provider.
 - **Stored plans are pruned** 30 days after their quote ran out, unless they
   were executed (an execution's plan is its history) or pay a request.
+- **A fresh local database has a short memory.** The chain watcher reads
+  history back to the oldest account in *this* database, so a new `.data/`
+  signed into an older testnet wallet shows its on-chain history from the day
+  it first signed in here. Production's accounts are as old as their wallets.
 
 ### Running more than one API instance
 
@@ -312,6 +394,9 @@ The API assumes it is the only one. Before running two:
   Redis) first.
 - **Caches** (prices, holdings) are per process. That is only a cost: each
   instance fetches its own copy.
+- **The chain watcher** runs in every instance as well. That stays correct —
+  a transfer is stored once and a user told once — but every instance reads
+  the chain, multiplying RPC calls. Give it to the same worker as the jobs.
 
 ## The agent
 

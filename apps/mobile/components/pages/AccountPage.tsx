@@ -6,12 +6,13 @@ import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, ApiError } from '../../lib/api';
 import { confirmWithBiometrics } from '../../lib/biometrics';
 import { clearChat } from '../../lib/chatStore';
 import { config } from '../../lib/config';
+import { unregisterPush, usePushPermission } from '../../lib/push';
 import { useWallet } from '../../lib/wallet';
 import { useTheme } from '../../theme';
 import { BlockyCard } from '../BlockyCard';
@@ -37,8 +38,15 @@ const TERMS_URL = `${config.websiteUrl}/terms`;
 export function AccountPage({ page, onPageChange }: PageProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { user, logout } = usePrivy();
+  const { user, logout: endSession } = usePrivy();
   const { address } = useWallet();
+  const notifications = usePushPermission();
+
+  // This phone stops getting this account's news first, while there's still a session to say so.
+  const logout = useCallback(async () => {
+    await unregisterPush();
+    await endSession();
+  }, [endSession]);
 
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [username, setUsername] = useState<string | null>(null);
@@ -117,7 +125,8 @@ export function AccountPage({ page, onPageChange }: PageProps) {
     try {
       await api.deleteAccount(keyExported);
       clearChat();
-      await logout();
+      // The account's push tokens went with it.
+      await endSession();
     } catch (error) {
       if (error instanceof ApiError && error.code === 'has_money') {
         Alert.alert('Your wallet isn’t empty', error.message, [
@@ -198,6 +207,20 @@ export function AccountPage({ page, onPageChange }: PageProps) {
 
         {/* --- Preferences ---------------------------------------------------- */}
         <Section title="Preferences">
+          <Row
+            icon={notifications.permission === 'on' ? 'notifications-outline' : 'notifications-off-outline'}
+            label="Notifications"
+            value={
+              notifications.permission === 'on'
+                ? 'On — payments, requests and alerts'
+                : notifications.permission === 'off'
+                  ? 'Off — turn on in Settings'
+                  : 'Off — get told the moment money arrives'
+            }
+            action={notifications.permission === 'on' ? undefined : 'Turn on'}
+            // Once on, the system's settings are where they're turned off or tuned.
+            onPress={notifications.permission === 'on' ? () => void Linking.openSettings() : () => void notifications.turnOn()}
+          />
           <ToggleRow
             icon="color-palette-outline"
             label="Dark mode"

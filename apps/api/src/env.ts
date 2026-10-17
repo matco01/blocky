@@ -68,14 +68,11 @@ const EnvSchema = z.object({
   ROBINHOOD_RPC_URL: z.string().url().optional(),
 
   /**
-   * Blockscout's API key, for the activity feed on mainnet. Arc's mainnet
-   * explorer turns away server requests, so mainnet reads go through
-   * Blockscout's hosted API, which needs a key (free tier:
-   * https://dev.blockscout.com). Without one the feed still shows every send
-   * made through Blocky, and says it is incomplete rather than hiding
-   * payments received.
+   * Expo's access token, for push notifications — needed only if "enhanced
+   * push security" is switched on for the project at expo.dev. Without it,
+   * pushes go out unauthenticated, which is Expo's default.
    */
-  BLOCKSCOUT_API_KEY: z.string().min(1).optional(),
+  EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
 
   /**
    * Postgres. Optional in development: without it the API runs an embedded

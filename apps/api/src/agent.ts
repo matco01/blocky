@@ -32,7 +32,7 @@ import {
   STOCK_CHAIN,
   IS_TESTNET,
 } from '@blocky/wallet-core';
-import { mergeActivity, type ExplorerTransfer } from './activity';
+import { mergeActivity, type WalletTransfers } from './activity';
 import { createRequest, insightsFor, linkMatchingRequest, moneyWarnings, readDollars, who } from './money';
 import { BUDGET_CATEGORIES, monthOf } from './insights';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
@@ -85,7 +85,7 @@ export function agentToolsFor(
   userId: string,
   reader: ChainReader,
   account: Address,
-  explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>,
+  walletTransfers: (address: Address) => Promise<WalletTransfers>,
   /** What the user typed this conversation; contacts may only hold addresses from it. */
   userText: string,
 ): AgentTools {
@@ -517,17 +517,14 @@ export function agentToolsFor(
      * about the past can never disagree with what the user sees when they look.
      */
     async getRecentActivity() {
-      const [executions, transfers] = await Promise.all([
+      const [executions, onChain] = await Promise.all([
         store.listExecutions(userId, 20),
-        explorerTransfers(account).then(
-          (value) => ({ ok: true as const, value }),
-          () => ({ ok: false as const, value: [] as ExplorerTransfer[] }),
-        ),
+        walletTransfers(account).catch((): WalletTransfers => ({ transfers: [], complete: false })),
       ]);
 
       return {
-        items: mergeActivity(account, executions, transfers.value).slice(0, 20),
-        complete: transfers.ok,
+        items: mergeActivity(account, executions, onChain.transfers).slice(0, 20),
+        complete: onChain.complete,
       };
     },
   };
@@ -578,7 +575,7 @@ export function createAgentHandler(
   store: Store,
   apiKey: string,
   reader: ChainReader,
-  explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>,
+  walletTransfers: (address: Address) => Promise<WalletTransfers>,
   blockyFee: BlockyFeeTerms | null = null,
 ) {
   // One client for the process. Constructing per request throws away the
@@ -615,7 +612,7 @@ export function createAgentHandler(
       memories,
       client,
       tools: {
-        ...agentToolsFor(store, userId, reader, account, explorerTransfers, userText),
+        ...agentToolsFor(store, userId, reader, account, walletTransfers, userText),
         async setAppearance(mode) {
           appearance = mode;
           return { switched: true, appearance: mode };

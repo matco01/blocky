@@ -3,6 +3,7 @@ import {
   TransactionReceiptNotFoundError,
   createPublicClient,
   http,
+  numberToHex,
   type Chain,
   type PublicClient,
 } from 'viem';
@@ -106,6 +107,43 @@ export interface TokenMetadata {
   decimals: number;
 }
 
+/** One event log, as `eth_getLogs` returns it. */
+export interface ChainLog {
+  /** The contract that emitted it, lowercased. */
+  address: Address;
+  topics: readonly `0x${string}`[];
+  data: `0x${string}`;
+  blockNumber: number;
+  /** When the block was made, from the log itself. Null from a node that leaves it out. */
+  blockTimestamp: Date | null;
+  /** Lowercased. */
+  transactionHash: `0x${string}`;
+  logIndex: number;
+}
+
+/** A log as the node sends it: hex quantities, and a timestamp only some nodes include. */
+interface RawLog {
+  address: string;
+  topics: `0x${string}`[];
+  data: `0x${string}`;
+  blockNumber: `0x${string}` | null;
+  blockTimestamp?: `0x${string}` | null;
+  transactionHash: `0x${string}` | null;
+  logIndex: `0x${string}` | null;
+  removed?: boolean;
+}
+
+export interface LogFilter {
+  /** The emitting contract. */
+  address: Address;
+  /** Per position: one value, any of several, or null for anything. */
+  topics: ReadonlyArray<`0x${string}` | readonly `0x${string}`[] | null>;
+  /** Inclusive. */
+  fromBlock: number;
+  /** Inclusive. */
+  toBlock: number;
+}
+
 export interface ChainReader {
   /** ERC-20 balance in base units. */
   erc20Balance(chainId: ChainId, token: Address, owner: Address): Promise<bigint>;
@@ -122,6 +160,17 @@ export interface ChainReader {
   gasPrice(chainId: ChainId): Promise<bigint>;
   /** Whether we have an endpoint configured for a chain at all. */
   supports(chainId: ChainId): boolean;
+
+  /** The newest block the endpoint has. */
+  blockNumber(chainId: ChainId): Promise<number>;
+  /** When a block was made. */
+  blockTime(chainId: ChainId, blockNumber: number): Promise<Date>;
+  /**
+   * Event logs over a block range. Every endpoint caps how many blocks or
+   * results one call may cover, each differently, and this throws when a call
+   * is refused — `readLogs` narrows the range and asks again.
+   */
+  getLogs(chainId: ChainId, filter: LogFilter): Promise<ChainLog[]>;
 
   /**
    * A mined transaction's outcome and logs. Null when the chain has not seen
@@ -246,6 +295,43 @@ export function createChainReader(config: RpcConfig): ChainReader {
 
     async gasPrice(chainId) {
       return clientFor(chainId).getGasPrice();
+    },
+
+    async blockNumber(chainId) {
+      return Number(await clientFor(chainId).getBlockNumber({ cacheTime: 0 }));
+    },
+
+    async blockTime(chainId, blockNumber) {
+      const block = await clientFor(chainId).getBlock({ blockNumber: BigInt(blockNumber) });
+      return new Date(Number(block.timestamp) * 1000);
+    },
+
+    async getLogs(chainId, filter) {
+      // Raw, rather than viem's `getLogs`: that wants an event ABI for topic
+      // filters, and its formatter drops the block timestamp Arc's nodes include.
+      const logs = (await clientFor(chainId).request({
+        method: 'eth_getLogs',
+        params: [
+          {
+            address: filter.address,
+            topics: filter.topics as `0x${string}`[],
+            fromBlock: numberToHex(filter.fromBlock),
+            toBlock: numberToHex(filter.toBlock),
+          },
+        ],
+      })) as unknown as RawLog[];
+
+      return logs
+        .filter((log) => !log.removed && log.blockNumber && log.transactionHash && log.logIndex)
+        .map((log) => ({
+          address: lowercase(log.address),
+          topics: log.topics,
+          data: log.data,
+          blockNumber: Number(log.blockNumber),
+          blockTimestamp: log.blockTimestamp ? new Date(Number(log.blockTimestamp) * 1000) : null,
+          transactionHash: log.transactionHash!.toLowerCase() as `0x${string}`,
+          logIndex: Number(log.logIndex),
+        }));
     },
 
     async transactionReceipt(chainId, hash) {

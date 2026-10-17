@@ -65,7 +65,7 @@ function app() {
     agent: null,
     gatewayBalances: async () => ({ totalUsd: '0', perChain: [] }),
     walletHoldings: async () => [],
-    explorerTransfers: async () => [],
+    walletTransfers: async () => ({ transfers: [], complete: true }),
     receiptPolling: { attempts: 1, delayMs: 0 },
   });
 }

@@ -1,23 +1,17 @@
-import { ENTRY_POINT_V07, getChain, isCrossChainContract, upstream } from '@blocky/wallet-core';
+import { ENTRY_POINT_V07, getChain, isCrossChainContract } from '@blocky/wallet-core';
 import { formatUsd, type Address, type ChainId } from '@blocky/shared';
-import type { Contact, Execution, PublicUser, StoredPlan } from './store';
+import type { ChainTransfer, Contact, Execution, PublicUser, StoredPlan } from './store';
 
 /**
  * The activity feed: what moved in and out of the wallet.
  *
  * Two sources, merged:
  *
- *  - **ArcScan** (Blockscout) for everything on-chain, including money the user
+ *  - **The chain**, as Blocky's own watcher read it (`watcher.ts`): every USDC
+ *    transfer to or from the wallet on Arc, including money the user
  *    *received*, which we would otherwise never know about.
  *  - **Our own executions**, which carry the human summary and show a send the
- *    moment it is submitted, before the explorer has indexed it.
- *
- * Arc has a trap here that an explorer happens to solve: a native USDC send
- * emits only a system-level Transfer event at 18 decimals, while an ERC-20
- * transfer emits both that and a 6-decimal one. Indexing only the ERC-20
- * contract misses native sends; indexing both double-counts. Verified against
- * the live testnet: ArcScan's USDC token-transfer list includes native sends,
- * already normalised to 6 decimals and de-duplicated.
+ *    moment it is submitted, before the watcher has read its block.
  */
 
 export interface ActivityItem {
@@ -31,8 +25,9 @@ export interface ActivityItem {
   /**
    * A headline for rows where "Sent to 0x…" would mislead — money moved to
    * the user's own wallet on another chain goes *to* a bridge contract (CCTP's
-   * minter, an Across SpokePool, Gas.zip) they have never heard of. Null means
-   * the app words it itself.
+   * minter, an Across SpokePool, Gas.zip) they have never heard of — and the
+   * same for money arriving that way, *from* a mint. Null means the app words
+   * it itself.
    */
   title: string | null;
   /** Our summary for sends we planned; null for anything we only saw on-chain. */
@@ -74,6 +69,8 @@ export interface ActivityDetails {
   /** The transaction on a block explorer. */
   explorerUrl: string;
 }
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const ROUTE_NAMES: Record<string, string> = {
   cctp: 'Circle (CCTP)',
@@ -123,7 +120,7 @@ export async function describeActivity(
       const named = names.get(item.counterparty.toLowerCase()) ?? null;
 
       if (!stored) {
-        // Only seen on-chain: USDC on the home chain, the amount the explorer reported.
+        // Only seen on-chain: USDC on the home chain, the amount the chain reported.
         const line: AssetLine = { amount: item.amount, symbol: 'USDC', chain: chain.name, usd: item.amount };
         return {
           ...item,
@@ -176,64 +173,22 @@ export async function describeActivity(
   );
 }
 
-export interface ExplorerTransfer {
-  txHash: string;
-  logIndex: number;
-  from: Address;
-  to: Address;
-  /** 6-decimal base units. */
-  value: bigint;
-  timestamp: string;
-}
-
-interface BlockscoutTransfer {
-  transaction_hash: string;
-  log_index: number;
-  from: { hash: string };
-  to: { hash: string };
-  total: { decimals: string; value: string };
-  timestamp: string;
-}
-
 /**
- * Recent USDC transfers touching an address, from a Blockscout explorer.
- *
- * Throws on failure; the caller shows the feed as unavailable rather than
- * empty, because "no activity" is a claim about the user's money.
+ * The feed's on-chain half, and whether it's the whole story. Not complete
+ * while the watcher is still reading history or has fallen behind: then the
+ * feed says some of it may be missing, because "no activity" is a claim about
+ * the user's money.
  */
-export async function fetchExplorerTransfers(
-  address: Address,
-  options: { apiBase: string; token: Address; apiKey?: string | undefined; fetch?: typeof fetch },
-): Promise<ExplorerTransfer[]> {
-  const doFetch = options.fetch ?? fetch;
-  const key = options.apiKey ? `&apikey=${encodeURIComponent(options.apiKey)}` : '';
-  const url = `${options.apiBase}/addresses/${address}/token-transfers?type=ERC-20&token=${options.token}${key}`;
-
-  const response = await doFetch(url, upstream({ headers: { accept: 'application/json' } }));
-
-  if (!response.ok) {
-    throw new Error(`Explorer request failed with ${response.status}`);
-  }
-
-  const body = (await response.json()) as { items?: BlockscoutTransfer[] };
-
-  return (body.items ?? [])
-    .filter((item) => item.total.decimals === '6' && /^\d+$/.test(item.total.value))
-    .map((item) => ({
-      txHash: item.transaction_hash.toLowerCase(),
-      logIndex: item.log_index,
-      from: item.from.hash.toLowerCase() as Address,
-      to: item.to.hash.toLowerCase() as Address,
-      value: BigInt(item.total.value),
-      timestamp: item.timestamp,
-    }));
+export interface WalletTransfers {
+  transfers: ChainTransfer[];
+  complete: boolean;
 }
 
 /** Merge on-chain transfers with our own records into one newest-first feed. */
 export function mergeActivity(
   wallet: Address,
   executions: readonly Execution[],
-  transfers: readonly ExplorerTransfer[],
+  transfers: readonly ChainTransfer[],
 ): ActivityItem[] {
   const self = wallet.toLowerCase();
   const items: ActivityItem[] = [];
@@ -248,7 +203,7 @@ export function mergeActivity(
      * Gas, not a send — from when sends went out as ERC-4337 user operations,
      * and still in older wallets' history. On Arc the native token is USDC, so
      * a user operation paid its prefund as a USDC transfer to the EntryPoint,
-     * which the explorer reports like any other transfer. Listing it would put
+     * which the chain reports like any other transfer. Listing it would put
      * a second row under the send, addressed to a contract the user has never
      * heard of, usually for $0.00. Sends today are ordinary transactions, which
      * leave no such transfer.
@@ -267,13 +222,20 @@ export function mergeActivity(
       counterparty: sent ? transfer.to : transfer.from,
       amount: formatUsd(transfer.value),
       status: execution?.status ?? 'success',
-      title: sent && isCrossChainContract(transfer.to) ? 'Moved to another chain' : null,
+      title: sent
+        ? isCrossChainContract(transfer.to)
+          ? 'Moved to another chain'
+          : null
+        : // A mint (CCTP) or a bridge paying out has no one behind it to name.
+          transfer.from === ZERO_ADDRESS || isCrossChainContract(transfer.from)
+          ? 'Arrived from another chain'
+          : null,
       summary: execution?.summary ?? null,
       timestamp: transfer.timestamp,
     });
   }
 
-  // Our sends the explorer has not indexed yet still belong in the feed.
+  // Our sends the watcher has not read yet, and moves on other chains, still belong in the feed.
   for (const execution of executions) {
     if (indexed.has(execution.txHash)) continue;
 

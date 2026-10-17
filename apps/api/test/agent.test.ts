@@ -1,5 +1,5 @@
 import { IntentSchema, type Plan } from '@blocky/shared';
-import type { ExplorerTransfer } from '../src/activity';
+import type { WalletTransfers } from '../src/activity';
 import { agentToolsFor, destinationMismatch, unsourcedRecipient } from '../src/agent';
 import { lookalikeWarning, looksAlike } from '../src/money';
 import { openDatabase, type Database } from '../src/db/client';
@@ -22,7 +22,7 @@ let database: Database;
 let store: Store;
 let ensResolutions: Record<string, string | null>;
 let ensNames: Record<string, string | null>;
-let transfers: () => Promise<ExplorerTransfer[]>;
+let transfers: () => Promise<WalletTransfers>;
 
 const reader: ChainReader = {
   supports: () => true,
@@ -50,6 +50,15 @@ const reader: ChainReader = {
   async lookupEns(address) {
     return ensNames[address] ?? null;
   },
+  async blockNumber() {
+    return 0;
+  },
+  async blockTime() {
+    return new Date(0);
+  },
+  async getLogs() {
+    return [];
+  },
 };
 
 function tools(userText = 'save sam as 0x1111111111111111111111111111111111111111') {
@@ -70,7 +79,7 @@ beforeEach(async () => {
   await store.upsertUser({ id: USER, walletAddress: ACCOUNT });
   ensResolutions = { 'vitalik.eth': VITALIK_ETH_ADDRESS };
   ensNames = {};
-  transfers = async () => [];
+  transfers = async () => ({ transfers: [], complete: true });
 });
 
 describe('get_token_price', () => {
@@ -276,9 +285,17 @@ describe('get_recent_activity', () => {
     expect(result.items).toHaveLength(1);
   });
 
-  it('marks the answer incomplete when the explorer is down, rather than claiming an empty history', async () => {
+  it('marks the answer incomplete while the chain watcher is behind, rather than claiming an empty history', async () => {
+    transfers = async () => ({ transfers: [], complete: false });
+
+    const result = (await tools().getRecentActivity()) as { complete: boolean };
+
+    expect(result.complete).toBe(false);
+  });
+
+  it('and when the transfers can’t be read at all', async () => {
     transfers = async () => {
-      throw new Error('explorer down');
+      throw new Error('database down');
     };
 
     const result = (await tools().getRecentActivity()) as { complete: boolean };

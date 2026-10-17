@@ -1,5 +1,5 @@
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
@@ -15,15 +15,32 @@ type Load =
   | { state: 'ready'; items: ActivityItem[]; complete: boolean }
   | { state: 'error'; message: string };
 
-/** Everything that moved in and out of the wallet, newest first. */
+/**
+ * Everything that moved in and out of the wallet, newest first. Opened from a
+ * "you got paid" notification (`?tx=`), it opens on that payment.
+ */
 export default function ActivityScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const topPadding = useModalTopPadding();
+  const { tx } = useLocalSearchParams<{ tx?: string }>();
 
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState<ActivityItem | null>(null);
+
+  // Once: closing the sheet and refreshing mustn't open it again.
+  const openedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (load.state !== 'ready' || !tx || openedFor.current === tx) return;
+    const wanted = tx.toLowerCase();
+    const item =
+      load.items.find((entry) => entry.txHash.toLowerCase() === wanted && entry.direction === 'received') ??
+      load.items.find((entry) => entry.txHash.toLowerCase() === wanted);
+    if (!item) return;
+    openedFor.current = tx;
+    setOpen(item);
+  }, [load, tx]);
 
   const fetchActivity = useCallback(async () => {
     try {

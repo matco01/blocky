@@ -2,8 +2,8 @@ import { CHAIN } from '@blocky/shared';
 import { ENTRY_POINT_V07, cctpContracts } from '@blocky/wallet-core';
 import type { Address } from '@blocky/shared';
 import { describe, expect, it } from 'vitest';
-import { mergeActivity, type ExplorerTransfer } from '../src/activity';
-import type { Execution } from '../src/store';
+import { mergeActivity } from '../src/activity';
+import type { ChainTransfer, Execution } from '../src/store';
 
 /**
  * The activity feed is the user's record of where their money went. Two things
@@ -16,7 +16,7 @@ import type { Execution } from '../src/store';
 const WALLET = '0x1111111111111111111111111111111111111111' as Address;
 const ALICE = '0x2222222222222222222222222222222222222222' as Address;
 
-function transfer(over: Partial<ExplorerTransfer> = {}): ExplorerTransfer {
+function transfer(over: Partial<ChainTransfer> = {}): ChainTransfer {
   return {
     txHash: '0xaaa',
     logIndex: 0,
@@ -123,5 +123,16 @@ describe('moves between chains', () => {
 
   it('leaves an ordinary send to be worded by the app', () => {
     expect(mergeActivity(WALLET, [], [transfer()])[0]?.title).toBeNull();
+  });
+
+  it('says money minted in from another chain arrived from one — "Received from 0x0000…" names nobody', () => {
+    const [item] = mergeActivity(WALLET, [], [transfer({ from: '0x0000000000000000000000000000000000000000', to: WALLET })]);
+
+    expect(item?.direction).toBe('received');
+    expect(item?.title).toBe('Arrived from another chain');
+  });
+
+  it('leaves money from a person to be worded by the app', () => {
+    expect(mergeActivity(WALLET, [], [transfer({ from: ALICE, to: WALLET })])[0]?.title).toBeNull();
   });
 });

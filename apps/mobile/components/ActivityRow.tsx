@@ -19,7 +19,8 @@ export function describe(item: ActivityItem): { kind: ActivityKind; title: strin
   const outsider = shortAddress(item.counterparty);
 
   if (item.direction === 'received') {
-    return { kind: 'received', title: `Received from ${party ?? outsider}`, icon: 'arrow-down' };
+    // The server's own words when there's nobody to name: money minted in from another chain.
+    return { kind: 'received', title: item.title ?? `Received from ${party ?? outsider}`, icon: 'arrow-down' };
   }
 
   // A move or a trade: something left, something else (or the same thing elsewhere) arrived.

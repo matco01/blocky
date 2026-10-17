@@ -10,6 +10,8 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { Text } from '../components/Text';
 import { Tile } from '../components/Tile';
 import { api, type AppNotification, type PaymentRequest } from '../lib/api';
+import { routeFor } from '../lib/notificationRoute';
+import { usePushPermission } from '../lib/push';
 import { payRequest } from '../lib/requests';
 import { useModalTopPadding } from '../lib/screenInsets';
 import { useTheme } from '../theme';
@@ -34,6 +36,7 @@ export default function NotificationsScreen() {
   const [error, setError] = useState<string | null>(null);
   // Requests from people they've never dealt with: kept folded until asked for.
   const [showStrangers, setShowStrangers] = useState(false);
+  const push = usePushPermission();
 
   const fetchAll = useCallback(async () => {
     try {
@@ -121,6 +124,27 @@ export default function NotificationsScreen() {
           </Text>
         ) : null}
 
+        {/* Everything here can reach them with the app closed — if they let it. */}
+        {push.permission && push.permission !== 'on' ? (
+          <Tile style={{ padding: theme.space.lg, gap: theme.space.sm }}>
+            <View style={styles.row}>
+              <Icon name="notifications-outline" size={20} tone="accent" />
+              <Text variant="bodyStrong" style={{ flex: 1 }}>
+                Know the moment you’re paid
+              </Text>
+            </View>
+            <Text variant="body" tone="secondary">
+              Blocky tells you when money arrives, someone asks you to pay, or an alert goes off — even with the app closed.
+            </Text>
+            <Button
+              label={push.permission === 'off' ? 'Turn on in Settings' : 'Turn on notifications'}
+              variant="secondary"
+              size="compact"
+              onPress={() => void push.turnOn()}
+            />
+          </Tile>
+        ) : null}
+
         {load.state === 'ready' ? (
           <>
             {load.waiting
@@ -159,22 +183,33 @@ export default function NotificationsScreen() {
               </View>
             ) : null}
 
-            {load.items.map((item) => (
-              <View key={item.id} style={[styles.item, { borderBottomColor: theme.colors.border }]}>
-                <View style={styles.row}>
-                  {!item.read ? <View style={[styles.dot, { backgroundColor: theme.colors.accent }]} /> : null}
-                  <Text variant="bodyStrong" style={{ flex: 1 }}>
-                    {item.title}
-                  </Text>
-                  <Text variant="caption" tone="tertiary">
-                    {timeAgo(item.createdAt)}
+            {load.items.map((item) => {
+              // Money that arrived opens on its payment in Activity; the rest is all said here.
+              const target = routeFor(isRecord(item.data) ? { ...item.data, kind: item.kind } : { kind: item.kind });
+              const row = (
+                <View style={[styles.item, { borderBottomColor: theme.colors.border }]}>
+                  <View style={styles.row}>
+                    {!item.read ? <View style={[styles.dot, { backgroundColor: theme.colors.accent }]} /> : null}
+                    <Text variant="bodyStrong" style={{ flex: 1 }}>
+                      {item.title}
+                    </Text>
+                    <Text variant="caption" tone="tertiary">
+                      {timeAgo(item.createdAt)}
+                    </Text>
+                  </View>
+                  <Text variant="body" tone="secondary">
+                    {item.body}
                   </Text>
                 </View>
-                <Text variant="body" tone="secondary">
-                  {item.body}
-                </Text>
-              </View>
-            ))}
+              );
+              return target === '/notifications' ? (
+                <View key={item.id}>{row}</View>
+              ) : (
+                <PressableScale key={item.id} onPress={() => router.push(target)} accessibilityLabel={item.title} haptic="none" scaleTo={0.99}>
+                  {row}
+                </PressableScale>
+              );
+            })}
 
             {load.items.length === 0 && load.waiting.length === 0 ? (
               <Text variant="body" tone="secondary" style={[styles.center, { marginTop: theme.space.xxl }]}>
@@ -219,6 +254,10 @@ function RequestCard(props: {
       {props.onBlock ? <Button label="Block this person" size="compact" variant="quiet" onPress={() => props.onBlock!(request)} /> : null}
     </Tile>
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function timeAgo(iso: string): string {

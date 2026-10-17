@@ -46,7 +46,8 @@ app.
 | **Blocky's server** | Your wallet address, username, the moves you make and the records listed below | To build cards, check limits and keep your history |
 | **Anthropic (Claude)** | Each message you send the assistant, your last ~20 chat messages, and what its tools look up (balances, contacts, activity, saved notes) | Claude is the AI that answers you; see [Anthropic's terms](#anthropic) |
 | **Privy** | Your email (or Google/Apple/passkey login) and your wallet | Signing in and securing your key |
-| **Price, route and chain services** (Circle, Across, Gas.zip, Uniswap, CoinGecko, DefiLlama, Blockscout and others) | Your wallet address and the amounts involved, never your name or email | Quotes, bridges, swaps, prices and history |
+| **Price, route and chain services** (Circle, Across, Gas.zip, Uniswap, CoinGecko, DefiLlama and others) | Your wallet address and the amounts involved, never your name or email | Quotes, bridges, swaps, prices and balances |
+| **Expo, and Google or Apple** *(only if you turn notifications on)* | The text of each notification, like "@sam sent you $20.00", and a token for your phone | Delivering notifications to your phone |
 | **Other Blocky users** | Your @username, and your wallet address when you pay them or request money | So people can pay you by name |
 | **Everyone** | Everything on the blockchain: your address, balances and transactions | That's how public blockchains work |
 
@@ -69,7 +70,8 @@ Blocky has no ads, no analytics trackers and no data brokers, and doesn't sell d
 - **Money features:**
   - payment requests and their notes
   - people you blocked
-  - notifications
+  - notifications, and a token for each phone that gets them (removed when you sign out there)
+  - money in and out of your wallet on Arc, read from the public blockchain for your activity history
   - price alerts
   - budgets
   - savings pots and auto-save rules

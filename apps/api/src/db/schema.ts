@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -8,6 +9,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -271,11 +273,82 @@ export const notifications = pgTable(
     title: text('title').notNull(),
     body: text('body').notNull(),
     data: jsonb('data'),
+    /**
+     * One notification per key per user. Money arriving is seen twice — by
+     * the sender's report and by the chain watcher — and must be told once.
+     * Null for everything else: nulls never collide.
+     */
+    dedupeKey: text('dedupe_key'),
     readAt: timestamp('read_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (table) => [index('notifications_user_created_idx').on(table.userId, table.createdAt)],
+  (table) => [
+    index('notifications_user_created_idx').on(table.userId, table.createdAt),
+    uniqueIndex('notifications_user_key_idx').on(table.userId, table.dedupeKey),
+  ],
 );
+
+/**
+ * Where to push a user's notifications: an Expo push token per device. A
+ * device signed in to one account at a time, so the token is the key, and
+ * signing in as someone else moves it to them.
+ */
+export const pushTokens = pgTable(
+  'push_tokens',
+  {
+    token: text('token').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    platform: text('platform', { enum: ['ios', 'android'] }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('push_tokens_user_idx').on(table.userId)],
+);
+
+/**
+ * USDC that moved to or from a Blocky wallet on Arc, read off the chain by the
+ * watcher (`watcher.ts`) — the activity feed's record of money received, and
+ * of anything sent from outside Blocky. Every user's, from the day they
+ * joined; nobody else's.
+ */
+export const chainTransfers = pgTable(
+  'chain_transfers',
+  {
+    chainId: integer('chain_id').notNull(),
+    txHash: text('tx_hash').notNull(),
+    logIndex: integer('log_index').notNull(),
+    blockNumber: bigint('block_number', { mode: 'number' }).notNull(),
+    fromAddress: text('from_address').notNull(),
+    toAddress: text('to_address').notNull(),
+    amount: numeric('amount', { precision: 38, scale: 6 }).notNull(),
+    /** When the block was made. */
+    at: timestamp('at', { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
+    index('chain_transfers_to_idx').on(table.toAddress, table.blockNumber),
+    index('chain_transfers_from_idx').on(table.fromAddress, table.blockNumber),
+  ],
+);
+
+/**
+ * How far the watcher has read, per chain. Two positions: the live edge,
+ * moving forward from the first start, and the history before it, read once
+ * from the oldest account forward until it meets the live edge's start.
+ */
+export const chainCursors = pgTable('chain_cursors', {
+  chainId: integer('chain_id').primaryKey(),
+  /** The last block the live watch has read. */
+  block: bigint('block', { mode: 'number' }).notNull(),
+  /** The next block of history to read. History is done once this passes `history_to`. */
+  historyNext: bigint('history_next', { mode: 'number' }).notNull(),
+  /** The last block of history: the one before the live watch began. */
+  historyTo: bigint('history_to', { mode: 'number' }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** "Tell me if ETH drops under $2,500." Fires once, then is done. */
 export const priceAlerts = pgTable(
@@ -387,6 +460,9 @@ export const schema = {
   paymentRequests,
   blockedUsers,
   notifications,
+  pushTokens,
+  chainTransfers,
+  chainCursors,
   priceAlerts,
   budgets,
   pots,

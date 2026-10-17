@@ -64,6 +64,13 @@
       "when": 1792236346483,
       "tag": "0008_lookup_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792248335344,
+      "tag": "0009_chain_watcher_and_push",
+      "breakpoints": true
     }
   ]
 }

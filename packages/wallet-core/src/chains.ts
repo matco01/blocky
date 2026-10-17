@@ -282,7 +282,7 @@ export const ENTRY_POINT_V07: Address = '0x0000000071727de22e5e9d8baf0edac6f37da
  * 0x3600… (6 decimals — `balanceOf`, `transfer`). They are the same money.
  *
  * Reusing a raw integer across the two shifts the amount by 10^12. That is not
- * a rounding error, it is a trillion times too much or too little, so these two
+ * a rounding error, it is a trillion times too much or too little, so these
  * functions are the only place in the codebase that crosses scales. Never sum a
  * native balance with an ERC-20 balance: that double-counts.
  */
@@ -297,6 +297,16 @@ const ARC_SCALE = 10n ** 12n;
 export function nativeToUsdcUnits(native: bigint): bigint {
   if (native < 0n) throw new Error('Negative native amount');
   return (native + ARC_SCALE - 1n) / ARC_SCALE;
+}
+
+/**
+ * Native 18-decimal USDC to 6-decimal USDC units, rounded *down*: this is used
+ * for money that moved, where rounding up would show a fraction of a cent that
+ * never arrived.
+ */
+export function nativeToUsdcUnitsDown(native: bigint): bigint {
+  if (native < 0n) throw new Error('Negative native amount');
+  return native / ARC_SCALE;
 }
 
 /** 6-decimal USDC units to native 18-decimal USDC. Exact. */

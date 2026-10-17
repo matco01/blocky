@@ -47,7 +47,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { stream } from 'hono/streaming';
 import { z } from 'zod';
-import { describeActivity, mergeActivity, type ExplorerTransfer } from './activity';
+import { describeActivity, mergeActivity, type WalletTransfers } from './activity';
 import type { AgentResponse, ChatTurn } from './agent';
 import { authenticate, type AuthenticatedUser, type IdentityProvider } from './auth';
 import {
@@ -62,7 +62,9 @@ import {
 } from './insights';
 import { createRequest, insightsFor, linkMatchingRequest, monthStart, moneyWarnings, who } from './money';
 import { createPlannerContext, type BlockyFeeTerms } from './planner-context';
+import { EXPO_PUSH_TOKEN } from './push';
 import { DuplicateExecutionError, type Store } from './store';
+import { receivedKey } from './watcher';
 
 /**
  * How much anyone can talk to Blocky. Every message is a paid AI call, and
@@ -102,12 +104,14 @@ export interface AppDeps {
   forgetHoldings?: (address: Address) => void;
   /**
    * Extra facts for `/health`, to check a deploy from outside: which commit
-   * is running, which chains read through a provider. Never a URL or a key.
+   * is running, which chains read through a provider, how far the chain
+   * watcher has read. Never a URL or a key.
    */
-  health?: Record<string, unknown>;
+  health?: () => Promise<Record<string, unknown>>;
   /** Override the chat limits (tests use small numbers). */
   chatLimits?: Partial<ChatLimits>;
-  explorerTransfers: (address: Address) => Promise<ExplorerTransfer[]>;
+  /** A wallet's USDC transfers on Arc, as the chain watcher read them. */
+  walletTransfers: (address: Address) => Promise<WalletTransfers>;
   /** How long to wait for a just-submitted transaction to become visible. */
   receiptPolling?: { attempts: number; delayMs: number };
   logRequests?: boolean;
@@ -162,7 +166,9 @@ export function createApp(deps: AppDeps) {
     );
   }
 
-  app.get('/health', (c) => c.json({ ok: true, defaultChain: getChain(DEFAULT_CHAIN).name, ...deps.health }));
+  app.get('/health', async (c) =>
+    c.json({ ok: true, defaultChain: getChain(DEFAULT_CHAIN).name, ...(await deps.health?.().catch(() => ({}))) }),
+  );
 
   /* --- The website's waitlist: public, so outside /v1 and its auth --------- */
 
@@ -544,6 +550,26 @@ export function createApp(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
+  /**
+   * Where to push this user's notifications: the phone's Expo push token,
+   * sent by the app when notifications are allowed, and removed when it
+   * signs out — so a shared phone stops getting the last person's money news.
+   */
+  const PushTokenSchema = z.object({ token: z.string().max(200).regex(EXPO_PUSH_TOKEN, 'Not an Expo push token') });
+
+  app.put('/v1/push-token', async (c) => {
+    const parsed = PushTokenSchema.extend({ platform: z.enum(['ios', 'android']) }).safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: 'invalid_token', issues: parsed.error.issues }, 400);
+    await store.savePushToken(c.get('user').id, parsed.data.token, parsed.data.platform);
+    return c.json({ ok: true });
+  });
+
+  app.delete('/v1/push-token', async (c) => {
+    const parsed = PushTokenSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: 'invalid_token', issues: parsed.error.issues }, 400);
+    return c.json({ removed: await store.deletePushToken(c.get('user').id, parsed.data.token) });
+  });
+
   /** The chains the API knows about, for a client that doesn't bundle `@blocky/wallet-core`. */
   app.get('/v1/chains', (c) =>
     c.json({
@@ -701,16 +727,13 @@ export function createApp(deps: AppDeps) {
     if (wallet instanceof Response) return wallet;
 
     const userId = c.get('user').id;
-    const [executions, transfers, contacts] = await Promise.all([
+    const [executions, onChain, contacts] = await Promise.all([
       store.listExecutions(userId),
-      deps.explorerTransfers(wallet).then(
-        (value) => ({ ok: true as const, value }),
-        () => ({ ok: false as const }),
-      ),
+      deps.walletTransfers(wallet).catch((): WalletTransfers => ({ transfers: [], complete: false })),
       store.listContacts(userId).catch(() => []),
     ]);
 
-    const items = await describeActivity(mergeActivity(wallet, executions, transfers.ok ? transfers.value : []), executions, {
+    const items = await describeActivity(mergeActivity(wallet, executions, onChain.transfers), executions, {
       homeChain: DEFAULT_CHAIN,
       getPlan: (planId) => store.getPlan(userId, planId),
       contacts,
@@ -719,9 +742,9 @@ export function createApp(deps: AppDeps) {
 
     return c.json({
       items,
-      // When the explorer is down the feed still shows our own sends, and says
-      // it is partial rather than implying nothing was received.
-      complete: transfers.ok,
+      // While the watcher is behind, the feed still shows our own sends, and
+      // says it is partial rather than implying nothing was received.
+      complete: onChain.complete,
     });
   });
 
@@ -1006,7 +1029,7 @@ export function createApp(deps: AppDeps) {
         chainId,
         txHash,
         // For a move between chains, the contract the USDC went to on-chain —
-        // the same counterparty the explorer reports for it.
+        // the same counterparty the chain reports for it.
         counterparty: shape.kind === 'transfer' ? shape.recipient.address : shape.counterparty,
         amount: shape.outflow.displayAmount,
         /*
@@ -1341,7 +1364,7 @@ interface BridgeShape {
   chainId: ChainId;
   outflow: Plan['outflow'][number];
   destination: ChainId;
-  /** The contract the money went to on-chain — what the explorer reports as the counterparty. */
+  /** The contract the money went to on-chain — what the chain reports as the counterparty. */
   counterparty: Address;
   /** Blocky's fee transfer, when the plan charges one: it must land exactly as planned. */
   blockyFee: { call: Plan['calls'][number]; token: Address; recipient: Address; amount: bigint } | null;
@@ -1486,6 +1509,8 @@ async function afterMoneyMoved(args: { store: Store; plan: Plan; userId: string;
 
   await budgetAlerts(store, userId, plan).catch((error: unknown) => console.error('budgetAlerts failed', error));
 
+  // The chain watcher sees this money arrive too; the shared key means
+  // whichever of the two gets there second says nothing.
   const request = await store.findRequestByPlan(plan.id);
   if (request && request.status === 'open') {
     await store.settleRequest(request.id, 'paid', txHash);
@@ -1494,6 +1519,7 @@ async function afterMoneyMoved(args: { store: Store; plan: Plan; userId: string;
       title: `${who(sender)} paid your request`,
       body: `${displayUsd(request.amountUsd)}${request.note ? ` for ${request.note}` : ''}`,
       data: { requestId: request.id, txHash },
+      key: receivedKey(txHash),
     });
     return;
   }
@@ -1508,6 +1534,7 @@ async function afterMoneyMoved(args: { store: Store; plan: Plan; userId: string;
         title: `${who(sender)} sent you ${delta?.usdValue ? displayUsd(delta.usdValue) : `${delta?.displayAmount} ${delta?.token.symbol}`}`,
         body: 'It’s in your wallet.',
         data: { txHash },
+        key: receivedKey(txHash),
       });
     }
   }

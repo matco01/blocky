@@ -16,6 +16,7 @@ import { Text } from '../components/Text';
 import { Tile } from '../components/Tile';
 import { api } from '../lib/api';
 import { homeChainName } from '../lib/chain';
+import { usePushPermission } from '../lib/push';
 import { useModalTopPadding } from '../lib/screenInsets';
 import { useWallet } from '../lib/wallet';
 import { useTheme } from '../theme';
@@ -37,6 +38,7 @@ export default function ReceiveScreen() {
   const insets = useSafeAreaInsets();
   const topPadding = useModalTopPadding();
   const { address } = useWallet();
+  const notifications = usePushPermission();
 
   // Undefined until known; null when they haven't picked one. A failed read
   // leaves it unknown, so nobody is told to pick a name they already have.
@@ -145,6 +147,22 @@ export default function ReceiveScreen() {
             </Text>
           )}
         </View>
+
+        {/* The moment to ask: they're waiting for money right now. */}
+        {notifications.permission && notifications.permission !== 'on' ? (
+          <PressableScale
+            onPress={() => void notifications.turnOn()}
+            accessibilityLabel="Turn on notifications"
+            haptic="light"
+            style={[styles.row, { gap: theme.space.sm }]}
+          >
+            <Icon name="notifications-outline" size={18} tone="accent" />
+            <Text variant="bodyStrong" tone="accent" style={{ flex: 1 }}>
+              {notifications.permission === 'off' ? 'Turn on notifications in Settings to hear when it lands' : 'Tell me the moment it arrives'}
+            </Text>
+            <Icon name="chevron-forward" size={18} tone="accent" />
+          </PressableScale>
+        ) : null}
 
         {IS_TESTNET ? (
           <PressableScale
