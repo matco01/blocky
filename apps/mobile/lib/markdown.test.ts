@@ -61,10 +61,41 @@ describe('blocks', () => {
     });
   });
 
-  it('degrades a heading to a bold line instead of showing hashes', () => {
-    expect(parseMarkdown('## Your balance')).toEqual([
-      { type: 'paragraph', inlines: [{ text: 'Your balance', bold: true }] },
+  it('turns a heading into a section label, without the hashes or bold markers', () => {
+    expect(parseMarkdown('## Your balance')).toEqual([{ type: 'heading', inlines: [{ text: 'Your balance' }] }]);
+    expect(parseMarkdown('### **Why**')).toEqual([{ type: 'heading', inlines: [{ text: 'Why' }] }]);
+  });
+
+  it('sets a closing sources line apart', () => {
+    const blocks = parseMarkdown('Stocks fell.\n\nSources: CNBC, Reuters');
+
+    expect(blocks).toEqual([
+      { type: 'paragraph', inlines: [{ text: 'Stocks fell.' }] },
+      { type: 'source', inlines: [{ text: 'CNBC, Reuters' }] },
     ]);
+  });
+
+  it('only treats "Sources:" at the start of a line as a sources line', () => {
+    expect(parseMarkdown('Two sources: CNBC and Reuters.')).toEqual([
+      { type: 'paragraph', inlines: [{ text: 'Two sources: CNBC and Reuters.' }] },
+    ]);
+  });
+
+  it('reads a structured market recap as headline, sections, bullets and sources', () => {
+    const reply = [
+      'Tech dragged stocks lower on Friday.',
+      '',
+      '## Stocks',
+      '- **Nasdaq** fell 2.1%, its worst day in a month.',
+      '- **Dow** up 0.7% as money rotated out of tech.',
+      '',
+      '## Why',
+      '- AI spending worries hit chipmakers.',
+      '',
+      'Sources: CNBC, Reuters',
+    ].join('\n');
+
+    expect(parseMarkdown(reply).map((b) => b.type)).toEqual(['paragraph', 'heading', 'list', 'heading', 'list', 'source']);
   });
 
   it('drops code fences but keeps what was inside', () => {
@@ -104,6 +135,49 @@ describe('inline', () => {
 
   it('never treats underscores as emphasis, since they appear in identifiers', () => {
     expect(parseInline('the field per_tx_cap_usd')).toEqual([{ text: 'the field per_tx_cap_usd' }]);
+  });
+
+  it('marks a percentage after a falling word as a move down, and only the number', () => {
+    expect(parseInline('Nasdaq fell 2.1% on Friday')).toEqual([
+      { text: 'Nasdaq fell ' },
+      { text: '2.1%', move: 'down' },
+      { text: ' on Friday' },
+    ]);
+  });
+
+  it('marks a rising word, allowing a hedge in between', () => {
+    expect(parseInline('the Dow was up about 0.7%')).toEqual([
+      { text: 'the Dow was up about ' },
+      { text: '0.7%', move: 'up' },
+    ]);
+  });
+
+  it('marks signed percentages by their sign, including the typographic minus', () => {
+    expect(parseInline('BTC +3.4%, ETH −1.2%, SOL -0.5%')).toEqual([
+      { text: 'BTC ' },
+      { text: '+3.4%', move: 'up' },
+      { text: ', ETH ' },
+      { text: '−1.2%', move: 'down' },
+      { text: ', SOL ' },
+      { text: '-0.5%', move: 'down' },
+    ]);
+  });
+
+  it('keeps bold on a move inside bold text', () => {
+    expect(parseInline('**Nasdaq −2.1%**')).toEqual([
+      { text: 'Nasdaq ', bold: true },
+      { text: '−2.1%', bold: true, move: 'down' },
+    ]);
+  });
+
+  it('leaves ranges, limits and plain percentages alone', () => {
+    expect(parseInline('roughly 1-2% lower')).toEqual([{ text: 'roughly 1-2% lower' }]);
+    expect(parseInline('fees up to 5%')).toEqual([{ text: 'fees up to 5%' }]);
+    expect(parseInline('a 0.5% fee')).toEqual([{ text: 'a 0.5% fee' }]);
+  });
+
+  it('never marks a move inside an address', () => {
+    expect(parseInline('`fell 2%`')).toEqual([{ text: 'fell 2%', code: true }]);
   });
 
   it('handles italics', () => {

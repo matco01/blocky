@@ -1,10 +1,15 @@
 /**
  * A deliberately small markdown parser for the agent's replies.
  *
- * The agent is told to use exactly this subset: paragraphs, single-level bullet
- * and numbered lists, **bold**, and `code` for addresses. Anything else it
- * produces anyway degrades to plain text rather than rendering as raw
- * symbols — a heading becomes a bold line, a code fence becomes its contents.
+ * The agent is told to use exactly this subset: paragraphs, `##` section
+ * headings, single-level bullet and numbered lists, **bold**, `code` for
+ * addresses, and a closing "Sources:" line. Anything else it produces anyway
+ * degrades to plain text rather than rendering as raw symbols — a code fence
+ * becomes its contents.
+ *
+ * On top of the markdown, price moves ("fell 2.1%", "+0.7%") are picked out so
+ * the chat can colour them: a market recap is mostly numbers going up or down,
+ * and the direction is the thing the eye wants first.
  *
  * Written here rather than pulled in as a dependency so the chat looks exactly
  * as designed, and because it is small enough to test completely.
@@ -15,15 +20,21 @@ export interface Inline {
   bold?: boolean;
   italic?: boolean;
   code?: boolean;
+  /** A price move: which way it went, for colouring. */
+  move?: 'up' | 'down';
 }
 
 export type Block =
   | { type: 'paragraph'; inlines: Inline[] }
-  | { type: 'list'; ordered: boolean; items: Inline[][] };
+  | { type: 'heading'; inlines: Inline[] }
+  | { type: 'list'; ordered: boolean; items: Inline[][] }
+  /** "Sources: CNBC, Reuters" — set apart, small, at the foot of a reply. */
+  | { type: 'source'; inlines: Inline[] };
 
 const BULLET = /^\s*[-*•]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
 const HEADING = /^\s*#{1,6}\s+(.*)$/;
+const SOURCE = /^\s*(?:sources?|via)\s*:\s*(.+)$/i;
 const FENCE = /^\s*```/;
 
 export function parseMarkdown(source: string): Block[] {
@@ -75,7 +86,17 @@ export function parseMarkdown(source: string): Block[] {
     if (heading) {
       flushParagraph();
       flushList();
-      blocks.push({ type: 'paragraph', inlines: [{ text: (heading[1] ?? '').trim(), bold: true }] });
+      // Bold markers inside a heading are noise: the heading is already set apart.
+      const text = (heading[1] ?? '').replace(/\*\*/g, '').trim();
+      if (text) blocks.push({ type: 'heading', inlines: parseInline(text) });
+      continue;
+    }
+
+    const sourceLine = line.match(SOURCE);
+    if (sourceLine) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: 'source', inlines: parseInline((sourceLine[1] ?? '').trim()) });
       continue;
     }
 
@@ -122,14 +143,64 @@ export function parseInline(text: string): Inline[] {
 
   if (last < text.length) parts.push({ text: text.slice(last) });
 
-  return mergeAdjacent(parts);
+  // Addresses never carry a move; everything else is scanned for one.
+  return mergeAdjacent(parts.flatMap((part) => (part.code ? [part] : splitMoves(part))));
 }
+
+const DOWN_WORDS = new Set([
+  'down', 'fell', 'falls', 'fallen', 'lost', 'loses', 'dropped', 'drops', 'slid', 'slides', 'sank', 'sinks',
+  'declined', 'declines', 'tumbled', 'tumbles', 'plunged', 'plunges', 'slipped', 'slips', 'sagged', 'shed', 'sheds',
+]);
+
+/**
+ * A price move: a signed percentage ("+0.7%", "−2.1%"), or a percentage right
+ * after a word that says which way ("fell 2.1%", "up about 3%"). Only the
+ * number is marked, so the sentence around it reads as it was written.
+ *
+ * The sign must start a word, so a range like "1-2%" is not read as "−2%".
+ * "up to 5%" is a limit, not a move, and doesn't match: nothing but a
+ * hedge word ("about", "nearly"…) may sit between the verb and the number.
+ */
+const MOVE =
+  /(^|[\s(])([+\-−]\d+(?:\.\d+)?%)|\b(up|down|rose|rises|risen|gained|gains|climbed|climbs|jumped|jumps|rallied|rallies|surged|surges|soared|soars|added|adds|fell|falls|fallen|lost|loses|dropped|drops|slid|slides|sank|sinks|declined|declines|tumbled|tumbles|plunged|plunges|slipped|slips|sagged|shed|sheds)(\s+(?:by\s+)?(?:about\s+|roughly\s+|nearly\s+|almost\s+|over\s+|around\s+|more than\s+)?)(\d+(?:\.\d+)?%)/gi;
+
+function splitMoves(part: Inline): Inline[] {
+  const { text, ...format } = part;
+  const out: Inline[] = [];
+  let last = 0;
+
+  for (const match of text.matchAll(MOVE)) {
+    const start = match.index ?? 0;
+    // Signed form: [lead, number]. Worded form: [word, gap, number].
+    const signed = match[2];
+    const lead = signed ? (match[1] ?? '') : `${match[3] ?? ''}${match[4] ?? ''}`;
+    const number = signed ?? match[5] ?? '';
+    const direction: 'up' | 'down' = signed
+      ? signed.startsWith('+')
+        ? 'up'
+        : 'down'
+      : DOWN_WORDS.has((match[3] ?? '').toLowerCase())
+        ? 'down'
+        : 'up';
+
+    const numberAt = start + lead.length;
+    if (numberAt > last) out.push({ ...format, text: text.slice(last, numberAt) });
+    out.push({ ...format, text: number, move: direction });
+    last = numberAt + number.length;
+  }
+
+  if (out.length === 0) return [part];
+  if (last < text.length) out.push({ ...format, text: text.slice(last) });
+  return out;
+}
+
+const isPlain = (part: Inline) => !part.bold && !part.italic && !part.code && !part.move;
 
 function mergeAdjacent(parts: Inline[]): Inline[] {
   const merged: Inline[] = [];
   for (const part of parts) {
     const previous = merged[merged.length - 1];
-    if (previous && !previous.bold && !previous.italic && !previous.code && !part.bold && !part.italic && !part.code) {
+    if (previous && isPlain(previous) && isPlain(part)) {
       previous.text += part.text;
     } else if (part.text) {
       merged.push({ ...part });

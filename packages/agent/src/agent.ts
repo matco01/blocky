@@ -567,11 +567,39 @@ async function callTool(name: string, input: unknown, tools: AgentTools): Promis
   }
 }
 
-function textOf(response: Anthropic.Message): string {
-  return response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('')
+/**
+ * The reply as the user reads it.
+ *
+ * After a web search the model's answer arrives in pieces, and every piece
+ * that carries a citation is the source's own words, quoted. Sometimes the
+ * quote finishes the model's sentence ("…with gains in energy names" +
+ * "partially mitigating the Dow's losses."), and it belongs. But often it is
+ * the article's version of what the model just said, or a headline, starting
+ * a fresh sentence in the middle of a line — joined in, a bullet reads the
+ * same fact twice. So a cited piece that opens a new capitalised sentence
+ * mid-line is left out; one that continues a sentence, or is the whole of a
+ * line, stays.
+ */
+export function textOf(response: Pick<Anthropic.Message, 'content'>): string {
+  let text = '';
+
+  for (const block of response.content) {
+    if (block.type !== 'text') continue;
+
+    const cited = (block.citations?.length ?? 0) > 0;
+    // At the start of a line — after a bullet, or a bullet's bold label
+    // ("- **Dow:** ") — a quote is the line's content, not an echo of it.
+    const midLine = text.length > 0 && !/(^|\n)\s*([-*•]|\d+[.)])?\s*(\*\*[^*\n]+\*\*:?\s*)?$/.test(text);
+    const startsSentence = /^\s*["“(]?[A-Z]/.test(block.text);
+
+    if (cited && midLine && startsSentence) continue;
+    text += block.text;
+  }
+
+  return text
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+([.,;:!?])/g, '$1')
+    .replace(/[ \t]+\n/g, '\n')
     .trim();
 }
 
